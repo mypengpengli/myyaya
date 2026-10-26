@@ -1,0 +1,22 @@
+apply plugin: 'com.android.library'
+apply plugin: 'expo-module-gradle-plugin'
+
+group = 'com.superlooi.photopickeraccess'
+version = '1.0.0'
+
+expoModule {
+  canBePublished false
+}
+
+android {
+  namespace 'com.superlooi.photopickeraccess'
+
+  defaultConfig {
+    minSdkVersion 24
+  }
+}
+
+dependencies {
+  implementation 'androidx.activity:activity-ktx:1.11.0'
+  implementation 'androidx.exifinterface:exifinterface:1.4.1'
+}

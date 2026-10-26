@@ -1,0 +1,7 @@
+mobile/** text=auto eol=lf
+mobile/**/*.png binary
+mobile/**/*.jpg binary
+mobile/**/*.ttf binary
+mobile/**/*.onnx binary
+# Preserve the exact upstream dependency patch, including its final context line.
+mobile/patches/** whitespace=-blank-at-eof

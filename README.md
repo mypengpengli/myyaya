@@ -2,7 +2,9 @@
 
 使用自己的小米 12 Pro 和已下单的 LOOI 底座，构建可以自定义模型、调用手机功能、执行服务器任务的桌面 AI 机器人。
 
-**当前状态：需求与开发准备阶段。** 仓库已有项目说明、实施计划和 Windows 手机连接检测脚本，尚未实现 Android App、LOOI 控制或模型接入。
+**当前状态：已导入社区 Android 应用基线，开始二次开发。** `mobile/` 来自 My LOOI，包含 BLE、语音、记忆和 APK 更新模块；已配置 myyaya 应用身份与自己的更新源入口。尚未构建并在本机手机上验证 myyaya APK，NewAPI / Hermes / 录像播放等定制需求仍待实现。
+
+代码来源、固定版本和开发方法见[社区代码来源](docs/UPSTREAM.md)；以后免 USB 更新应用的流程见[APK 在线更新](docs/UPDATES.md)。
 
 ## 当前方案
 
@@ -37,9 +39,10 @@ LOOI 社区已有 BLE SDK 和 Android 项目可以研究，但社区接口不等
 | 内容展示 | 显示图片、网页、PDF 和视频；Word 文件按格式选择合适的预览方式 |
 | 人物与记忆 | 分阶段实现人脸检测、跟踪、登记身份与人物记忆，评估声纹和人物档案绑定 |
 | 看向与靠近 | 目标是“喊昵称后看向我”“叫它过来”；先实现看人，再验证定位、避障与自主靠近 |
+| APK 在线更新 | 手机内检查、下载并确认安装自己发布的新版，日常升级无需连接电脑 |
 | Hermes Screen | 有服务端画面或事件接口时，在手机上展示 Agent 工作过程；接入能力待核对 |
 
-这些是项目目标，不代表现有 LOOI 官方 App 已提供上述自定义能力。语音、BLE 适配及 Android 技术栈将在实测后确定。
+这些是项目目标，不代表现有 LOOI 官方 App 已提供上述自定义能力。现以社区 My LOOI 的 React Native / Expo + 原生 Android 模块为基础，BLE 与语音行为需要在自己的设备上验证。
 
 ### 手机录像与播放
 
@@ -108,11 +111,15 @@ README.md                            项目目标与当前主线
 docs/STATUS.md                       已完成事项与待验证项
 docs/PLAN.md                         最新需求、分期与扩展方案
 docs/LOOI.md                         LOOI 接入资料与验证计划
+docs/UPSTREAM.md                     社区代码来源与改造说明
+docs/UPDATES.md                      APK 在线升级与发布方法
 docs/archive/                        2026-10-25 旧方案及进度快照
 scripts/check-devices.ps1             Windows / ADB 连接检查
+scripts/create-update-feed.py         生成 APK 更新 manifest 与 SHA-256
+mobile/                              导入并定制的社区 Android 应用源码
 ```
 
-本地 `.tools/` 中的下载工具不随仓库上传。当前没有可安装的 myyaya APK，也没有固件或运动控制程序。
+本地 `.tools/` 中的下载工具不随仓库上传。当前已包含社区运动控制源码，但尚无构建验收通过的 myyaya APK。
 
 ## 参考资料
 

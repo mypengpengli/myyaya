@@ -18,21 +18,24 @@
 - 查阅微雪官方接线和 FAQ：UART 模式为 A 档，TX-TX / RX-RX；转接板不降压。
 - 已补充手机功能调用需求：智能体可以调用录像、查找录像、播放录像及播放控制。“取出录像”按用户补充理解为找到并播放视频；这些能力尚待实现。
 - 建立 myyaya 仓库并保留旧方案快照；已将 README 主线从 K50 + LOOI 纠正为小米 12 Pro + LOOI。
-- 查阅 LOOI 官方产品资料、Super LOOI / SDK 和 My LOOI 社区项目，记录参考方向与未验证项；尚未导入这些项目的代码。
+- 查阅 LOOI 官方产品资料、Super LOOI / SDK 和 My LOOI 社区项目，选择并导入 My LOOI v2.1.151 到 mobile/。
 - 在 PLAN.md 中补充人物记忆、昵称唤醒后看人、自主靠近、Hermes Screen，以及候选 USB 传感器和 WAVE ROVER 扩展的分期。
+- 配置 myyaya 独立包名和自己的 HTTPS 更新源入口，保留社区 APK 校验与安装模块；添加更新 manifest 生成脚本。
+- 本地 TypeScript、48 项源码/行为检查、实际 Expo 应用配置检查通过；验证范围与未完成项见 [VALIDATION.md](VALIDATION.md)。
 
 ## 当前实测结果
 
 - 上次 ADB 实测（2026-10-25）没有检测到 Android 设备，当前连接状态未重新确认。
 - 小米 12 Pro 的底层 Android 版本、LOOI 型号、固件版本及 BLE 兼容性尚未确认；澎湃 OS 3 目前来自用户说明。
 - 尚未验证 LOOI 状态读取、停止、运动、传感器或手机固定与供电。
-- 目前只有文档和连接检测脚本，没有 Android 应用、模型接入或机器人控制实现。
+- 已导入社区 Android / BLE / 语音 / 更新源码，尚未构建自己的签名 APK，未做手机或 LOOI 实机验收；NewAPI 与 Hermes 未接入。
+- 用户已选择将 myyaya 仓库公开，现已改为公开；默认使用其 GitHub Releases 作为更新源。首个签名 APK、永久发布签名和首轮覆盖安装验收尚未完成。
 
 ## 下一步
 
 1. 用户将小米 12 Pro 开启 USB 调试并通过数据线接到本机，手机上允许本机调试。
 2. 运行连接检测，记录手机型号、Android 版本和 CPU ABI。
 3. 确认 LOOI 型号、固件与官方 App 基础功能，再进入自定义 BLE 接入验证。
-4. 依据实测选择 Android 应用与 LOOI 适配实现，再接 NewAPI 和手机本地工具。
+4. 在导入的社区应用基线上准备自己的永久发布签名与首个 APK，再接 NewAPI 和手机本地工具，并验收手机内覆盖更新。
 
 小米 12 Pro 保留现有 Android 系统。当前步骤无需 root、解锁 bootloader、恢复出厂设置或读取个人文件。

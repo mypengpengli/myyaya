@@ -17,7 +17,7 @@
 | [社区 SDK 文档](https://github.com/GrinZero/super-looi/blob/main/packages/looi-sdk/README.md) | 描述移动、停止、头部位置、灯光、底座状态回调和原始 BLE 写入接口；标明早期版本 | 用于设计受控的连接与动作验证，不视为实机已通过 |
 | [razor79/my-looi](https://github.com/razor79/my-looi) | 非官方 Android 应用，提供语音、手机本地记忆与 BLE 控制，常规使用不要求配套后端 | 可研究 Android 与 BLE 生命周期；其现有模型路径不等于已支持本项目的 NewAPI / Hermes |
 
-这些社区项目不是 LOOI 厂商官方 SDK。本仓库当前仅引用资料，没有复制其源码、协议实现或厂商 App 资源。后续选用实现时再核对具体版本、许可证及依赖。
+这些社区项目不是 LOOI 厂商官方 SDK。现已根据用户要求将 MIT 许可的 My LOOI 固定版本导入 `mobile/`，保留其许可、第三方说明与致谢；来源和修改记录见 [UPSTREAM.md](UPSTREAM.md)。没有修改厂商 App。
 
 ## 待验证事项
 
