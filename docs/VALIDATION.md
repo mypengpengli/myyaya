@@ -18,7 +18,9 @@
 - `v2.1.120-incremental-retired-module-prune-regression.test.mjs`：依赖 bash。
 - `v2.1.122-apk-provenance-vosk-regression.test.mjs`：依赖 bash 和 zip。
 
-Windows 本地未将这两项计为通过。已添加 `.github/workflows/source-checks.yml`，在 Ubuntu / Node 22 上执行完整上游测试和自己的更新测试；具体远程结果以 Actions 为准。
+Windows 本地未将这两项计为通过。已添加 `.github/workflows/source-checks.yml`，在 Ubuntu / Node 22 上执行完整上游测试和自己的更新测试。
+
+GitHub Actions 的[完整检查](https://github.com/mypengpengli/myyaya/actions/runs/40328700906)已通过，对应源码提交 `e72aad1b12e3ebf99285742476dbe22e718939f6`，包括上述两项、TypeScript 检查、自己的更新测试与运动/BLE/急停检查。这仍是源码验证，不是 Android APK 构建或设备验收。
 
 ## 尚未验证
 

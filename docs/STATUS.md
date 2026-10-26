@@ -22,6 +22,7 @@
 - 在 PLAN.md 中补充人物记忆、昵称唤醒后看人、自主靠近、Hermes Screen，以及候选 USB 传感器和 WAVE ROVER 扩展的分期。
 - 配置 myyaya 独立包名和自己的 HTTPS 更新源入口，保留社区 APK 校验与安装模块；添加更新 manifest 生成脚本。
 - 本地 TypeScript、48 项源码/行为检查、实际 Expo 应用配置检查通过；验证范围与未完成项见 [VALIDATION.md](VALIDATION.md)。
+- GitHub Actions 已在 Ubuntu / Node 22 上完成并通过完整检查，包括两项需要 Linux 工具的测试。
 
 ## 当前实测结果
 
