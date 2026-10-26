@@ -23,6 +23,8 @@
 - 配置 myyaya 独立包名和自己的 HTTPS 更新源入口，保留社区 APK 校验与安装模块；添加更新 manifest 生成脚本。
 - 本地 TypeScript、48 项源码/行为检查、实际 Expo 应用配置检查通过；验证范围与未完成项见 [VALIDATION.md](VALIDATION.md)。
 - GitHub Actions 已在 Ubuntu / Node 22 上完成并通过完整检查，包括两项需要 Linux 工具的测试。
+- 用户确定采用 Pi；已编写 [Pi 实施方案](PI-AGENT-PLAN.md)，首版选择自有服务器运行 Pi，手机执行本地工具，手机内嵌单独验证。
+- 使用用户授权的测试 Key 完成少量 NewAPI HTTPS 预验证：agnes-3.0-flash 文字、原生工具调用及结果续答、SSE、简单看图；TeleSpeechASR 合成中文转写；agnes-image-2.5-flash 生图及产物下载。Key 未进入仓库，结果与边界见 [测试记录](MODEL-PROBE-2026-10-26.md)。
 
 ## 当前实测结果
 
@@ -31,12 +33,14 @@
 - 尚未验证 LOOI 状态读取、停止、运动、传感器或手机固定与供电。
 - 已导入社区 Android / BLE / 语音 / 更新源码，尚未构建自己的签名 APK，未做手机或 LOOI 实机验收；NewAPI 与 Hermes 未接入。
 - 用户已选择将 myyaya 仓库公开，现已改为公开；默认使用其 GitHub Releases 作为更新源。首个签名 APK、永久发布签名和首轮覆盖安装验收尚未完成。
+- 上述模型测试是在 Windows 上直接请求接口，尚未验证 Pi SDK 集成、Android 端运行和整机闭环；agnes-video-2.5 仅确认模型列表可见，未发起生成任务。中文 TTS、真实手机语音和录像资源协调仍待验证。
 
 ## 下一步
 
-1. 用户将小米 12 Pro 开启 USB 调试并通过数据线接到本机，手机上允许本机调试。
-2. 运行连接检测，记录手机型号、Android 版本和 CPU ABI。
-3. 确认 LOOI 型号、固件与官方 App 基础功能，再进入自定义 BLE 接入验证。
-4. 在导入的社区应用基线上准备自己的永久发布签名与首个 APK，再接 NewAPI 和手机本地工具，并验收手机内覆盖更新。
+1. 按 Pi 方案 P1 实现最小 Node 服务，用固定版本的 Pi SDK 验证工具循环、中文输入、事件和取消。
+2. 手机连接本机后运行检测，记录 Android 版本和 CPU ABI，准备永久签名 APK 与手机工具桥。
+3. 尽早验收录像/播放和录制期间语音停止，再接中文 ASR→Pi→TTS；完成手机内覆盖更新测试。
+4. LOOI 到货后确认型号、固件与官方 App 基础功能，再验证 BLE、停止和受限动作。
+5. 后续按 Pi 方案完成 Hermes、内容展示、人物记忆与扩展，不把导航当作现有能力。
 
 小米 12 Pro 保留现有 Android 系统。当前步骤无需 root、解锁 bootloader、恢复出厂设置或读取个人文件。

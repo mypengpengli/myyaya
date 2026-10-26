@@ -2,7 +2,9 @@
 
 使用自己的小米 12 Pro 和已下单的 LOOI 底座，构建可以自定义模型、调用手机功能、执行服务器任务的桌面 AI 机器人。
 
-**当前状态：已导入社区 Android 应用基线，开始二次开发。** `mobile/` 来自 My LOOI，包含 BLE、语音、记忆和 APK 更新模块；已配置 myyaya 应用身份与自己的更新源入口。尚未构建并在本机手机上验证 myyaya APK，NewAPI / Hermes / 录像播放等定制需求仍待实现。
+**当前状态：已导入社区 Android 应用基线，确定采用 Pi，完成方案与少量模型接口预验证。** `mobile/` 来自 My LOOI，包含 BLE、语音、记忆和 APK 更新模块；已配置 myyaya 应用身份与自己的更新源入口。尚未构建并在本机手机上验证 myyaya APK，Pi / NewAPI / Hermes / 录像播放等定制需求仍待集成。
+
+最新开发入口：[Pi 智能体实施方案](docs/PI-AGENT-PLAN.md)、[2026-10-26 模型接口测试](docs/MODEL-PROBE-2026-10-26.md)。首版由自有服务器运行 Pi，手机执行相机、媒体、记忆与 BLE 工具；完整 Pi 功能需要该服务在线，手机内嵌路线单独验证。
 
 代码来源、固定版本和开发方法见[社区代码来源](docs/UPSTREAM.md)；以后免 USB 更新应用的流程见[APK 在线更新](docs/UPDATES.md)。
 
@@ -16,12 +18,12 @@
 小米 12 Pro / 澎湃 OS 3 / myyaya Android App（待开发）
     ├─ 表情、语音、摄像头、录像与视频播放
     ├─ 本地工具调用与任务结果展示
-    ├─ NewAPI → 用户选择的模型
+    ├─ Pi 服务 → NewAPI → 用户选择的模型
     ├─ Hermes → 搜索、任务执行与文件返回（可选）
     └─ BLE → LOOI 底座（待实机验证）
 ```
 
-新增要求、分期与尚未确定的扩展方案见[最新方案整理](docs/PLAN.md)。
+新增要求与扩展方向见[最新方案整理](docs/PLAN.md)；采用 Pi 后的执行顺序、模型分工、手机工具与验收条件以 [Pi 实施方案](docs/PI-AGENT-PLAN.md)为准。
 
 原来的 ESP32-S3 + 两个 HD1910 舵机方案已作为[历史方案](docs/archive/2026-10-25-esp32-plan.md)保留，不再作为当前主线的接线与采购要求。
 
@@ -31,7 +33,7 @@ LOOI 社区已有 BLE SDK 和 Android 项目可以研究，但社区接口不等
 
 | 方向 | 目标 |
 | --- | --- |
-| 自定义模型 | 配置自己的 NewAPI 地址、模型名和密钥，切换对话模型与角色提示词 |
+| 自定义模型与智能体 | 采用 Pi 核心库，配置自己的 NewAPI 地址、模型与角色；首个主模型候选为 agnes-3.0-flash |
 | 语音对话 | 录音、语音识别、语音合成；优先验证本地昵称唤醒、本地 VAD 和简单离线命令 |
 | 手机功能 | 智能体调用相机录像、查找录像、播放视频及播放控制 |
 | 机器人动作 | 先实现手动连接、停止和小范围动作，再加入与对话联动的动作 |
@@ -42,7 +44,7 @@ LOOI 社区已有 BLE SDK 和 Android 项目可以研究，但社区接口不等
 | APK 在线更新 | 手机内检查、下载并确认安装自己发布的新版，日常升级无需连接电脑 |
 | Hermes Screen | 有服务端画面或事件接口时，在手机上展示 Agent 工作过程；接入能力待核对 |
 
-这些是项目目标，不代表现有 LOOI 官方 App 已提供上述自定义能力。现以社区 My LOOI 的 React Native / Expo + 原生 Android 模块为基础，BLE 与语音行为需要在自己的设备上验证。
+这些是项目目标，不代表现有 LOOI 官方 App 已提供上述自定义能力。现以社区 My LOOI 的 React Native / Expo + 原生 Android 模块为手机基础，新增 Pi 任务核心；BLE 与语音行为需要在自己的设备上验证。
 
 ### 手机录像与播放
 
@@ -61,7 +63,8 @@ Android 应用需要把手机功能提供为智能体可调用的工具。智能
 
 ### NewAPI 与 Hermes
 
-- 普通问答可以由应用调用 NewAPI，具体接口能力需与所选模型核对。
+- 首版普通问答由 Pi 服务调用 NewAPI；手机直连 NewAPI 作为纯问答降级候选，完整 Pi 工具任务依赖 Pi 服务在线。
+- `agnes-3.0-flash` 的文字、SSE、工具结果续答和简单看图测试已通过；中文 ASR 与生图也完成小样本接口验证，详见[实测记录](docs/MODEL-PROBE-2026-10-26.md)。这不等于已经接入 APK。
 - 搜索、文件处理等任务交给 Hermes 或后续工具服务；接入前先核对服务器现有的 API 和认证方式。
 - Hermes 为可选任务后端，普通问答不应依赖它必须在线。
 - 模型服务和语音服务分别配置；接入对话模型不代表自动具备语音识别、语音合成或联网搜索。
@@ -88,13 +91,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-devices.ps1 
 
 ## 实施顺序
 
-1. 确认小米 12 Pro 的 ADB、Android 版本、蓝牙和相机可用性；LOOI 到货后记录型号与固件版本。
-2. 使用官方 App 做硬件基线检查，再验证自定义应用的 BLE 连接、状态读取和停止指令。
-3. 完成自定义 Android App 的手动控制与表情页面，实测受控的小范围动作。
-4. 接入 NewAPI，先跑通文字问答，再加入语音。
-5. 跑通手机录像、查找与播放闭环。
-6. 接入 Hermes 任务状态及文件、网页展示。
-7. 按实测结果加入昵称唤醒、看人、人物档案和记忆；将自主靠近作为独立的后续验收。
+1. 用 Pi 核心库实现最小服务，接 NewAPI，验证中文文本、工具循环、流式进度和取消。
+2. 确认小米 12 Pro 的 ADB、Android 版本、蓝牙和相机，准备首个永久签名 APK、手机工具桥与在线升级验收。
+3. 优先验证录像、查找、播放，以及有声录像时语音停止所需的麦克风/相机协调。
+4. 加入中文 ASR、TTS、打断和昵称唤醒，通过语音调用同一套手机工具。
+5. LOOI 到货后记录型号与固件，验证官方基础功能、BLE、停止和受限动作，再开放相应智能体工具。
+6. 接入 Hermes、文件展示及独立图片/视频生成工具。
+7. 加入人物档案和记忆；将自主靠近作为独立的后续验收。详细条件见 [Pi 方案](docs/PI-AGENT-PLAN.md)。
 
 ## 扩展方向
 
@@ -110,6 +113,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-devices.ps1 
 README.md                            项目目标与当前主线
 docs/STATUS.md                       已完成事项与待验证项
 docs/PLAN.md                         最新需求、分期与扩展方案
+docs/PI-AGENT-PLAN.md                 Pi 架构、手机工具与阶段验收
+docs/MODEL-PROBE-2026-10-26.md         NewAPI 小样本实测结果与边界
 docs/LOOI.md                         LOOI 接入资料与验证计划
 docs/UPSTREAM.md                     社区代码来源与改造说明
 docs/UPDATES.md                      APK 在线升级与发布方法
