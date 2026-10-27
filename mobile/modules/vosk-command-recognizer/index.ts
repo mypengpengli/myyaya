@@ -96,6 +96,11 @@ export type VoskCommandRecognizerStatus = {
 };
 
 declare class VoskCommandRecognizerModule extends NativeModule<VoskCommandRecognizerEvents> {
+  prepareChinese(): Promise<{ sessionId: number; sampleRate: number }>;
+  startChineseCapture(): Promise<{ running: boolean; sampleRate: number }>;
+  stopChineseCapture(): Promise<void>;
+  speakChinese(text: string): Promise<void>;
+  stopChineseSpeech(): void;
   prepare(language: string, assetDir: string, grammarJson: string, emergencyGrammarJson: string): Promise<void>;
   setGrammar(grammarJson: string): Promise<void>;
   feedSamples(samples: number[]): void;

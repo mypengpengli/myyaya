@@ -1,6 +1,6 @@
 # APK 开发方案补充：开工范围、协议与验收
 
-日期：2026-10-27（Asia/Shanghai）。状态：开发草案，尚未实现本文新增模块、构建 APK 或部署 Pi 服务。
+日期：2026-10-27（Asia/Shanghai）。本文是早期开发草案；同日已完成 Hermes 首轮 APK 与社区 BLE/中文离线语音的后续接线，当前状态以 [STATUS](STATUS.md)、[VALIDATION](VALIDATION.md)及[社区能力审查](COMMUNITY-CAPABILITIES.md)为准。Pi 服务仍待部署。
 
 用户本次确认：**LOOI 即将到货；小米 12 Pro 已升级澎湃 OS 3。** 底层 Android 版本、CPU ABI、相机和 BLE 能力仍需读取实机。本方案承接 [总体需求](PLAN.md) 与 [Pi 架构](PI-AGENT-PLAN.md)，不重新选择技术路线；具体参数和协议是本次提出的实现约定，后续按原型结果修订。
 

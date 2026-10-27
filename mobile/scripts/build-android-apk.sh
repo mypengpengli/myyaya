@@ -87,6 +87,7 @@ MY_LOOI_BUILD_ALLOW_LOCAL_ENV=1 corepack pnpm test
 # Stage offline Vosk command models before Expo prebuild copies them into Android
 # assets. Downloads are cached under ~/.cache/my-looi.
 bash scripts/download-vosk-command-models.sh
+node scripts/prepare-chinese-voice-model.mjs
 
 incremental_build="${MY_LOOI_INCREMENTAL_BUILD:-0}"
 if [[ "$incremental_build" == "1" && -d android && -f android/gradlew ]]; then

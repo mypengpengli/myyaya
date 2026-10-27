@@ -12,6 +12,8 @@ Android release builds download and bundle selected Vosk command models from the
 
 Source: https://alphacephei.com/vosk/models
 
+The myyaya Chinese build also bundles `vosk-model-small-cn-0.22` (Apache-2.0), obtained from that catalog. The archive SHA256 is pinned in `scripts/prepare-chinese-voice-model.mjs`; model files are staged during builds and are not committed to Git. Chinese capture, dictation and commands run locally. The optional system TTS path requires an installed offline Chinese voice; it does not use an OpenAI voice.
+
 ## Silero VAD
 
 The repository includes a Silero VAD ONNX model under `assets/models/sherpa-onnx/vad/`. Silero VAD is distributed under the MIT License; its notice is preserved in `licenses/SILERO-VAD-MIT.txt`.

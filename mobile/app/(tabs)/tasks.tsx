@@ -6,6 +6,8 @@ import { getHermesTaskService, retryHermesTask, stopHermesTask, submitNewHermesT
 import { terminalRun, type RunStatus } from "@/src/hermes/run-protocol";
 import { RobotFace } from "@/src/ui/RobotFace";
 import { looiTheme as theme } from "@/src/ui/looi-theme";
+import { ChineseVoiceControls } from "@/src/ui/ChineseVoiceControls";
+import { chineseVoice } from "@/src/voice/chinese-voice-runtime";
 
 const statusNames: Record<RunStatus, string> = { pending: "待提交 / 待确认", started: "已提交", queued: "排队中", running: "执行中", waiting_for_approval: "等待服务器端审批",
   stopping: "正在停止", completed: "已完成", failed: "执行失败", cancelled: "已取消", interrupted: "服务器中断" };
@@ -70,10 +72,12 @@ export default function TasksScreen() {
             {!selected.runId ? <Button label="用原幂等键重试提交" disabled={busy} onPress={() => void action("retry")} /> : null}
             {selected.runId && !terminalRun(selected.status) ? <Button label={selected.status === "stopping" ? "重试停止" : "停止任务"}
               disabled={busy} onPress={() => void action("stop")} /> : null}
+            {selected.output ? <Button label="朗读结果" onPress={() => { void chineseVoice.speak(selected.output); }} /> : null}
             <Text selectable style={styles.hint}>任务编号：{selected.runId ?? "尚未确认"} · 返回表情或关闭应用后，服务器任务继续执行。</Text>
           </> : <Text style={styles.empty}>试着输入“运行 pwd，只读检查当前目录，并用中文回答”。</Text>}
         </ScrollView>
         {message ? <Text accessibilityLiveRegion="polite" style={styles.notice}>{message}</Text> : null}
+        <ChineseVoiceControls onTranscript={setInput} />
         <View style={styles.composer}>
           <TextInput accessibilityLabel="发送给 Hermes 的任务" placeholder="告诉小丫要做什么…" placeholderTextColor={theme.muted}
             value={input} onChangeText={setInput} multiline maxLength={10_000} editable={!busy} style={styles.input} />

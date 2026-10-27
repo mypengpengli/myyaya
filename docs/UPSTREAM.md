@@ -25,11 +25,11 @@ My LOOI 最初基于 [GrinZero/super-looi](https://github.com/GrinZero/super-loo
 - 使用 LF 保存源码，确保上游源码哈希与跨平台测试一致。
 - 根目录的项目文档、需求和连接检测脚本继续由 myyaya 维护。
 
-当前保留上游版本号 `2.1.151` / Android versionCode `151`。后续发布需要同时递增 `mobile/package.json`、`mobile/app.json` 中的版本及 versionCode，并更新相关版本快照测试。`mobile/` 内部部分页面仍保留 My LOOI 的上游文案，中文界面和品牌调整属于后续改造。
+自己的新版已递增为 `2.1.152` / Android versionCode `152`，社区导入基线仍是 `2.1.151`。版本同时更新 package/app 配置与快照检查。`mobile/` 内部部分旧页面仍保留上游文案；新增控制和中文语音入口见[社区能力审查](COMMUNITY-CAPABILITIES.md)。
 
 ## 后续开发
 
-先验证这套基线，再接 NewAPI、Hermes、录像与视频播放等需求。目前上游语音会话使用其原有 Realtime 路径，尚未实现我们的 NewAPI 和 Hermes 接入。自己的包名和在线更新配置通过 `app.config.js` 生效；后续 build 仍需准备永久签名与 Android 工具链。
+Hermes 文字任务已接入，底座中文控制和无需 OpenAI 的中文离线语音已另行接线。原有 Realtime 保留为兼容源码；NewAPI 连续对话、录像与视频生成仍待后续实现。自己的包名和在线更新配置通过 `app.config.js` 生效；永久签名与本机 Android 工具链已准备并完成第一版构建。
 
 开发命令在 `mobile/` 目录执行：
 

@@ -91,4 +91,19 @@ assert.equal(
 );
 
 await robot.disconnectLooiRobot();
+
+// STOP received during the sensor warmup must invalidate the pending start.
+robot.configureLooiRobotTransport(transport);
+await robot.connectLooiRobot();
+const beforeWarmup = writes.length;
+const pendingMotion = robot.moveLooi("forward", 100);
+const cancellation = assert.rejects(pendingMotion, /动作已取消/);
+await new Promise((resolve) => setTimeout(resolve, 30));
+await robot.stopLooiMotion("stop-during-sensor-warmup");
+notifyFed9({ characteristic: "dockNotify", hex: "0101010101", bytes: new Uint8Array([1, 1, 1, 1, 1]) });
+notifyFed9({ characteristic: "dockNotify", hex: "0ee803", bytes: new Uint8Array([0x0e, 0xe8, 0x03]) });
+await cancellation;
+assert.equal(writes.slice(beforeWarmup).filter((write) => write.key === "drive" && write.payload !== "0000").length, 0,
+  "a cancelled warmup must never emit a late drive frame");
+await robot.disconnectLooiRobot();
 console.log("Motion deadman behavioral tests passed");

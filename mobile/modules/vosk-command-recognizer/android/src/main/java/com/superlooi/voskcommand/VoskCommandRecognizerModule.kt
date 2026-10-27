@@ -44,11 +44,35 @@ class VoskCommandRecognizerModule : Module() {
   private var sequence: Int = 0
   @Volatile private var currentSessionId: Int = 0
   @Volatile private var appliedResetGeneration: Int = 0
+  private var chineseBridge: ChineseSpeechBridge? = null
+
+  private fun bridge(): ChineseSpeechBridge = chineseBridge ?: ChineseSpeechBridge(
+    appContext.reactContext ?: throw IllegalStateException("React context unavailable"),
+    { pcm -> enqueuePcm(pcm) },
+    { message -> sendError("chinese-capture", IllegalStateException(message)) }
+  ).also { chineseBridge = it }
 
   override fun definition() = ModuleDefinition {
     Name("VoskCommandRecognizer")
 
     Events("onCommandResult", "onEmergencyStop", "onEmergencyUnknown", "onEmergencyHealth", "onModelReady", "onRecognizerError", "onRecognizerState")
+
+    AsyncFunction("prepareChinese") {
+      bridge().stopCapture()
+      executor.submit {}.get()
+      prepareRecognizer("zh", "vosk-command-cn-0.22", "__dictation__", "[\"[unk]\"]")
+      mapOf("sessionId" to currentSessionId, "sampleRate" to 16000)
+    }
+    AsyncFunction("startChineseCapture") {
+      check(currentLanguage == "zh" && recognizer != null) { "Chinese model is not ready" }
+      bridge().startCapture()
+    }
+    AsyncFunction("stopChineseCapture") {
+      bridge().stopCapture()
+      executor.submit {}.get()
+    }
+    AsyncFunction("speakChinese") { text: String, promise: expo.modules.kotlin.Promise -> bridge().speak(text, promise) }
+    Function("stopChineseSpeech") { chineseBridge?.stopSpeech() }
 
     // Keep v1.1.36 recognizer lifecycle semantics. prepare() is intentionally
     // not routed through the PCM executor; v1.1.38 adds observability only.
@@ -141,6 +165,36 @@ class VoskCommandRecognizerModule : Module() {
       for (i in samples.indices) {
         pcm[i] = (min(1.0, max(-1.0, samples[i])) * 32767.0).toFloat()
       }
+      enqueuePcm(pcm)
+    }
+
+    Function("reset") { reason: String, resetEmergency: Boolean -> resetRecognizer(reason, resetEmergency) }
+
+    Function("unload") {
+      chineseBridge?.stopCapture()
+      executor.execute { closeRecognizer(); currentLanguage = ""; currentAssetDir = "" }
+    }
+
+    Function("getStatus") {
+      mapOf(
+        "ready" to (recognizer != null), "language" to currentLanguage,
+        "queuedChunks" to queuedChunks.get(), "sessionId" to currentSessionId,
+        "resetGeneration" to appliedResetGeneration, "resetCount" to resetCount.get(),
+        "droppedChunks" to 0, "samplesSinceReset" to samplesSinceReset.get(),
+        "emergencySamplesSinceReset" to emergencySamplesSinceReset.get(),
+        "emergencyArmed" to emergencyArmed, "emergencyArmGeneration" to emergencyArmGeneration.get()
+      )
+    }
+
+    OnDestroy {
+      chineseBridge?.close()
+      executor.submit { closeRecognizer() }.get()
+      executor.shutdown()
+    }
+  }
+
+  private fun enqueuePcm(pcm: FloatArray) {
+      if (recognizer == null || queuedChunks.get() >= 12) return
       val feedEmergencyGeneration = if (emergencyArmed) emergencyArmGeneration.get() else 0
       queuedChunks.incrementAndGet()
       executor.execute {
@@ -270,7 +324,7 @@ class VoskCommandRecognizerModule : Module() {
       }
     }
 
-    Function("reset") { reason: String, resetEmergency: Boolean ->
+  private fun resetRecognizer(reason: String, resetEmergency: Boolean): Int {
       if (resetEmergency) {
         emergencyArmed = false
         emergencyArmGeneration.incrementAndGet()
@@ -309,49 +363,21 @@ class VoskCommandRecognizerModule : Module() {
           sendError("reset", error)
         }
       }
-      generation
+      return generation
     }
-
-    Function("unload") {
-      executor.execute {
-        closeRecognizer()
-        currentLanguage = ""
-        currentAssetDir = ""
-      }
-    }
-
-    Function("getStatus") {
-      mapOf(
-        "ready" to (recognizer != null),
-        "language" to currentLanguage,
-        "queuedChunks" to queuedChunks.get(),
-        "sessionId" to currentSessionId,
-        "resetGeneration" to appliedResetGeneration,
-        "resetCount" to resetCount.get(),
-        "droppedChunks" to 0,
-        "samplesSinceReset" to samplesSinceReset.get(),
-        "emergencySamplesSinceReset" to emergencySamplesSinceReset.get(),
-        "emergencyArmed" to emergencyArmed,
-        "emergencyArmGeneration" to emergencyArmGeneration.get()
-      )
-    }
-
-    OnDestroy {
-      executor.execute { closeRecognizer() }
-      executor.shutdown()
-    }
-  }
 
   private fun prepareRecognizer(language: String, assetDir: String, grammarJson: String, emergencyGrammarJson: String) {
     val context = appContext.reactContext ?: throw IllegalStateException("React context unavailable")
     val started = SystemClock.elapsedRealtime()
     val destination = File(context.filesDir, "vosk-command-models/$assetDir")
-    val cached = destination.exists() && destination.list()?.isNotEmpty() == true
+    val completion = File(destination, ".myyaya-copy-complete")
+    val cached = completion.exists() && File(destination, "am/final.mdl").isFile && File(destination, "conf/model.conf").isFile
     val copyStarted = SystemClock.elapsedRealtime()
 
     if (!cached) {
       destination.parentFile?.mkdirs()
       copyAssetTree(context.assets, assetDir, destination)
+      completion.writeText(assetDir)
     }
     val assetCopyMs = SystemClock.elapsedRealtime() - copyStarted
 
@@ -372,7 +398,7 @@ class VoskCommandRecognizerModule : Module() {
 
     currentGrammar = grammarJson
     currentEmergencyGrammar = emergencyGrammarJson
-    recognizer = Recognizer(model, 16000.0f, grammarJson).also {
+    recognizer = (if (grammarJson == "__dictation__") Recognizer(model, 16000.0f) else Recognizer(model, 16000.0f, grammarJson)).also {
       it.setWords(true)
       it.setPartialWords(false)
       it.setEndpointerMode(Recognizer.EndpointerMode.SHORT)

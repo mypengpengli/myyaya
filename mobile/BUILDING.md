@@ -12,7 +12,7 @@ Run `powershell -File scripts/build-hermes-apk.ps1` from the mobile directory. T
 
 The `with-shared-android-toolchain` config plugin makes native libraries inherit build-tools 36 and makes Sherpa inherit the host NDK, avoiding extra AGP-default SDK/NDK installations. If React Native's AAR download redirects to `repo.reactnative.dev` and times out, an alternate download must match Maven Central's published SHA256 before entering the local Gradle cache. The current `react-android-0.85.3-release.aar` checksum is `435467261a5ea8a8203eb07fb0c024cc928c17fa3fe06b2fec8b094d842af52f`.
 
-The `hermes-integration` profile excludes the unused upstream RU/UK/EN Vosk model assets and prevents legacy Realtime startup. It supports the default local expression UI and Hermes task panel. The normal full build below retains all offline model resources. Neither build embeds the user's Hermes Token: enter it once in connection settings after installation.
+The `hermes-integration` profile excludes unused RU/UK/EN Vosk assets and prevents legacy Realtime startup. It now bundles the Chinese Vosk model for local commands/dictation, alongside the expression UI, BLE controls and Hermes task panel. Before a manual prebuild, run `node scripts/prepare-chinese-voice-model.mjs`; the helper runs it automatically. The archive SHA256 is pinned; an existing archive can be supplied with `--archive <path>`. Linux needs unzip and Windows uses its built-in tar. The normal full build retains the other offline language models as well. Neither build embeds the user's Hermes Token: enter it once in settings after installation. System TTS needs an installed offline Chinese voice; Azure is not required for local commands.
 
 ## Toolchain
 

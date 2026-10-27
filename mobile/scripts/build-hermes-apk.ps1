@@ -43,8 +43,10 @@ try {
   Invoke-Checked { corepack.cmd pnpm exec tsc --noEmit }
   Invoke-Checked { node scripts/hermes-connection-behavior.test.mjs }
   Invoke-Checked { node scripts/hermes-runs-behavior.test.mjs }
+  Invoke-Checked { node scripts/chinese-voice-behavior.test.mjs }
   Invoke-Checked { node scripts/local-setup-behavior.test.mjs }
   Invoke-Checked { node scripts/public-repository-audit.mjs }
+  Invoke-Checked { node scripts/prepare-chinese-voice-model.mjs }
   Invoke-Checked { corepack.cmd pnpm exec expo prebuild --platform android --no-install --template expo-template-bare-minimum@56.0.38 }
   Invoke-Checked { node scripts/apply-android-release-signing.mjs android/app/build.gradle }
   Push-Location android

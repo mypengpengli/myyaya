@@ -623,14 +623,22 @@ function assertMovementAllowed(direction: LooiMoveDirection, source: string): vo
   );
 }
 
+function assertPendingMotionCurrent(token: number, robot: LooiRobot): void {
+  if (token !== motionSequenceAbortGeneration || state.robot !== robot || !state.connected) {
+    throw new Error("动作已取消，请重新发出指令");
+  }
+}
+
 async function runBoundedMotion(
   direction: Exclude<LooiMoveDirection, "stop">,
   durationMs: number,
   mode: "manual-bounded" | "calibrated-turn",
   details: Record<string, unknown> = {}
 ) {
+  const requestToken = motionSequenceAbortGeneration;
   const robot = await getRobot();
   await waitForMovementSafetyReady(direction, mode);
+  assertPendingMotionCurrent(requestToken, robot);
   assertMovementAllowed(direction, mode);
   const boundedDurationMs = clampDuration(durationMs);
   prepareMotionStart(robot, direction, mode);
@@ -720,10 +728,12 @@ export async function performLooiSocialAttentionPivot(direction: "left" | "right
 
 /** Calibrated bounded turn. First build uses time estimates that must be tuned on the real robot. */
 export async function turnLooi(direction: "left" | "right", degrees: 90 | 180 = 90) {
+  const requestToken = motionSequenceAbortGeneration;
   const robot = await getRobot();
   const durationMs = clampDuration(degrees === 180 ? TURN_180_MS : TURN_90_MS);
   const source = `turn-${degrees}`;
   await waitForMovementSafetyReady(direction, source);
+  assertPendingMotionCurrent(requestToken, robot);
   assertMovementAllowed(direction, source);
   prepareMotionStart(robot, direction, source);
   // Re-check immediately before wheel motion so a cliff event arriving during
@@ -780,6 +790,7 @@ export async function turnLooi(direction: "left" | "right", degrees: 90 | 180 = 
  * rotations are always bounded by turnLooi().
  */
 export async function startLooiMotion(direction: string) {
+  const requestToken = motionSequenceAbortGeneration;
   const robot = await getRobot();
   const normalizedDirection = normalizeMoveDirection(direction);
   if (normalizedDirection === "stop") {
@@ -791,6 +802,7 @@ export async function startLooiMotion(direction: string) {
   }
 
   await waitForMovementSafetyReady(normalizedDirection, "continuous");
+  assertPendingMotionCurrent(requestToken, robot);
   assertMovementAllowed(normalizedDirection, "continuous");
   prepareMotionStart(robot, normalizedDirection, "continuous");
   assertMovementAllowed(normalizedDirection, "continuous");
@@ -863,60 +875,70 @@ export async function stopLooiMotion(reason = "explicit"): Promise<void> {
 }
 
 export async function setLooiLight(enabled: boolean) {
+  const requestToken = motionSequenceAbortGeneration;
   const robot = await getRobot();
+  assertPendingMotionCurrent(requestToken, robot);
   await robot.setLight(enabled);
   return { ok: true, enabled };
 }
 
 export async function setLooiHead(direction: string) {
+  const requestToken = motionSequenceAbortGeneration;
   const robot = await getRobot();
+  assertPendingMotionCurrent(requestToken, robot);
   await robot.setHead(direction);
   return { ok: true, direction };
 }
 
 /** Head-only conversational gestures: no wheel movement. */
 export async function performLooiHeadGesture(gesture: string, repetitions = 1) {
+  const requestToken = motionSequenceAbortGeneration;
   const robot = await getRobot();
+  assertPendingMotionCurrent(requestToken, robot);
+  const guardedHead = async (direction: string) => {
+    assertPendingMotionCurrent(requestToken, robot);
+    await robot.setHead(direction);
+  };
   const count = Math.max(1, Math.min(5, Math.round(Number(repetitions) || 1)));
   switch (gesture) {
     case "nod":
       for (let i = 0; i < count; i += 1) {
-        await robot.setHead("up");
+        await guardedHead("up");
         await delay(280);
-        await robot.setHead("down");
+        await guardedHead("down");
         await delay(390);
-        await robot.setHead("center");
+        await guardedHead("center");
         await delay(i + 1 < count ? 240 : 140);
       }
       break;
     case "curious":
-      await robot.setHead("up");
+      await guardedHead("up");
       await delay(420);
-      await robot.setHead("center");
+      await guardedHead("center");
       break;
     case "happy_bob":
-      await robot.setHead("up");
+      await guardedHead("up");
       await delay(180);
-      await robot.setHead("down");
+      await guardedHead("down");
       await delay(180);
-      await robot.setHead("up");
+      await guardedHead("up");
       await delay(180);
-      await robot.setHead("center");
+      await guardedHead("center");
       break;
     case "sleepy":
-      await robot.setHead("down");
+      await guardedHead("down");
       await delay(550);
-      await robot.setHead("center");
+      await guardedHead("center");
       break;
     case "thinking":
-      await robot.setHead("down");
+      await guardedHead("down");
       await delay(300);
-      await robot.setHead("center");
+      await guardedHead("center");
       break;
     case "speaking_soft":
-      await robot.setHead("up");
+      await guardedHead("up");
       await delay(150);
-      await robot.setHead("center");
+      await guardedHead("center");
       break;
     default:
       throw new Error(`Unsupported LOOI head gesture: ${gesture}`);
@@ -1025,7 +1047,9 @@ function pickDanceStyle(): LooiDanceStyle {
  * cancelled rather than re-starting the wheels.
  */
 export async function performLooiDance(requestedStyle: LooiDanceStyle | "random" = "random") {
-  await stopLooiMotion("dance-start").catch(() => undefined);
+  const requestedToken = motionSequenceAbortGeneration + 1;
+  await stopLooiMotion("dance-start");
+  if (requestedToken !== motionSequenceAbortGeneration) throw new Error("动作已取消，请重新发出指令");
   const sequenceToken = motionSequenceAbortGeneration;
   const style = requestedStyle === "random" ? pickDanceStyle() : requestedStyle;
   recordDiagnosticEvent("robot", "dance-started", { style, requestedStyle });

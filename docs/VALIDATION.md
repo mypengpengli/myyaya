@@ -2,6 +2,22 @@
 
 验证日期：2026-10-26。
 
+## 2026-10-27 第二轮：中文底座与离线语音
+
+- 复用社区 BLE SDK、扫描/重连、有限运动、头部动作、跳舞、灯光、传感器保护和人脸注视；新增中文入口，不另写底座协议。当前仍没有手机/LOOI 真机记录。
+- 中文命令行为检查通过：唤醒和 15 秒会话、只接受完整动作短语、否定/引用/复合句不移动、partial STOP 无需唤醒；听写不执行动作，过期原生 session、权限拒绝、加载中取消和后台事件不启动采音/动作；关闭语音和朗读取消本机动作。
+- 新增模型打包回归通过：复现只有 manifest 的空模型目录并确认构建拒绝；中文路径逐文件复制、内容一致性和损坏模型检查通过。本机 Node 24 原生递归 cp 曾漏拷中文路径文件，已改成显式遍历、逐文件复制和 SHA256 校验。先前只代码编译成功的中间包不作为交付。
+- Vosk 官方中文归档实际下载并核对项目固定 SHA256；准备后的模型、来源清单和 Apache 许可证共 16 个文件，约 68.3 MB。Expo prebuild 及最终 APK 内的模型文件逐项核对大小/SHA256，确认新中文采音/TTS 类已打包。
+- TypeScript 通过；46 项跨平台源码/行为检查通过。完整 `pnpm test` 在 Windows 遇到原有 bash/zip 工具测试限制，两项交给 Ubuntu CI，不将未执行项写为通过。
+- 另行通过 BLE 前后台重连、Vosk 急停、方向悬崖保护、运动 deadman、Realtime PCM 类型与应用身份检查；新增 STOP 等待传感器阶段测试确保不会晚写驱动帧。
+- 最终 Gradle `assembleRelease` 完整通过：1180 项任务，50 项执行、1130 项复用，用时 2 分 8 秒；包含中文采音/TTS Kotlin 编译、原生模块、Metro/Hermes 字节码和 release 打包。
+- 交付 `mobile/output/android/myyaya-2.1.152-arm64.apk`：172142329 字节，约 164.2 MiB；包名 `io.github.mypengpengli.myyaya`，versionCode 152，minSdk 24 / targetSdk 36，仅 ARM64。
+- APK SHA256：`5198523a5f0086442830b9a952814b7102c9de7dc67bbb41e829cb301059c0ef`。APK v2 签名与 16 KiB ZIP 对齐通过；证书 SHA256 与第一版相同：`9cbd68acd1dce6768a9f5be3756dbfc24444e1222980e51e26f57608521addce`。
+- ZIP 完整性、独立 JS bundle、包内 Hermes Token/签名密码/独立 API Key/私钥文件缺失检查通过。包在本地输出目录，未发布 Release；旧 2.1.151 包另以版本名保留。
+- 手机麦克风、唤醒准确率、中文离线音色、前后台、覆盖安装、底座角度与固件兼容性仍待用户测试，不把上述编译和模拟行为测试当作真机通过。
+
+后续功能范围和使用顺序见[社区能力审查](COMMUNITY-CAPABILITIES.md)。下面保留首轮与历史验证记录。
+
 ## 2026-10-27 首轮 APK 开发
 
 - 新增实际任务客户端与 SQLite 任务仓库、全局前台监视器、横屏任务页面；TypeScript 通过。

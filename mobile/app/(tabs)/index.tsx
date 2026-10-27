@@ -18,6 +18,9 @@ import { ConversationOverlay } from "@/src/ui/ConversationOverlay";
 import { ImageOverlay } from "@/src/ui/ImageOverlay";
 import { looiTheme } from "@/src/ui/looi-theme";
 import { RobotFace } from "@/src/ui/RobotFace";
+import { ChineseVoiceControls } from "@/src/ui/ChineseVoiceControls";
+import { executeChineseRobotCommand, isChineseRobotCommandExecuting } from "@/src/device-tools/chinese-robot-control";
+import { noteSocialAttentionInteraction } from "@/src/core/social-attention";
 import { RESPONSE_LANGUAGE_OPTIONS, type ResponseLanguage } from "@/src/language/response-language";
 import { LISTENING_LANGUAGE_OPTIONS, type ListeningLanguage } from "@/src/language/listening-language";
 import { wakeRobotFromFace } from "@/src/core/sleep-mode";
@@ -183,12 +186,13 @@ export default function IndexScreen() {
 
   const handleAwakeFaceTap = useCallback(() => {
     if (appMode === "local") {
-      if (getLooiRobotRuntimeState().motionActive || isDrivingControlSessionActive()) {
-        void stopLooiMotion("local-face-tap-stop").catch((error) => {
+      if (getLooiRobotRuntimeState().motionActive || isDrivingControlSessionActive() || isChineseRobotCommandExecuting()) {
+        void executeChineseRobotCommand({ kind: "stop" }).catch((error) => {
           console.warn("[Home] Local touch stop failed:", error);
         });
         return;
       }
+      noteSocialAttentionInteraction("local-face-tap");
       triggerCharacterReaction("startled", { durationMs: 520, source: "local-face-tap" });
       return;
     }
@@ -324,6 +328,9 @@ export default function IndexScreen() {
         </Pressable>
       ) : null}
       <View style={styles.languagePicker}>
+        {appMode === "local" ? <Pressable accessibilityRole="button" onPress={() => router.replace("/robot")} style={styles.languageButton}>
+          <Text style={styles.languageText}>底座控制</Text>
+        </Pressable> : null}
         {appMode === "local" ? <Pressable accessibilityRole="button" accessibilityLabel="打开 Hermes 执行任务"
           onPress={() => router.replace("/tasks")} style={styles.languageButton}>
           <Text style={styles.languageText}>执行任务</Text>
@@ -403,7 +410,7 @@ export default function IndexScreen() {
       <View style={styles.faceStage}>
         {appMode === "local" ? <View pointerEvents="none" style={styles.repairBanner}>
           <Text style={styles.repairTitle}>本地模式</Text>
-          <Text style={styles.repairText}>可通过“执行任务”连接 Hermes · 语音和 Pi / NewAPI 尚未启用</Text>
+          <Text style={styles.repairText}>中文离线口令 · 底座控制 · Hermes 任务</Text>
         </View> : null}
         {repairStep ? (
           <Pressable
@@ -453,6 +460,7 @@ export default function IndexScreen() {
       </View>
       {!robotSleeping && appMode === "legacy_realtime" ? <ConversationOverlay /> : null}
       {!robotSleeping && appMode === "legacy_realtime" ? <ImageOverlay /> : null}
+      {!robotSleeping && appMode === "local" ? <ChineseVoiceControls /> : null}
     </SafeAreaView>
   );
 }

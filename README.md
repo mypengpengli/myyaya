@@ -14,6 +14,8 @@ Hermes 服务地址已提供并完成电脑端只读鉴权/能力复核。App �
 
 ## 当前方案
 
+同日第二轮已生成 2.1.152 签名 APK：中文底座控制页（扫描连接、受限移动/转向、头部动作、跳舞、灯光、停止）、Vosk 中文离线唤醒口令/听写、系统中文朗读和人脸注视开关。无需 OpenAI Key。包内模型文件和签名检查通过；能力出处和真机测试顺序见[社区能力审查](docs/COMMUNITY-CAPABILITIES.md)。
+
 2026-10-27 已完成方案并生成首个永久签名 ARM64 联调 APK。已接入 Hermes 文字派单、SQLite 任务恢复、SSE 进度和右下角表情，同一份客户端已通过真实 HTTPS 任务/幂等/SSE 联调；Android release 构建与签名/包内校验通过，手机端尚待验收。使用步骤与后续范围见[首轮 APK](docs/APK-ITERATION-1.md)。
 
 根据[最新需求讨论](https://chatgpt.com/share/6adf4c3e-e364-83e9-a865-a9f99f4e4150)，2026-10-26 将主线明确为 **小米 12 Pro + LOOI + 自定义 Android APK**。用户表示手机已升级澎湃 OS 3，保留现有系统；底层 Android 版本和设备能力仍以 ADB / 实机检查为准。K50 是早期候选，不再是当前开发目标。

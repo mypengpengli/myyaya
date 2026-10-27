@@ -1,10 +1,12 @@
 # 首个 APK：Hermes 文字任务联调
 
+此页保留第一版 2.1.151 的构建记录。后续 2.1.152 已增加底座控制及中文离线语音，最新范围见[社区能力审查](COMMUNITY-CAPABILITIES.md)，安装包元数据见 [VALIDATION](VALIDATION.md)。
+
 日期：2026-10-27。开发方案已具备实施条件，本次先完成直接连接现有 Hermes 的最小闭环。最终 Pi / NewAPI 主线保持不变；本阶段不要求先部署新的 Pi 服务。
 
 ## 已生成的本地安装包
 
-文件：`mobile/output/android/myyaya-hermes-arm64.apk`，约 122.3 MiB，附 `.apk.sha256` 校验文件。包名 `io.github.mypengpengli.myyaya`，版本 `2.1.151` / versionCode `151`，minSdk 24、targetSdk 36，仅 ARM64。
+历史包已另存为：`mobile/output/android/myyaya-2.1.151-arm64.apk`，约 122.3 MiB，附 `.apk.sha256` 校验文件。包名 `io.github.mypengpengli.myyaya`，版本 `2.1.151` / versionCode `151`，minSdk 24、targetSdk 36，仅 ARM64。
 
 SHA256：`09c7b1d80bdbf729ac209894bef1fcc447eec2e14c9dde459a9eccb1a6e7782f`。
 
