@@ -68,6 +68,7 @@ let motionArmed = false;
 let nativeStarted = false;
 let nativeStartPromise: Promise<void> | null = null;
 let nativeLifecycleGeneration = 0;
+let explicitCameraOwners = 0;
 let faceSubscription: Subscription | null = null;
 let errorSubscription: Subscription | null = null;
 let unsubscribeConversation: (() => void) | null = null;
@@ -129,6 +130,7 @@ function conversationMotionConfirmed(): boolean {
 function canUseAttention(): boolean {
   const user = useUserStore.getState();
   return running &&
+    explicitCameraOwners === 0 &&
     user.preferences.cameraAttentionEnabled &&
     !user.robotSleeping &&
     isMainScreenFocused();
@@ -601,6 +603,17 @@ export function holdSocialAttentionMotionFor(durationMs: number, reason: string)
   const safeDurationMs = Math.max(0, Math.min(10_000, Math.round(durationMs)));
   externalMotionHoldUntil = Math.max(externalMotionHoldUntil, Date.now() + safeDurationMs);
   recordDiagnosticEvent("character", "social-attention-motion-held", { reason, durationMs: safeDurationMs });
+}
+
+/** Temporarily release Camera2 for an explicit recording; never alter user preferences. */
+export async function pauseSocialCamera(): Promise<() => void> {
+  explicitCameraOwners++;
+  const pending = nativeStartPromise;
+  attentionActive = false;
+  await stopNative("explicit-recording");
+  await pending?.catch(() => {});
+  let released = false;
+  return () => { if (released) return; released = true; explicitCameraOwners = Math.max(0, explicitCameraOwners - 1); handlePreferenceChange(); };
 }
 
 export function startSocialAttentionController(source = "runtime"): void {

@@ -3,6 +3,12 @@ packages:
   - "packages/*"
 
 minimumReleaseAge: 10080
+# Reviewed official Pi v1.4.0 sources, pinned to the same release; lifecycle
+# scripts remain disabled during validation. Keep the age gate for other packages.
+minimumReleaseAgeExclude:
+  - "@earendil-works/pi-agent-core@1.4.0"
+  - "@earendil-works/pi-ai@1.4.0"
+  - "@earendil-works/pi-telemetry@1.4.0"
 trustPolicy: no-downgrade
 trustPolicyIgnoreAfter: 10080
 

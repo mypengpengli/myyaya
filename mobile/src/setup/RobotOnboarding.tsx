@@ -10,6 +10,7 @@ import { useUserStore } from "../store/user";
 import { looiTheme as theme } from "../ui/looi-theme";
 import { completeRobotOnboarding, hasCompletedRobotOnboarding, setOptionalCapabilitySkipped } from "./setup-storage";
 import { openDevicePermissionSettings, readDevicePermissions, requestDevicePermissions, type DevicePermissions } from "./device-permissions";
+import { ModelConnectionForm } from "../agent/ModelConnectionForm";
 
 export function RobotOnboarding() {
   const router = useRouter();
@@ -119,11 +120,11 @@ export function RobotOnboarding() {
   return <SafeAreaView style={styles.safe}>
     <View style={styles.header}>
       <Text style={styles.brand}>小丫</Text>
-      <Text style={styles.progress}>{["授权", "连接 LOOI", "准备好了"][step]} · {step + 1}/3</Text>
+      <Text style={styles.progress}>{["授权", "连接 LOOI", "模型连接", "准备好了"][step]} · {step + 1}/4</Text>
       {existingSetup ? <Action secondary label="返回" disabled={busy} onPress={() => router.replace("/menu")} /> : null}
     </View>
     <ScrollView contentContainerStyle={styles.content}>
-      <Text style={styles.title}>{["先认识一下彼此", "连接你的 LOOI", connected ? "很高兴见到你" : "先和小丫见个面"][step]}</Text>
+      <Text style={styles.title}>{["先认识一下彼此", "连接你的 LOOI", "连接小丫的大脑", connected ? "很高兴见到你" : "先和小丫见个面"][step]}</Text>
       {step === 0 ? <>
         <Text style={styles.subtitle}>允许这些权限，小丫才能听见你、看向你，并连接自己的身体。</Text>
         {([["bluetooth", "附近设备", "搜索并连接 LOOI；旧版 Android 会请求位置权限。"],
@@ -144,8 +145,12 @@ export function RobotOnboarding() {
         <Action label={scanning ? "正在搜索…" : "重新搜索"} disabled={scanning || busy} onPress={() => void search()} />
         <Action secondary label="检查系统权限" disabled={busy} onPress={() => setStep(0)} />
         <Action secondary label="稍后连接，先查看表情" disabled={busy || scanning} onPress={() => { setMessage(""); setStep(2); }} />
+      </> : step === 2 ? <>
+        <Text style={styles.subtitle}>填写自己的中转站连接，验证后即可用中文和小丫聊天。</Text>
+        <ModelConnectionForm onSaved={() => setStep(3)} />
+        <Action secondary label="稍后配置，先查看表情" onPress={() => setStep(3)} />
       </> : <>
-        <Text style={styles.subtitle}>平时只显示表情和简短状态。说“小丫小丫”唤醒，从右向左滑动打开菜单。</Text>
+        <Text style={styles.subtitle}>平时只显示表情，底部小字提示正在进行的步骤。说“小丫小丫”唤醒，从右向左滑动打开菜单。</Text>
         <Text style={styles.detail}>{connected ? "LOOI 已连接，下次自动重连。" : "可以随时在菜单中的“连接 LOOI”完成连接。"}</Text>
         <Action label="和小丫见面" onPress={finish} />
       </>}

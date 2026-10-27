@@ -19,7 +19,7 @@ export function splitChineseWake(text: string): { addressed: boolean; command: s
 }
 export function isChineseStop(text: string): boolean {
   const { command } = splitChineseWake(text);
-  return /^(?:请)?(?:停|停下|停下来|停止|停止移动|停止运动|紧急停止|别动|不要动|刹车)$/u.test(command);
+  return /^(?:请)?(?:停|停下|停下来|停止|停止移动|停止运动|停止录像|结束录像|停止录制|紧急停止|别动|不要动|刹车)$/u.test(command);
 }
 export function parseChineseRobotCommand(text: string): ChineseRobotCommand | null {
   const value = splitChineseWake(text).command.replace(/^请/u, "").replace(/(?:一下|一点|一点点)$/u, "");
@@ -42,6 +42,7 @@ export function parseChineseRobotCommand(text: string): ChineseRobotCommand | nu
 export class ChineseCommandGate {
   private until = 0;
   reset() { this.until = 0; }
+  open(now: number) { this.until = now + 15_000; }
   accept(text: string, partial: boolean, now: number): { command?: ChineseRobotCommand; wake?: boolean } {
     // STOP bypasses wake, endpoint and conversation windows. Other partials do nothing.
     if (isChineseStop(text)) { this.until = 0; return { command: { kind: "stop" } }; }

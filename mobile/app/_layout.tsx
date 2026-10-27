@@ -14,6 +14,7 @@ import { useUserStore } from '@/src/store/user';
 import { markRobotInteraction, startRobotInactivityTimer, stopRobotInactivityTimer } from '@/src/core/robot-inactivity';
 import { recordDiagnosticEvent } from '@/src/diagnostics/diagnostic-log';
 import { useAppMode } from '@/src/setup/use-app-mode';
+import { RecordingOverlay } from '@/src/artifacts/RecordingOverlay';
 import { startHermesTaskMonitor } from '@/src/hermes/task-runtime';
 import { startPerformanceMonitor, stopPerformanceMonitor } from '@/src/diagnostics/performance-monitor';
 import {
@@ -188,6 +189,12 @@ function RootLayoutNav() {
   const segments = useSegments();
   const currentRoot = String(segments[0] ?? '');
   const onboardingVisible = currentRoot === 'onboarding';
+  useEffect(() => {
+    if (appMode !== 'local' || onboardingVisible) return;
+    let disposed = false, stop: (() => void) | undefined;
+    void import('@/src/artifacts/media-jobs').then(({ startMediaJobMonitor }) => { if (!disposed) stop = startMediaJobMonitor(); }).catch(() => {});
+    return () => { disposed = true; stop?.(); };
+  }, [appMode, onboardingVisible]);
 
   // A menu/Settings/task view is still the same foreground companion app.
   // One app-level owner keeps voice alive across those internal transitions.
@@ -239,7 +246,10 @@ function RootLayoutNav() {
           <Stack.Screen name="onboarding" options={{ headerShown: false }} />
           <Stack.Screen name="menu" options={{ headerShown: false, animation: "slide_from_right" }} />
           <Stack.Screen name="voice-settings" options={{ headerShown: false, animation: "slide_from_right" }} />
+          <Stack.Screen name="model-settings" options={{ headerShown: false, animation: "slide_from_right" }} />
+          <Stack.Screen name="artifacts" options={{ headerShown: false, animation: "slide_from_right" }} />
         </Stack>
+        {appMode === 'local' && !onboardingVisible ? <RecordingOverlay /> : null}
       </View>
     </ThemeProvider>
   );

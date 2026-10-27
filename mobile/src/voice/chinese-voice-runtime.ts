@@ -16,8 +16,17 @@ export const chineseVoice = new ChineseVoiceSession(VoskCommandRecognizer, async
   if (Platform.OS !== "android") return false;
   return await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO) === PermissionsAndroid.RESULTS.GRANTED;
 }, () => focused !== 0 && Platform.OS === "android" && AppState.currentState === "active" &&
-  getAppMode() === "local" && !useUserStore.getState().robotSleeping, executeChineseRobotCommand,
-  () => stopLooiMotion("chinese-voice-capture-closed"));
+  getAppMode() === "local" && !useUserStore.getState().robotSleeping, async (command) => {
+    if (command.kind !== "stop") return executeChineseRobotCommand(command);
+    // Stop motors immediately, while the video/audio mux finalizes separately.
+    const motion = executeChineseRobotCommand(command);
+    const recording = await import("../artifacts/phone-recording");
+    const artifact = await recording.stopPhoneRecording();
+    const notice = await motion;
+    return artifact ? "录像已保存" : notice;
+  },
+  () => stopLooiMotion("chinese-voice-capture-closed"),
+  async (text, signal) => (await import("../agent/companion-runtime")).replyToCompanion(text, signal));
 
 export function focusChineseVoiceScreen({ autoStart = false }: { autoStart?: boolean } = {}): () => void {
   const owner = ++focusGeneration;
@@ -30,7 +39,7 @@ export function focusChineseVoiceScreen({ autoStart = false }: { autoStart?: boo
       void (async () => {
         if (Platform.OS !== "android" || !await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO)) return;
         if (focused !== owner || AppState.currentState !== "active" || !hasCompletedRobotOnboarding() || !isChineseWakeEnabled() ||
-          useUserStore.getState().robotSleeping || getAppMode() !== "local") return;
+          useUserStore.getState().robotSleeping || getAppMode() !== "local" || chineseVoice.isCapturePaused()) return;
         const phase = chineseVoice.getSnapshot().phase;
         if (phase === "off" || phase === "error") await chineseVoice.start("wake");
       })().catch(() => {});
@@ -58,7 +67,7 @@ export function focusChineseVoiceScreen({ autoStart = false }: { autoStart?: boo
     const user = useUserStore.getState();
     const phase = chineseVoice.getSnapshot().phase;
     const next = user.robotSleeping || AppState.currentState !== "active" ? "sleeping"
-      : phase === "speaking" ? "speaking" : phase === "loading" ? "processing" : phase === "listening" ? "listening" : "attention";
+      : phase === "speaking" ? "speaking" : phase === "loading" || phase === "thinking" ? "processing" : phase === "listening" ? "listening" : "attention";
     if (user.voiceState !== next) user.setVoiceState(next);
   };
   const expression = chineseVoice.subscribe(syncFace);

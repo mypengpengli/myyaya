@@ -1,5 +1,7 @@
 .tools/
 artifacts/
+!mobile/src/artifacts/
+!mobile/src/artifacts/**
 .venv/
 .env
 .env.*

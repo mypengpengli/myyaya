@@ -118,7 +118,7 @@ Agent 每个会话串行，首版 `toolExecution: "sequential"`；外部作业�
 
 用户已选的 TTS 音色依据 [Azure 官方音色表](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/language-support?tabs=tts)，认证和区域音色表见 [TTS REST](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/rest-text-to-speech)。标准 Xiaoyou 音色没有列出 cute 风格，不套用别的音色 style 参数；“可爱”以接入后试听为准。换供应商/音色只变 TtsProvider 配置，不改会话核心；Azure 凭据不进入 APK。
 
-固定唤醒词 **小丫小丫**。先评估现有 sherpa-onnx 原生桥配中文 KWS 模型，重新生成 token/关键词并做远场、同音和误触发测试，不能只把 UI 名字改掉。官方有中英 3M/中文 3.3M 的自定义关键词模型可研究，[模型与 token 规则](https://k2-fsa.github.io/sherpa/onnx/kws/index.html)。离线“停止录像/停止运动”单独配置并验证，不用云端 ASR 充当离线停止能力。
+固定唤醒词 **小丫小丫**。先评估现有 sherpa-onnx 原生桥配中文 KWS 模型，重新生成 token/关键词并做远场、同音和误触发测试，不能只把 UI 名字改掉。官方有中英 3M/中文 3.3M 的自定义关键词模型可研究，[模型与 token 规则](https://k2-fsa.github.io/sherpa/onnx/kws/index.html)。离线“停止运动”单独验证，不用云端 ASR 代替。2026-10-27 用户允许录像改为手动停止，录制时暂停识别、结束后恢复。
 
 同一 PCM 生产者供 KWS、VAD、分段 ASR 和需要的录像音轨；手机原生层做分流，队列背压和丢帧状态可观测。TTS 以标点/短句分段播报，generationId 作废后清队列，防止旧回答续播。中文模型是按能力下载，不能作为进入全 App 的前置条件。
 
@@ -160,7 +160,7 @@ Agent 每个会话串行，首版 `toolExecution: "sequential"`；外部作业�
 | S0 本轮修复 | 解除上游强制 Key/语音模型门槛；默认本地表情；旧 Realtime 独立选择 | 无 Key/无麦克风许可可进 App；本地模式不自动启动旧语音；切换模式释放资源 |
 | S1 基线与协议 | 永久签名手机包、中文核心界面、Pi provider/假工具与 V1 设备桥 | 原生构建安装、SDK工具循环/取消、幂等重连、签名覆盖升级 |
 | S2 图片闭环与 Viewer | 拍照/保存/10秒固定关闭/再调出；图生图 adapter | 原图与派生图关联正确；固定/倒计时不冲突；图片编辑真实接口通过 |
-| S3 中文陪伴与媒体 | 中文 ASR、童声候选、固定唤醒、视频/录像播放器及音频协调 | 持续会话/打断；有声录像语音停止；视频结束再10秒；后台封装与恢复 |
+| S3 中文陪伴与媒体 | 中文 ASR、童声候选、固定唤醒、视频/录像播放器及音频协调 | 持续会话/打断；有声录像手动停止后恢复对话；视频结束再10秒；保存与恢复 |
 | S4 异步生成与 Hermes | JobWorker、图生视频/视频生成、办公派单、任务大框与小表情 | 执行时仍聊天；真实事件/文件返回；取消/失败/重启恢复；不重扣费提交 |
 | S5 身体与人物 | BLE 基线可到货后并行；有限动作、看人、身份/人体关联与跟随 | 每项有本机记录；相机/音频占用与运动仲裁成立 |
 | S6 空间与扩展 | 手机 VIO/地图原型、去客厅、邮箱/微信插件 | 分别通过导航/账户/发送能力验证后启用，不等待全部功能才发布基础包 |

@@ -1,0 +1,36 @@
+export type PresentationItem = { id: string; kind: "image" | "video" | "document"; title: string; uri: string; text?: string };
+export type PresentationState = { active: PresentationItem | null; queue: PresentationItem[]; pinned: boolean;
+  ready: boolean; ended: boolean; suspended: boolean; deadline: number | null };
+
+/** Hiding a result only changes this presentation queue; it never deletes files. */
+export class ResultPresentation {
+  private state: PresentationState = { active: null, queue: [], pinned: false, ready: false, ended: false, suspended: false, deadline: null };
+  private listeners = new Set<() => void>();
+  constructor(private readonly now: () => number = Date.now) {}
+  getSnapshot = () => this.state;
+  subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
+  private update(patch: Partial<PresentationState>) { this.state = { ...this.state, ...patch }; this.listeners.forEach((fn) => fn()); }
+  private deadline() { return !this.state.pinned && !this.state.suspended && this.state.ready &&
+    (this.state.active?.kind !== "video" || this.state.ended) ? this.now() + 10_000 : null; }
+  offer(item: PresentationItem) {
+    if (!this.state.active) this.open(item);
+    else if (this.state.active.id !== item.id && !this.state.queue.some((queued) => queued.id === item.id)) {
+      this.update({ queue: [...this.state.queue, item].slice(-32) });
+    }
+  }
+  open(item: PresentationItem) { this.update({ active: item, pinned: false, ready: false, ended: false, deadline: null,
+    queue: this.state.queue.filter((queued) => queued.id !== item.id) }); }
+  close() {
+    const [next, ...queue] = this.state.queue;
+    this.update({ active: next ?? null, queue, pinned: false, ready: false, ended: false, deadline: null });
+  }
+  loaded(id: string) { if (this.state.active?.id !== id) return; this.update({ ready: true }); this.update({ deadline: this.deadline() }); }
+  videoEnded(id: string) { if (this.state.active?.id !== id) return; this.update({ ready: true, ended: true }); this.update({ deadline: this.deadline() }); }
+  videoResumedOrSeeking(id: string) { if (this.state.active?.id === id) this.update({ ended: false, deadline: null }); }
+  loadingOrFailed(id: string) { if (this.state.active?.id === id) this.update({ ready: false, ended: false, deadline: null }); }
+  pin() { this.update({ pinned: !this.state.pinned }); this.update({ deadline: this.deadline() }); }
+  interact() { this.update({ deadline: this.deadline() }); }
+  suspend(value: boolean) { this.update({ suspended: value }); this.update({ deadline: this.deadline() }); }
+  tick() { if (this.state.deadline !== null && this.now() >= this.state.deadline) this.close(); }
+}
+export const resultPresentation = new ResultPresentation();

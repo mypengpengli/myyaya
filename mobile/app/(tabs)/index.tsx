@@ -10,6 +10,10 @@ import { ImageOverlay } from "@/src/ui/ImageOverlay";
 import { looiTheme } from "@/src/ui/looi-theme";
 import { RobotFace } from "@/src/ui/RobotFace";
 import { chineseVoice, resumeAutomaticChineseVoice } from "@/src/voice/chinese-voice-runtime";
+import { getCompanionProgress, subscribeCompanionProgress } from "@/src/agent/companion-progress";
+import { ResultOverlay } from "@/src/artifacts/ResultOverlay";
+import { resultPresentation } from "@/src/artifacts/presentation";
+import { getPhoneRecording, subscribePhoneRecording } from "@/src/artifacts/phone-recording";
 import { executeChineseRobotCommand, isChineseRobotCommandExecuting } from "@/src/device-tools/chinese-robot-control";
 import { noteSocialAttentionInteraction } from "@/src/core/social-attention";
 import { wakeRobotFromFace } from "@/src/core/sleep-mode";
@@ -98,6 +102,11 @@ export default function IndexScreen() {
   }, []);
 
   const handleAwakeFaceTap = useCallback(() => {
+    if (appMode === "local" && ["thinking", "speaking"].includes(chineseVoice.getSnapshot().phase)) {
+      chineseVoice.interrupt();
+      void executeChineseRobotCommand({ kind: "stop" }).catch(() => {});
+      return;
+    }
     if (appMode === "local") {
       if (getLooiRobotRuntimeState().motionActive || isDrivingControlSessionActive() || isChineseRobotCommandExecuting()) {
         void executeChineseRobotCommand({ kind: "stop" }).catch((error) => {
@@ -200,18 +209,23 @@ export default function IndexScreen() {
   }, [appMode, runIdlePhysicalReaction]);
 
   const speech = useSyncExternalStore(chineseVoice.subscribe, chineseVoice.getSnapshot, chineseVoice.getSnapshot);
+  const progress = useSyncExternalStore(subscribeCompanionProgress, getCompanionProgress, getCompanionProgress);
+  const presentation = useSyncExternalStore(resultPresentation.subscribe, resultPresentation.getSnapshot, resultPresentation.getSnapshot);
+  const recording = useSyncExternalStore(subscribePhoneRecording, getPhoneRecording, getPhoneRecording);
   useFocusEffect(useCallback(() => { if (appMode === "local") resumeAutomaticChineseVoice(); }, [appMode]));
   const swipe = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponderCapture: (_, gesture) => gesture.dx < -30 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.5,
     onPanResponderRelease: (_, gesture) => { if (gesture.dx < -65) router.push("/menu"); },
   }), [router]);
   const interactionNotice = speech.notice && !/^(离线监听中|请说一句话)/.test(speech.notice) ? speech.notice : "";
-  const caption = robotSleeping ? (appMode === "local" ? "休息中" : t("home.wakeFromSleep")) : speech.phase === "loading" ? "正在准备…"
+  const caption = ["preparing", "recording", "saving"].includes(recording.phase) ? recording.notice
+    : robotSleeping ? (appMode === "local" ? "休息中" : t("home.wakeFromSleep")) : speech.phase === "loading" ? "正在准备…"
+    : speech.phase === "thinking" ? progress.label || "正在想怎么回答"
     : speech.phase === "error" ? speech.notice || "语音暂不可用" : speech.phase === "speaking" ? "小丫在说话"
     : speech.partial || (speech.phase === "listening" ? interactionNotice || "小丫 · 我在听" : "小丫");
   return <SafeAreaView style={styles.home} {...swipe.panHandlers}>
-    <View style={styles.faceStage}>
-      <RobotFace mode="fullscreen" labelVisible={false}
+    <View style={presentation.active && appMode === "local" ? styles.smallFace : styles.faceStage}>
+      <RobotFace mode={presentation.active && appMode === "local" ? "avatar" : "fullscreen"} labelVisible={false}
         onLongPress={() => router.push("/menu")}
         onPress={() => {
           if (robotSleeping) {
@@ -224,6 +238,7 @@ export default function IndexScreen() {
       <Text numberOfLines={1} style={styles.captionText}>{caption}</Text>
     </View> : <ConversationOverlay />}
     {!robotSleeping && appMode === "legacy_realtime" ? <ImageOverlay /> : null}
+    {appMode === "local" ? <ResultOverlay /> : null}
     <Pressable accessibilityRole="button" accessibilityLabel="打开菜单，也可以向左滑动" onPress={() => router.push("/menu")} style={styles.menuHandle}>
       <Text style={styles.handle}>‹</Text>
     </Pressable>
@@ -232,8 +247,9 @@ export default function IndexScreen() {
 const styles = StyleSheet.create({
   home: { flex: 1, backgroundColor: looiTheme.bg, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   faceStage: { flex: 1, width: "100%", alignItems: "center", justifyContent: "center" },
-  caption: { position: "absolute", bottom: 20, left: "15%", right: "15%", alignItems: "center" },
-  captionText: { color: looiTheme.muted, fontSize: 13, opacity: 0.8 },
+  smallFace: { position: "absolute", right: "2%", top: "35%", bottom: "35%", width: "15%", alignItems: "center", justifyContent: "center" },
+  caption: { position: "absolute", bottom: 8, left: 16, right: 48, alignItems: "flex-start" },
+  captionText: { color: looiTheme.muted, fontSize: 10, opacity: 0.65 },
   menuHandle: { position: "absolute", right: 0, top: "38%", bottom: "38%", width: 38, justifyContent: "center", alignItems: "center" },
   handle: { color: looiTheme.muted, fontSize: 25, opacity: 0.35 },
 });

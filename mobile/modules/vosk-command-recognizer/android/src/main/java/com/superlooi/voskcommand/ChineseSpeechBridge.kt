@@ -7,6 +7,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
@@ -27,6 +28,7 @@ internal class ChineseSpeechBridge(
 ) {
   private val running = AtomicBoolean(false)
   private var recorder: AudioRecord? = null
+  private var echoCanceler: AcousticEchoCanceler? = null
   private var thread: Thread? = null
   private val main = Handler(Looper.getMainLooper())
   private var tts: TextToSpeech? = null
@@ -46,7 +48,7 @@ internal class ChineseSpeechBridge(
     val minimum = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
     check(minimum > 0) { "16 kHz audio capture is unavailable" }
     val capture = AudioRecord.Builder()
-      .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+      .setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION)
       .setAudioFormat(AudioFormat.Builder().setSampleRate(16000).setChannelMask(AudioFormat.CHANNEL_IN_MONO)
         .setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
       .setBufferSizeInBytes(max(minimum * 4, 12800)).build()
@@ -56,6 +58,14 @@ internal class ChineseSpeechBridge(
       check(capture.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Microphone recording did not start" }
     } catch (error: Throwable) { capture.release(); throw error }
     recorder = capture
+    // Keep local wake/STOP recognition alive while the assistant speaks.
+    // Availability varies by Android audio HAL; never pretend this guarantees
+    // far-field duplex quality without a real speaker/microphone test.
+    try {
+      if (AcousticEchoCanceler.isAvailable()) {
+        echoCanceler = AcousticEchoCanceler.create(capture.audioSessionId)?.also { it.enabled = true }
+      }
+    } catch (_: Throwable) { echoCanceler = null }
     running.set(true)
     thread = Thread({
       Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
@@ -78,6 +88,8 @@ internal class ChineseSpeechBridge(
     running.set(false)
     try { recorder?.stop() } catch (_: Throwable) {}
     try { thread?.join(1500) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
+    try { echoCanceler?.release() } catch (_: Throwable) {}
+    echoCanceler = null
     try { recorder?.release() } catch (_: Throwable) {}
     thread = null
     recorder = null

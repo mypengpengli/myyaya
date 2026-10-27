@@ -1,0 +1,51 @@
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { AppState, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { VideoView, useVideoPlayer } from "expo-video";
+import { resultPresentation as presentation, type PresentationItem } from "./presentation";
+
+function VideoResult({ item }: { item: PresentationItem }) {
+  const player = useVideoPlayer(item.uri, (instance) => { instance.loop = false; instance.play(); });
+  useEffect(() => {
+    player.timeUpdateEventInterval = 0.25;
+    let last = 0;
+    const subscriptions = [player.addListener("playToEnd", () => presentation.videoEnded(item.id)),
+      player.addListener("playingChange", ({ isPlaying }) => { if (isPlaying) presentation.videoResumedOrSeeking(item.id); }),
+      player.addListener("statusChange", ({ status }) => { if (status === "loading" || status === "error") presentation.loadingOrFailed(item.id); }),
+      player.addListener("timeUpdate", ({ currentTime }) => {
+        if (Math.abs(currentTime - last) > 1 || currentTime < last) presentation.videoResumedOrSeeking(item.id);
+        last = currentTime;
+      })];
+    const app = AppState.addEventListener("change", (state) => { if (state !== "active") player.pause(); });
+    return () => { subscriptions.forEach((subscription) => subscription.remove()); app.remove(); };
+  }, [player, item.id]);
+  return <VideoView player={player} nativeControls contentFit="contain" surfaceType="textureView" style={styles.content} />;
+}
+export function ResultOverlay() {
+  const state = useSyncExternalStore(presentation.subscribe, presentation.getSnapshot, presentation.getSnapshot);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    presentation.suspend(AppState.currentState !== "active");
+    const app = AppState.addEventListener("change", (value) => presentation.suspend(value !== "active"));
+    const timer = setInterval(() => { presentation.tick(); setNow(Date.now()); }, 250);
+    return () => { app.remove(); clearInterval(timer); };
+  }, []);
+  if (!state.active) return null;
+  const item = state.active;
+  return <View style={styles.overlay} onTouchStart={() => presentation.interact()}>
+    {item.kind === "video" ? <VideoResult key={item.id} item={item} /> : item.kind === "image" ?
+      <Image key={item.id} source={{ uri: item.uri }} resizeMode="contain" style={styles.content}
+        onLoad={() => presentation.loaded(item.id)} onError={() => presentation.loadingOrFailed(item.id)} /> :
+      <ScrollView onLayout={() => presentation.loaded(item.id)} style={styles.document}><Text style={styles.text}>{item.text ?? "文档预览暂不可用"}</Text></ScrollView>}
+    <View style={styles.top}>
+      <Pressable accessibilityRole="button" accessibilityLabel={state.pinned ? "取消固定" : "固定结果"} onPress={() => presentation.pin()} style={styles.button}><Text style={styles.text}>{state.pinned ? "已固定" : "固定"}</Text></Pressable>
+      <Text numberOfLines={1} style={styles.title}>{item.title}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="关闭结果" onPress={() => presentation.close()} style={styles.button}><Text style={styles.text}>×</Text></Pressable>
+    </View>
+    <Text style={styles.countdown}>{state.deadline !== null ? `${Math.max(0, Math.ceil((state.deadline - now) / 1000))} 秒` : state.pinned ? "已固定" : ""}{state.queue.length ? ` · 另有 ${state.queue.length} 个结果` : ""}</Text>
+  </View>;
+}
+const styles = StyleSheet.create({ overlay: { position: "absolute", top: "8%", bottom: "10%", left: "5%", right: "18%", backgroundColor: "#0b111b", borderRadius: 20, overflow: "hidden" },
+  content: { width: "100%", height: "100%" }, document: { flex: 1, marginTop: 60, padding: 24 }, text: { color: "#edf4ff", fontSize: 17, lineHeight: 26 },
+  top: { position: "absolute", left: 8, right: 8, top: 8, flexDirection: "row", alignItems: "center", gap: 10 },
+  button: { backgroundColor: "#172334ee", paddingHorizontal: 14, paddingVertical: 6, borderRadius: 12 }, title: { color: "#b1bdcf", flex: 1, fontSize: 12 },
+  countdown: { position: "absolute", bottom: 10, right: 10, color: "#edf4ff", fontSize: 11, backgroundColor: "#172334dd", borderRadius: 8, padding: 5 } });

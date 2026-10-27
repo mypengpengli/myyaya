@@ -115,6 +115,7 @@ const app = { currentState: "active", addEventListener: (_name, fn) => { appList
 class FakeSession {
   phase = "off";
   getSnapshot = () => ({ phase: this.phase });
+  isCapturePaused = () => false;
   subscribe = () => () => {};
   async start() { starts++; this.phase = "listening"; }
   async stop() { stops++; this.phase = "off"; }
