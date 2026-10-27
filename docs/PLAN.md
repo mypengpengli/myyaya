@@ -1,6 +1,7 @@
 # 最新方案整理
 
 依据：[用户提供的完整分享对话](https://chatgpt.com/share/6adf4c3e-e364-83e9-a865-a9f99f4e4150)。整理日期：2026-10-26。
+2026-10-27 补充：用户确认手机为 Android，可使用小米 12 Pro 或红米 K50，不再固定一个机型；下面手机选择记录保留历史语境。最新启动与交互要求见 [陪伴交互说明](COMPANION-UX.md)。
 
 2026-10-27 用户在当前对话补充完整使用流程和任务框草图，最新范围以 [PRODUCT-REQUIREMENTS.md](PRODUCT-REQUIREMENTS.md) 为准，技术决策与产品开发顺序见 [ARCHITECTURE.md](ARCHITECTURE.md)。固定唤醒为“小丫小丫”，增加多轮媒体产物、10 秒固定/关闭规则、持续对话与异步 Hermes 作业；本文保留此前背景与硬件扩展。
 

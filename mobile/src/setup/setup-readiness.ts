@@ -1,7 +1,7 @@
 import { getLooiRobotRuntimeState } from "@/src/device-tools/looi-robot";
 import { getSavedLooiRobot } from "@/src/device-tools/looi-robot-autoconnect";
 import type { SherpaModelCheck } from "@/src/voice/sherpa-models";
-import { getAppMode, getSetupStorageState, type AppMode, type SetupSkipState } from "./setup-storage";
+import { getAppMode, getSetupStorageState, hasCompletedRobotOnboarding, type AppMode, type SetupSkipState } from "./setup-storage";
 
 export type SetupStep = "openai" | "models" | "permissions" | "done";
 
@@ -33,14 +33,15 @@ export function areSherpaModelsReady(status: SetupModelReadiness): boolean {
 export async function computeSetupReadiness(): Promise<SetupReadiness> {
   const storageState = getSetupStorageState();
   if (storageState.appMode === "local") {
-    // Opening the local UI must not load models, inspect a cloud key or ask for
-    // recording access. Individual local features request their own permissions.
+    // Local use needs no cloud key/models, but first launch must show the
+    // permission and robot-connection guide, including upgrades from the dashboard.
+    const completed = hasCompletedRobotOnboarding();
     return {
       appMode: "local", legacyVoiceReady: false,
       openAiKeyConfigured: false, modelsReady: false, modelStatus: null,
       microphoneReady: false, robotReady: await getRobotReady(),
       skipped: storageState.skipped, onboardingCompleted: storageState.onboardingCompleted,
-      requiredReady: true, nextStep: "done",
+      requiredReady: completed, nextStep: completed ? "done" : "permissions",
     };
   }
   const [{ hasOpenAiApiKey }, { checkAllSherpaModelReadiness }] = await Promise.all([

@@ -73,11 +73,12 @@ assert.match(realtimeRouter, /beginSelectedPhotoContext/);
 assert.match(realtimeRouter, /addSelectedPhotoToContext/);
 assert.match(realtimeRouter, /finishSelectedPhotoContext/);
 
-// The main face exposes one small picker affordance; no in-app camera preview or Share target was added.
+// Picker access lives in the swipe menu; the face stays clear.
 const home = read("app/(tabs)/index.tsx");
-assert.match(home, /selectPhotosIntoCurrentDiscussion/);
-assert.match(home, /home\.choosePhotosA11y/);
-assert.match(home, /photoPickerButton/);
+const menu = read("app/menu.tsx");
+assert.match(menu, /selectPhotosIntoCurrentDiscussion/);
+assert.match(menu, /home\.choosePhotosA11y/);
+assert.doesNotMatch(home, /photoPickerButton/);
 assert.doesNotMatch(home, /CameraView|launchCamera|ShareIntent/);
 
 const strings = read("src/i18n/ui-strings.ts");

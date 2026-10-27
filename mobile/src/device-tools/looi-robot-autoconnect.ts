@@ -176,20 +176,27 @@ export async function forceReconnectSavedLooiRobot(): Promise<AutoConnectionResu
   return result;
 }
 
-export async function scanLooiRobotCandidates(): Promise<LooiRobotCandidate[]> {
+export async function scanLooiRobotCandidates(options: {
+  signal?: AbortSignal;
+  onCandidates?: (candidates: LooiRobotCandidate[]) => void;
+} = {}): Promise<LooiRobotCandidate[]> {
   if (Platform.OS === "web") return [];
 
   const [{ scanLooiRobotCandidates }, saved] = await Promise.all([
     import("./react-native-ble-transport"),
     getSavedLooiRobot(),
   ]);
-  const candidates = await scanLooiRobotCandidates();
-  return candidates.map((candidate) => ({
+  const mapCandidates = (candidates: { id: string; name: string; rssi: number | null }[]) => candidates.map((candidate) => ({
     id: candidate.id,
     name: candidate.name,
     rssi: candidate.rssi,
     selected: candidate.id === saved?.id,
   }));
+  const candidates = await scanLooiRobotCandidates({
+    signal: options.signal,
+    onCandidates: options.onCandidates ? (found) => options.onCandidates?.(mapCandidates(found)) : undefined,
+  });
+  return mapCandidates(candidates);
 }
 
 export async function connectSelectedLooiRobot(robot: SavedLooiRobot): Promise<{

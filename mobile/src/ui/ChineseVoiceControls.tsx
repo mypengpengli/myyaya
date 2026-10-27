@@ -4,9 +4,9 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { chineseVoice, focusChineseVoiceScreen } from "../voice/chinese-voice-runtime";
 import { looiTheme as theme } from "./looi-theme";
 
-export function ChineseVoiceControls({ onTranscript }: { onTranscript?: (text: string) => void }) {
+export function ChineseVoiceControls({ onTranscript, manageFocus = false }: { onTranscript?: (text: string) => void; manageFocus?: boolean }) {
   const speech = useSyncExternalStore(chineseVoice.subscribe, chineseVoice.getSnapshot, chineseVoice.getSnapshot);
-  useFocusEffect(useCallback(() => focusChineseVoiceScreen(), []));
+  useFocusEffect(useCallback(() => manageFocus ? focusChineseVoiceScreen() : undefined, [manageFocus]));
   const active = speech.phase === "listening" || speech.phase === "loading" || speech.phase === "speaking";
   return <View style={styles.frame}>
     <View style={styles.row}>

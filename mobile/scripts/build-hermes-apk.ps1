@@ -41,6 +41,7 @@ try {
   # Flat native module paths avoid CMake/Ninja limits with pnpm's isolated peer directories.
   Invoke-Checked { corepack.cmd pnpm install --frozen-lockfile --node-linker=hoisted }
   Invoke-Checked { corepack.cmd pnpm exec tsc --noEmit }
+  Invoke-Checked { node scripts/companion-experience.test.mjs }
   Invoke-Checked { node scripts/hermes-connection-behavior.test.mjs }
   Invoke-Checked { node scripts/hermes-runs-behavior.test.mjs }
   Invoke-Checked { node scripts/chinese-voice-behavior.test.mjs }

@@ -77,6 +77,8 @@ function makeManager({ initiallyConnected, connectError = null }) {
 
 const customRequire = (id) => {
   if (id === "react-native") return reactNative;
+  if (id === "../setup/device-permissions") return { requestBluetoothPermissions: async () => {} };
+  if (id === "./looi-discovery") return compileTs("src/device-tools/looi-discovery.ts", require);
   if (id === "react-native-ble-plx") {
     return { BleManager: class {}, ScanMode: { LowLatency: 2 }, State: { PoweredOn: "PoweredOn", PoweredOff: "PoweredOff" } };
   }

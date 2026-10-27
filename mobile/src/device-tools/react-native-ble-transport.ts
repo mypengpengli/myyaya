@@ -1,4 +1,6 @@
-import { PermissionsAndroid, Platform } from "react-native";
+import { Platform } from "react-native";
+import { requestBluetoothPermissions } from "../setup/device-permissions";
+import { isLooiAdvertisement, looiAdvertisementName } from "./looi-discovery";
 import {
   BleManager,
   ScanMode,
@@ -115,7 +117,7 @@ export class ReactNativeBleLooiTransport implements LooiTransport {
       throw new Error("LOOI BLE transport requires a native iOS or Android runtime.");
     }
 
-    await requestAndroidBluetoothPermissions();
+    await requestBluetoothPermissions();
     await this.waitForPoweredOn();
 
     const device = await this.findRobotDevice();
@@ -352,31 +354,7 @@ export class ReactNativeBleLooiTransport implements LooiTransport {
   }
 
   private async waitForPoweredOn(): Promise<void> {
-    const currentState = await this.manager.state();
-    if (currentState === State.PoweredOn) return;
-
-    if (Platform.OS === "android" && currentState === State.PoweredOff) {
-      await this.manager.enable().catch(() => {});
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      let subscription: Subscription | null = null;
-      const timeout = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        subscription?.remove();
-        reject(new Error(`Bluetooth did not become ready within ${this.bleStateTimeoutMs}ms`));
-      }, this.bleStateTimeoutMs);
-
-      subscription = this.manager.onStateChange((nextState) => {
-        if (nextState !== State.PoweredOn || settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        subscription?.remove();
-        resolve();
-      }, true);
-    });
+    await waitForManagerPoweredOn(this.manager, this.bleStateTimeoutMs);
   }
 
   private async findRobotDevice(): Promise<Device> {
@@ -406,7 +384,7 @@ export class ReactNativeBleLooiTransport implements LooiTransport {
       const finish = (callback: () => void) => {
         if (settled) return;
         settled = true;
-        void this.manager.stopDeviceScan().finally(callback);
+        void this.manager.stopDeviceScan().then(callback, callback);
       };
 
       const timeout = setTimeout(() => {
@@ -417,7 +395,7 @@ export class ReactNativeBleLooiTransport implements LooiTransport {
         .startDeviceScan(
           null,
           {
-            allowDuplicates: false,
+            allowDuplicates: true,
             scanMode: Platform.OS === "android" ? ScanMode.LowLatency : undefined,
           },
           (error, device) => {
@@ -453,10 +431,13 @@ export class ReactNativeBleLooiTransport implements LooiTransport {
 export async function scanLooiRobotCandidates(options: {
   scanTimeoutMs?: number;
   robotName?: string;
+  onCandidates?: (candidates: ScannedLooiRobot[]) => void;
+  signal?: AbortSignal;
 } = {}): Promise<ScannedLooiRobot[]> {
   if (Platform.OS === "web") return [];
 
-  await requestAndroidBluetoothPermissions();
+  await requestBluetoothPermissions();
+  if (options.signal?.aborted) return [];
 
   const manager = new BleManager();
   const robotName = options.robotName ?? process.env.EXPO_PUBLIC_LOOI_ROBOT_NAME ?? DEFAULT_ROBOT_NAME;
@@ -464,24 +445,31 @@ export async function scanLooiRobotCandidates(options: {
 
   try {
     await waitForManagerPoweredOn(manager, DEFAULT_BLE_STATE_TIMEOUT_MS);
+    if (options.signal?.aborted) return [];
 
     return await new Promise<ScannedLooiRobot[]>((resolve, reject) => {
       const candidates = new Map<string, ScannedLooiRobot>();
+      let advertisements = 0;
       let settled = false;
       const finish = (callback: () => void) => {
         if (settled) return;
         settled = true;
-        void manager.stopDeviceScan().finally(callback);
+        options.signal?.removeEventListener("abort", cancel);
+        void manager.stopDeviceScan().then(callback, callback);
       };
+      const cancel = () => { clearTimeout(timeout); finish(() => resolve([])); };
       const timeout = setTimeout(() => {
+        recordDiagnosticEvent("robot", "ble-discovery-finished", { advertisements, candidates: candidates.size });
         finish(() => resolve([...candidates.values()].sort(compareScannedRobots)));
       }, scanTimeoutMs);
+      options.signal?.addEventListener("abort", cancel, { once: true });
+      if (options.signal?.aborted) { cancel(); return; }
 
       manager
         .startDeviceScan(
           null,
           {
-            allowDuplicates: false,
+            allowDuplicates: true,
             scanMode: Platform.OS === "android" ? ScanMode.LowLatency : undefined,
           },
           (error, device) => {
@@ -490,8 +478,11 @@ export async function scanLooiRobotCandidates(options: {
               finish(() => reject(error));
               return;
             }
-            if (!device || !isLikelyLooiRobot(device, robotName)) return;
+            if (settled || !device) return;
+            advertisements++;
+            if (!isLikelyLooiRobot(device, robotName)) return;
             candidates.set(device.id, toScannedRobot(device));
+            options.onCandidates?.([...candidates.values()].sort(compareScannedRobots));
           },
         )
         .catch((error) => {
@@ -504,31 +495,15 @@ export async function scanLooiRobotCandidates(options: {
   }
 }
 
-async function requestAndroidBluetoothPermissions(): Promise<void> {
-  if (Platform.OS !== "android") return;
-
-  const permissions =
-    Number(Platform.Version) >= 31
-      ? [
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-        ]
-      : [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION];
-
-  const result = await PermissionsAndroid.requestMultiple(permissions);
-  const denied = permissions.filter((permission) => result[permission] !== PermissionsAndroid.RESULTS.GRANTED);
-  if (denied.length > 0) {
-    throw new Error(`Bluetooth permissions denied: ${denied.join(", ")}`);
-  }
-}
-
 async function waitForManagerPoweredOn(manager: BleManager, timeoutMs: number): Promise<void> {
   const currentState = await manager.state();
   if (currentState === State.PoweredOn) return;
+  if (currentState === State.Unauthorized) throw new Error("附近设备权限未允许，请打开系统设置授权后重试。");
+  if (currentState === State.Unsupported) throw new Error("这台设备不支持 BLE 蓝牙。");
 
   if (Platform.OS === "android" && currentState === State.PoweredOff) {
-    await manager.enable().catch(() => {});
+    // Android 13+ disallows programmatic enable for ordinary apps.
+    throw new Error("手机蓝牙未开启，请打开系统蓝牙后重新搜索 LOOI。");
   }
 
   await new Promise<void>((resolve, reject) => {
@@ -538,7 +513,7 @@ async function waitForManagerPoweredOn(manager: BleManager, timeoutMs: number): 
       if (settled) return;
       settled = true;
       subscription?.remove();
-      reject(new Error(`Bluetooth did not become ready within ${timeoutMs}ms`));
+      reject(new Error("蓝牙暂未就绪，请确认蓝牙已开启、附近设备权限已允许，然后重试。"));
     }, timeoutMs);
 
     subscription = manager.onStateChange((nextState) => {
@@ -568,16 +543,13 @@ function shortUuid(uuid: string): string {
 }
 
 function isLikelyLooiRobot(device: Device, robotName: string): boolean {
-  const advertisedName = device.name ?? device.localName ?? "";
-  if (advertisedName === robotName) return true;
-  if (advertisedName.toLowerCase().includes("looi")) return true;
-  return Boolean(device.serviceUUIDs?.some((uuid) => uuid.toLowerCase() === LOOI_SERVICE_UUID));
+  return isLooiAdvertisement(device, robotName);
 }
 
 function toScannedRobot(device: Device): ScannedLooiRobot {
   return {
     id: device.id,
-    name: device.name ?? device.localName ?? "LOOI Robot",
+    name: looiAdvertisementName(device),
     rssi: device.rssi ?? null,
     serviceUUIDs: device.serviceUUIDs ?? [],
   };

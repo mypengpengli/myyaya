@@ -7,9 +7,10 @@ const read = (path) => fs.readFileSync(path, "utf8");
 const pkg = JSON.parse(read("package.json"));
 const app = JSON.parse(read("app.json"));
 
-assert.equal(pkg.version, "2.1.152");
-assert.equal(app.expo.version, "2.1.152");
-assert.equal(app.expo.android.versionCode, 152);
+assert.equal(app.expo.version, pkg.version);
+const patchVersion = Number(pkg.version.split(".")[2]);
+assert.ok(Number.isInteger(patchVersion) && patchVersion >= 152);
+assert.equal(app.expo.android.versionCode, patchVersion, "every new 2.1.x APK must increment versionCode as well");
 
 assert.ok(fs.existsSync("modules/photo-picker-access"));
 assert.ok(fs.existsSync("src/voice/realtime-visual-command.ts"));

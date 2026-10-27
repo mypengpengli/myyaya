@@ -20,8 +20,8 @@ const retiredPaths = [
 for (const path of retiredPaths) assert.equal(existsSync(path), false, `${path} must remain absent`);
 
 const home = readFileSync("app/(tabs)/index.tsx", "utf8");
-assert.match(home, /gearshape\.fill/);
-assert.match(home, /applyLiveRealtimePreferences/);
+assert.match(home, /router\.push\("\/menu"\)/);
+assert.match(home, /onMoveShouldSetPanResponderCapture/);
 assert.doesNotMatch(home, /quickPanelVisible|quickActions/);
 
 const settings = readFileSync("app/(tabs)/settings.tsx", "utf8");

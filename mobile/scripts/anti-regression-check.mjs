@@ -22,8 +22,8 @@ assert.match(settings, /Realtime WebRTC \(legacy A\/B\)/);
 assert.doesNotMatch(settings, /Realtime \+ Local ASR|GigaAM/);
 
 const home = read("app/(tabs)/index.tsx");
-assert.match(home, /gearshape\.fill/);
-assert.match(home, /applyLiveRealtimePreferences/);
+assert.match(home, /router\.push\("\/menu"\)/);
+assert.match(home, /onMoveShouldSetPanResponderCapture/);
 assert.doesNotMatch(home, /quickPanelVisible|quickActions|quickPanel:/);
 
 const store = read("src/store/user.ts");

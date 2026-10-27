@@ -1,67 +1,41 @@
-import {
-  forceReconnectSavedLooiRobot,
-  startLooiRobotAutoConnection,
-} from "@/src/device-tools/looi-robot-autoconnect";
+import { startLooiRobotAutoConnection } from "@/src/device-tools/looi-robot-autoconnect";
 import {
   getLooiRobotRuntimeState,
   performLooiCharacterReaction,
-  stopLooiMotion,
-  subscribeLooiRobotRuntimeState,
 } from "@/src/device-tools/looi-robot";
 import { voiceRuntime } from "@/src/perceivers/voice-runtime";
 import { useAppMode } from "@/src/setup/use-app-mode";
-import {
-  computeSetupReadiness,
-  type SetupReadiness,
-} from "@/src/setup/setup-readiness";
 import { ConversationOverlay } from "@/src/ui/ConversationOverlay";
 import { ImageOverlay } from "@/src/ui/ImageOverlay";
 import { looiTheme } from "@/src/ui/looi-theme";
 import { RobotFace } from "@/src/ui/RobotFace";
-import { ChineseVoiceControls } from "@/src/ui/ChineseVoiceControls";
+import { chineseVoice, resumeAutomaticChineseVoice } from "@/src/voice/chinese-voice-runtime";
 import { executeChineseRobotCommand, isChineseRobotCommandExecuting } from "@/src/device-tools/chinese-robot-control";
 import { noteSocialAttentionInteraction } from "@/src/core/social-attention";
-import { RESPONSE_LANGUAGE_OPTIONS, type ResponseLanguage } from "@/src/language/response-language";
-import { LISTENING_LANGUAGE_OPTIONS, type ListeningLanguage } from "@/src/language/listening-language";
 import { wakeRobotFromFace } from "@/src/core/sleep-mode";
 import { setMainScreenFocused } from "@/src/core/main-screen-presence";
 import { useUserStore } from "@/src/store/user";
 import { useConversationStore } from "@/src/store/conversation";
 import { useUiText } from "@/src/i18n/use-ui-text";
 import { recordDiagnosticEvent } from "@/src/diagnostics/diagnostic-log";
-import { selectPhotosIntoCurrentDiscussion } from "@/src/vision/photo-picker-context";
 import { triggerCharacterReaction } from "@/src/character/character-reaction";
 import { classifyFaceTapImmediateRoute } from "@/src/character/face-tap-routing";
 import { isDrivingControlSessionActive } from "@/src/voice/driving-control-session";
 import { useFocusEffect, useRouter } from "expo-router";
-import { SymbolView } from "expo-symbols";
-import regularSymbolWeight from "expo-symbols/androidWeights/regular";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 
 
-function shortLanguage(language: "ru" | "uk" | "en"): string {
-  const option = [...LISTENING_LANGUAGE_OPTIONS, ...RESPONSE_LANGUAGE_OPTIONS].find((item) => item.id === language);
-  return option?.shortLabel ?? language.toUpperCase();
-}
-
 export default function IndexScreen() {
   const appMode = useAppMode();
   const router = useRouter();
-  const [languageMenu, setLanguageMenu] = useState<"listening" | "response" | null>(null);
-  const [readiness, setReadiness] = useState<SetupReadiness | null>(null);
-  const [robotRuntimeState, setRobotRuntimeState] = useState(() => getLooiRobotRuntimeState());
-  const [photoPickerBusy, setPhotoPickerBusy] = useState(false);
   const sleepTapAtRef = useRef(0);
   const idleTapCountRef = useRef(0);
   const idleTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasFocusedMainOnceRef = useRef(false);
   const robotSleeping = useUserStore((state) => state.robotSleeping);
-  const listeningLanguage = useUserStore((state) => state.preferences.listeningLanguage);
-  const responseLanguage = useUserStore((state) => state.preferences.language);
-  const updatePreferences = useUserStore((state) => state.updatePreferences);
   const { t } = useUiText();
 
   useEffect(() => () => {
@@ -73,12 +47,6 @@ export default function IndexScreen() {
     startLooiRobotAutoConnection().catch((error) => {
       console.warn("[Home] LOOI robot auto-connect failed:", error);
     });
-  }, []);
-
-  useEffect(() => {
-    const syncRobotState = () => setRobotRuntimeState(getLooiRobotRuntimeState());
-    syncRobotState();
-    return subscribeLooiRobotRuntimeState(syncRobotState);
   }, []);
 
   useFocusEffect(
@@ -117,61 +85,6 @@ export default function IndexScreen() {
       };
     }, [appMode])
   );
-
-  useEffect(() => {
-    let cancelled = false;
-    computeSetupReadiness()
-      .then((next) => {
-        if (!cancelled) setReadiness(next);
-      })
-      .catch((error) => {
-        console.warn("[Home] Failed to compute setup readiness:", error);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [appMode]);
-
-  const repairStep = appMode === "legacy_realtime" && readiness?.modelsReady === false ? "models" : null;
-
-  const connectRobot = useCallback(async () => {
-    const current = getLooiRobotRuntimeState();
-    if (current.connected || current.connecting) return;
-    try {
-      const result = await forceReconnectSavedLooiRobot();
-      if (!result.ok && result.reason === "no-saved-robot") {
-        router.replace("/settings");
-        return;
-      }
-      if (!result.ok) throw new Error(`Robot reconnect skipped: ${result.reason ?? "unknown"}`);
-    } catch (error) {
-      console.warn("[Home] LOOI connect failed:", error);
-      recordDiagnosticEvent("robot", "ble-force-reconnect-ui-failed", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      // Runtime state carries the authoritative BLE error; force a UI refresh in
-      // case the transport rejected before publishing its own state change.
-      setRobotRuntimeState(getLooiRobotRuntimeState());
-    }
-  }, [router]);
-
-  const choosePhotosForDiscussion = useCallback(async () => {
-    if (photoPickerBusy || useUserStore.getState().robotSleeping) return;
-    setPhotoPickerBusy(true);
-    try {
-      const result = await selectPhotosIntoCurrentDiscussion();
-      recordDiagnosticEvent("vision", "photo-picker-ui-finished", {
-        selected: result.selected,
-        cancelled: result.cancelled,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      recordDiagnosticEvent("vision", "photo-picker-ui-failed", { error: message });
-      Alert.alert(t("home.photoPickerErrorTitle"), t("home.photoPickerErrorBody"));
-    } finally {
-      setPhotoPickerBusy(false);
-    }
-  }, [photoPickerBusy, t]);
 
   const runIdlePhysicalReaction = useCallback((reaction: "annoyed" | "angry") => {
     const current = getLooiRobotRuntimeState();
@@ -286,371 +199,41 @@ export default function IndexScreen() {
     }, 280);
   }, [appMode, runIdlePhysicalReaction]);
 
-  const robotConnectionMode = robotRuntimeState.connecting
-    ? "connecting"
-    : robotRuntimeState.connected
-      ? "connected"
-      : robotRuntimeState.lastError
-        ? "error"
-        : "disconnected";
-
-  const robotConnectionLabel = robotConnectionMode === "connecting"
-    ? t("home.robot.connecting")
-    : robotConnectionMode === "connected"
-      ? t("home.robot.connected")
-      : robotConnectionMode === "error"
-        ? t("home.robot.retry")
-        : t("home.robot.connect");
-
-
-  return (
-    <SafeAreaView style={styles.home}>
-      {!robotSleeping ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`LOOI Robot: ${robotConnectionLabel}`}
-          disabled={robotConnectionMode === "connecting" || robotConnectionMode === "connected"}
-          onPress={() => void connectRobot()}
-          style={[
-            styles.robotReconnectButton,
-            robotConnectionMode === "connecting" && styles.robotReconnectButtonBusy,
-            robotConnectionMode === "connected" && styles.robotReconnectButtonConnected,
-            robotConnectionMode === "error" && styles.robotReconnectButtonError,
-          ]}
-        >
-          <Text style={[
-            styles.robotReconnectText,
-            robotConnectionMode === "connected" && styles.robotReconnectTextConnected,
-            robotConnectionMode === "error" && styles.robotReconnectTextError,
-          ]}>
-            🤖 {robotConnectionLabel}
-          </Text>
-        </Pressable>
-      ) : null}
-      <View style={styles.languagePicker}>
-        {appMode === "local" ? <Pressable accessibilityRole="button" onPress={() => router.replace("/robot")} style={styles.languageButton}>
-          <Text style={styles.languageText}>底座控制</Text>
-        </Pressable> : null}
-        {appMode === "local" ? <Pressable accessibilityRole="button" accessibilityLabel="打开 Hermes 执行任务"
-          onPress={() => router.replace("/tasks")} style={styles.languageButton}>
-          <Text style={styles.languageText}>执行任务</Text>
-        </Pressable> : null}
-        {appMode === "legacy_realtime" ? <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t("home.listeningLanguageA11y", { language: listeningLanguage })}
-          onPress={() => setLanguageMenu((value) => value === "listening" ? null : "listening")}
-          style={styles.languageButton}
-        >
-          <Text style={styles.languageText}>🎙 {shortLanguage(listeningLanguage)} ▾</Text>
-        </Pressable> : null}
-        {appMode === "legacy_realtime" ? <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t("home.responseLanguageA11y", { language: responseLanguage })}
-          onPress={() => setLanguageMenu((value) => value === "response" ? null : "response")}
-          style={styles.languageButton}
-        >
-          <Text style={styles.languageText}>🔊 {shortLanguage(responseLanguage)} ▾</Text>
-        </Pressable> : null}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t("home.settingsA11y")}
-          onPress={() => router.replace("/settings")}
-          style={styles.settingsButton}
-        >
-          <SymbolView
-            name={{ ios: "gearshape.fill", android: "settings" }}
-            size={20}
-            tintColor={looiTheme.cyan}
-            weight={{ ios: "semibold", android: regularSymbolWeight }}
-            fallback={<Text style={styles.settingsFallback}>⚙</Text>}
-          />
-        </Pressable>
-        {languageMenu ? (
-          <View style={styles.languageMenu}>
-            {(languageMenu === "listening" ? LISTENING_LANGUAGE_OPTIONS : RESPONSE_LANGUAGE_OPTIONS).map((option) => {
-              const selected = option.id === (languageMenu === "listening" ? listeningLanguage : responseLanguage);
-              return (
-                <Pressable
-                  key={`${languageMenu}-${option.id}`}
-                  accessibilityRole="button"
-                  onPress={() => {
-                    const menu = languageMenu;
-                    if (menu === "listening") {
-                      const from = listeningLanguage;
-                      updatePreferences({ listeningLanguage: option.id as ListeningLanguage });
-                      recordDiagnosticEvent("runtime", "listening-language-changed", { from, language: option.id, source: "home-ui" });
-                    } else {
-                      const from = responseLanguage;
-                      updatePreferences({ language: option.id as ResponseLanguage });
-                      recordDiagnosticEvent("runtime", "response-language-changed", { from, language: option.id, source: "home-ui" });
-                    }
-                    setLanguageMenu(null);
-                    void voiceRuntime.applyLiveRealtimePreferences(`home-${menu ?? "unknown"}-language`).then((applied) => {
-                      if (menu === "listening" && !applied) {
-                        return voiceRuntime.rearmWakewordAfterNavigation();
-                      }
-                    }).catch((error) => {
-                      recordDiagnosticEvent("runtime", "live-language-apply-failed", {
-                        source: menu ?? "unknown",
-                        error: error instanceof Error ? error.message : String(error),
-                      });
-                    });
-                  }}
-                  style={[styles.languageMenuItem, selected && styles.languageMenuItemSelected]}
-                >
-                  <Text style={[styles.languageMenuText, selected && styles.languageMenuTextSelected]}>
-                    {option.shortLabel} · {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        ) : null}
-      </View>
-      <View style={styles.faceStage}>
-        {appMode === "local" ? <View pointerEvents="none" style={styles.repairBanner}>
-          <Text style={styles.repairTitle}>本地模式</Text>
-          <Text style={styles.repairText}>中文离线口令 · 底座控制 · Hermes 任务</Text>
-        </View> : null}
-        {repairStep ? (
-          <Pressable
-            accessibilityRole="button"
-            onPress={() =>
-              router.replace(`/onboarding?step=${repairStep}` as never)
-            }
-            style={styles.repairBanner}
-          >
-            <Text style={styles.repairTitle}>
-              {t("home.modelsNotReady")}
-            </Text>
-            <Text style={styles.repairText}>{t("home.repairModels")}</Text>
-          </Pressable>
-        ) : null}
-        {!robotSleeping && appMode === "legacy_realtime" ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t("home.choosePhotosA11y")}
-            disabled={photoPickerBusy}
-            onPress={() => void choosePhotosForDiscussion()}
-            style={[styles.photoPickerButton, photoPickerBusy && styles.photoPickerButtonBusy]}
-          >
-            <Text style={styles.photoPickerIcon}>{photoPickerBusy ? "…" : "🖼️"}</Text>
-          </Pressable>
-        ) : null}
-        <RobotFace
-          mode="fullscreen"
-          labelVisible={false}
-          onPress={() => {
-                    if (robotSleeping) {
-              sleepTapAtRef.current = 0;
-              void wakeRobotFromFace().catch((error) => {
-                console.warn("[Home] Failed to wake LOOI from face tap:", error);
-              });
-              return;
-            }
-            handleAwakeFaceTap();
-          }}
-        />
-        {robotSleeping ? (
-          <View pointerEvents="none" style={styles.sleepBadge}>
-            <Text style={styles.sleepTitle}>Zzz</Text>
-            <Text style={styles.sleepText}>{t("home.wakeFromSleep")}</Text>
-          </View>
-        ) : null}
-      </View>
-      {!robotSleeping && appMode === "legacy_realtime" ? <ConversationOverlay /> : null}
-      {!robotSleeping && appMode === "legacy_realtime" ? <ImageOverlay /> : null}
-      {!robotSleeping && appMode === "local" ? <ChineseVoiceControls /> : null}
-    </SafeAreaView>
-  );
+  const speech = useSyncExternalStore(chineseVoice.subscribe, chineseVoice.getSnapshot, chineseVoice.getSnapshot);
+  useFocusEffect(useCallback(() => { if (appMode === "local") resumeAutomaticChineseVoice(); }, [appMode]));
+  const swipe = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponderCapture: (_, gesture) => gesture.dx < -30 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.5,
+    onPanResponderRelease: (_, gesture) => { if (gesture.dx < -65) router.push("/menu"); },
+  }), [router]);
+  const interactionNotice = speech.notice && !/^(离线监听中|请说一句话)/.test(speech.notice) ? speech.notice : "";
+  const caption = robotSleeping ? (appMode === "local" ? "休息中" : t("home.wakeFromSleep")) : speech.phase === "loading" ? "正在准备…"
+    : speech.phase === "error" ? speech.notice || "语音暂不可用" : speech.phase === "speaking" ? "小丫在说话"
+    : speech.partial || (speech.phase === "listening" ? interactionNotice || "小丫 · 我在听" : "小丫");
+  return <SafeAreaView style={styles.home} {...swipe.panHandlers}>
+    <View style={styles.faceStage}>
+      <RobotFace mode="fullscreen" labelVisible={false}
+        onLongPress={() => router.push("/menu")}
+        onPress={() => {
+          if (robotSleeping) {
+            sleepTapAtRef.current = 0;
+            void wakeRobotFromFace().catch((error) => console.warn("[Home] Wake failed:", error));
+          } else handleAwakeFaceTap();
+        }} />
+    </View>
+    {appMode === "local" || robotSleeping ? <View pointerEvents="none" style={styles.caption}>
+      <Text numberOfLines={1} style={styles.captionText}>{caption}</Text>
+    </View> : <ConversationOverlay />}
+    {!robotSleeping && appMode === "legacy_realtime" ? <ImageOverlay /> : null}
+    <Pressable accessibilityRole="button" accessibilityLabel="打开菜单，也可以向左滑动" onPress={() => router.push("/menu")} style={styles.menuHandle}>
+      <Text style={styles.handle}>‹</Text>
+    </Pressable>
+  </SafeAreaView>;
 }
-
 const styles = StyleSheet.create({
-  home: {
-    flex: 1,
-    backgroundColor: looiTheme.bg,
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-  },
-  faceStage: {
-    width: "100%",
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  photoPickerButton: {
-    position: "absolute",
-    left: 18,
-    bottom: 18,
-    zIndex: 8,
-    width: 46,
-    height: 46,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: looiTheme.line,
-    backgroundColor: "rgba(3, 13, 24, 0.84)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  photoPickerButtonBusy: {
-    opacity: 0.58,
-  },
-  photoPickerIcon: {
-    fontSize: 21,
-    color: looiTheme.cyan,
-    fontWeight: "800",
-  },
-  robotReconnectButton: {
-    position: "absolute",
-    bottom: 18,
-    right: 18,
-    zIndex: 8,
-    minHeight: 44,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: looiTheme.line,
-    backgroundColor: "rgba(3, 13, 24, 0.84)",
-    paddingHorizontal: 13,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  robotReconnectButtonBusy: {
-    opacity: 0.62,
-  },
-  robotReconnectButtonConnected: {
-    borderColor: "rgba(77, 231, 180, 0.52)",
-  },
-  robotReconnectButtonError: {
-    borderColor: "rgba(255, 92, 122, 0.54)",
-  },
-  robotReconnectText: {
-    color: looiTheme.cyan,
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 0.2,
-  },
-  robotReconnectTextConnected: {
-    color: looiTheme.ok,
-  },
-  robotReconnectTextError: {
-    color: looiTheme.danger,
-  },
-  languagePicker: {
-    position: "absolute",
-    top: 18,
-    right: 18,
-    zIndex: 8,
-    flexDirection: "row",
-    gap: 6,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: looiTheme.line,
-    backgroundColor: "rgba(3, 13, 24, 0.84)",
-    padding: 5,
-  },
-  settingsButton: {
-    minWidth: 36,
-    minHeight: 36,
-    borderRadius: 13,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  settingsFallback: {
-    color: looiTheme.cyan,
-    fontSize: 18,
-  },
-  languageMenu: {
-    position: "absolute",
-    top: 44,
-    right: 0,
-    minWidth: 180,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: looiTheme.lineActive,
-    backgroundColor: "rgba(3, 13, 24, 0.97)",
-    padding: 5,
-    gap: 3,
-  },
-  languageMenuItem: {
-    minHeight: 36,
-    borderRadius: 10,
-    justifyContent: "center",
-    paddingHorizontal: 10,
-  },
-  languageMenuItemSelected: {
-    backgroundColor: "rgba(40, 213, 255, 0.16)",
-  },
-  languageMenuText: {
-    color: looiTheme.muted,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  languageMenuTextSelected: {
-    color: looiTheme.cyan,
-  },
-  languageButton: {
-    minWidth: 64,
-    height: 34,
-    borderRadius: 13,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 8,
-  },
-  languageButtonSelected: {
-    backgroundColor: looiTheme.cyan,
-  },
-  languageText: {
-    color: looiTheme.muted,
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 0.6,
-  },
-  languageTextSelected: {
-    color: looiTheme.bg,
-  },
-  sleepBadge: {
-    position: "absolute",
-    bottom: 34,
-    alignSelf: "center",
-    alignItems: "center",
-    gap: 3,
-    opacity: 0.62,
-  },
-  sleepTitle: {
-    color: looiTheme.cyan,
-    fontSize: 18,
-    fontWeight: "800",
-  },
-  sleepText: {
-    color: looiTheme.muted,
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  repairBanner: {
-    position: "absolute",
-    top: 34,
-    alignSelf: "center",
-    zIndex: 4,
-    minWidth: 300,
-    maxWidth: "86%",
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: looiTheme.lineActive,
-    backgroundColor: "rgba(3, 13, 24, 0.88)",
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    alignItems: "center",
-    gap: 4,
-  },
-  repairTitle: {
-    color: looiTheme.text,
-    fontSize: 15,
-    fontWeight: "800",
-  },
-  repairText: {
-    color: looiTheme.cyan,
-    fontSize: 12,
-    fontWeight: "700",
-  },
+  home: { flex: 1, backgroundColor: looiTheme.bg, alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  faceStage: { flex: 1, width: "100%", alignItems: "center", justifyContent: "center" },
+  caption: { position: "absolute", bottom: 20, left: "15%", right: "15%", alignItems: "center" },
+  captionText: { color: looiTheme.muted, fontSize: 13, opacity: 0.8 },
+  menuHandle: { position: "absolute", right: 0, top: "38%", bottom: "38%", width: 38, justifyContent: "center", alignItems: "center" },
+  handle: { color: looiTheme.muted, fontSize: 25, opacity: 0.35 },
 });

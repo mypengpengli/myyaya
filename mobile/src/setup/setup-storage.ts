@@ -16,6 +16,7 @@ type SetupStoragePayload = {
 };
 
 const SETUP_STORAGE_KEY = "looi.setup.v1";
+const ROBOT_ONBOARDING_KEY = "myyaya.companion-onboarding.v1";
 const setupStorage = createMMKV({ id: "looi.setup" });
 
 const defaultSetupState: SetupStoragePayload = {
@@ -101,5 +102,16 @@ export function setOnboardingCompleted(completed: boolean): SetupStoragePayload 
 
 export function resetSetupStorage(): void {
   setupStorage.remove(SETUP_STORAGE_KEY);
+  setupStorage.remove(ROBOT_ONBOARDING_KEY);
   for (const listener of modeListeners) listener();
+}
+
+/** A separate migration marker makes existing dashboard installs see the new guide once. */
+export function hasCompletedRobotOnboarding(): boolean {
+  return setupStorage.getString(ROBOT_ONBOARDING_KEY) === "1";
+}
+
+export function completeRobotOnboarding(): void {
+  setOnboardingCompleted(true);
+  setupStorage.set(ROBOT_ONBOARDING_KEY, "1");
 }

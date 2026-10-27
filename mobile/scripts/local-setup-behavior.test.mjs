@@ -73,10 +73,15 @@ const readiness = loadTs("src/setup/setup-readiness.ts", {
   "expo-audio": { getRecordingPermissionsAsync: async () => { micChecks += 1; return { granted: hasMic }; } },
 });
 let state = await readiness.computeSetupReadiness();
-assert.equal(state.requiredReady, true, "offline local UI must open without any legacy prerequisites");
+assert.equal(state.requiredReady, false, "fresh local installs must show robot setup, without requiring a cloud key");
 assert.equal(state.legacyVoiceReady, false, "local UI readiness is not permission to capture audio");
-assert.equal(state.nextStep, "done");
+assert.equal(state.nextStep, "permissions");
 assert.deepEqual([cloudChecks, modelChecks, micChecks], [0, 0, 0], "local setup must not inspect keys/models/audio permissions");
+storage.setOnboardingCompleted(true);
+assert.equal((await readiness.computeSetupReadiness()).requiredReady, false, "old dashboard completion does not skip the new guide");
+storage.completeRobotOnboarding();
+assert.equal((await readiness.computeSetupReadiness()).requiredReady, true, "the guide may finish with explicitly skipped optional capabilities");
+assert.equal((await readiness.computeSetupReadiness()).nextStep, "done");
 assert.equal(await readiness.isLegacyVoiceReady(), false);
 
 storage.setAppMode("legacy_realtime");
@@ -362,15 +367,16 @@ const conversationOverlay = () => {};
 const imageOverlay = () => {};
 const retainedConversation = { messages: [{ role: "user", content: "keep history" }], realtimeIssue: { kind: "no_credits" } };
 Object.assign(homeMocks, {
-  "react": { useCallback: (fn) => fn, useEffect() {}, useRef: (value) => ({ current: value }), useState: (value) => [typeof value === "function" ? value() : value, () => {}] },
+  "react": { useCallback: (fn) => fn, useEffect() {}, useMemo: (fn) => fn(), useSyncExternalStore: (_subscribe, snapshot) => snapshot(), useRef: (value) => ({ current: value }) },
   "react/jsx-runtime": { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) },
-  "react-native": { StyleSheet: { create: (styles) => styles }, View: "View", Text: "Text", Pressable: "Pressable" },
+  "react-native": { StyleSheet: { create: (styles) => styles }, PanResponder: { create: (handlers) => ({ panHandlers: handlers }) }, View: "View", Text: "Text", Pressable: "Pressable" },
   "react-native-safe-area-context": { SafeAreaView: "SafeAreaView" },
   "expo-router": { useRouter: () => ({}), useFocusEffect() {} },
   "@/src/setup/use-app-mode": { useAppMode: () => screenMode },
   "@/src/ui/ConversationOverlay": { ConversationOverlay: conversationOverlay },
   "@/src/ui/ImageOverlay": { ImageOverlay: imageOverlay },
   "@/src/ui/looi-theme": { looiTheme: {} },
+  "@/src/voice/chinese-voice-runtime": { chineseVoice: { getSnapshot: () => ({ phase: "off" }), subscribe() {} } },
   "@/src/device-tools/looi-robot": { getLooiRobotRuntimeState: () => ({}) },
   "@/src/store/user": { useUserStore: Object.assign((select) => select(userState), { getState: () => userState }) },
   "@/src/store/conversation": { useConversationStore: { getState: () => retainedConversation } },
@@ -384,6 +390,14 @@ const countType = (node, type) => !node ? 0 : Array.isArray(node)
   : typeof node === "object" ? Number(node.type === type) + countType(node.props?.children, type) : 0;
 assert.equal(countType(Home(), conversationOverlay), 0);
 assert.equal(countType(Home(), imageOverlay), 0);
+const localHome = Home();
+const renderedText = (node) => !node ? "" : Array.isArray(node) ? node.map(renderedText).join(" ")
+  : typeof node === "object" ? renderedText(node.props?.children) : String(node);
+assert.doesNotMatch(renderedText(localHome), /本地模式|底座控制|执行任务|开启中文口令|听写一句话|试听中文声音/,
+  "companion home must not expose the developer dashboard");
+const gestures = localHome.props;
+assert.equal(gestures.onMoveShouldSetPanResponderCapture(null, { dx: -80, dy: 3 }), true);
+assert.equal(gestures.onMoveShouldSetPanResponderCapture(null, { dx: -3, dy: 80 }), false, "vertical gestures do not open the menu");
 screenMode = "legacy_realtime";
 assert.equal(countType(Home(), conversationOverlay), 1, "legacy overlay remains available only in its selected mode");
 assert.equal(retainedConversation.messages[0].content, "keep history", "mode changes must not delete conversation history");

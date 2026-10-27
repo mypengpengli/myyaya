@@ -25,6 +25,7 @@ import { syncVoiceRuntime } from "@/src/core/app-bootstrap";
 import { useUserStore } from "@/src/store/user";
 import { useUiText } from "@/src/i18n/use-ui-text";
 import { INTERFACE_LANGUAGE_OPTIONS } from "@/src/i18n/ui-language";
+import { RobotOnboarding } from "@/src/setup/RobotOnboarding";
 import { getLocalizedModelDownloadStage, type UiStringKey } from "@/src/i18n/ui-strings";
 
 const setupSteps: { id: SetupStep; labelKey: UiStringKey | null }[] = [
@@ -62,6 +63,11 @@ async function requestMicrophoneAccess(deniedMessage: string): Promise<void> {
 }
 
 export default function OnboardingScreen() {
+  const appMode = useAppMode();
+  return appMode === "local" ? <RobotOnboarding /> : <LegacyOnboardingScreen />;
+}
+
+function LegacyOnboardingScreen() {
   const appMode = useAppMode();
   const router = useRouter();
   const params = useLocalSearchParams<{ step?: string }>();

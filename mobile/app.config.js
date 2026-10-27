@@ -9,8 +9,10 @@ module.exports = () => ({
   name: 'myyaya',
   slug: 'myyaya',
   scheme: 'myyaya',
-  plugins: [...(integrationBuild ? base.plugins.filter((plugin) => plugin !== './plugins/with-vosk-command-models') : base.plugins), './plugins/with-shared-android-toolchain', './plugins/with-chinese-voice-model'],
-  android: { ...base.android, package: 'io.github.mypengpengli.myyaya' },
+  plugins: [...(integrationBuild ? base.plugins.filter((plugin) => plugin !== './plugins/with-vosk-command-models') : base.plugins), './plugins/with-shared-android-toolchain', './plugins/with-chinese-voice-model', './plugins/with-companion-permissions'],
+  android: { ...base.android, package: 'io.github.mypengpengli.myyaya',
+    permissions: [...(base.android.permissions || []), 'android.permission.CAMERA', 'android.permission.RECORD_AUDIO', 'android.permission.ACCESS_COARSE_LOCATION'],
+  },
   ios: { ...base.ios, bundleIdentifier: 'io.github.mypengpengli.myyaya' },
   extra: {
     ...base.extra,

@@ -71,8 +71,8 @@ for (const file of ["src/voice/realtime-pcm-conversation.ts", "src/voice/realtim
   assert.match(source, /persistent: true/);
 }
 
-const home = readFileSync("app/(tabs)/index.tsx", "utf8");
-assert.match(home, /useUserStore\(\(state\) => state\.preferences\.language\)/);
-assert.match(home, /useUserStore\(\(state\) => state\.preferences\.listeningLanguage\)/);
+const settings = readFileSync("app/(tabs)/settings.tsx", "utf8");
+assert.match(settings, /RESPONSE_LANGUAGE_OPTIONS\.map/);
+assert.match(settings, /LISTENING_LANGUAGE_OPTIONS\.map/);
 
 console.log("v2.1.108 voice language switching regression: PASS");

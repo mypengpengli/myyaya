@@ -187,6 +187,23 @@ function RootLayoutNav() {
   const router = useRouter();
   const segments = useSegments();
   const currentRoot = String(segments[0] ?? '');
+  const onboardingVisible = currentRoot === 'onboarding';
+
+  // A menu/Settings/task view is still the same foreground companion app.
+  // One app-level owner keeps voice alive across those internal transitions.
+  useEffect(() => {
+    if (appMode !== 'local' || onboardingVisible) return;
+    let disposed = false;
+    let release: (() => void) | undefined;
+    void import('@/src/voice/chinese-voice-runtime').then(({ focusChineseVoiceScreen }) => {
+      if (!disposed) release = focusChineseVoiceScreen({ autoStart: true });
+    }).catch((error) => {
+      recordDiagnosticEvent('runtime', 'companion-voice-load-failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+    return () => { disposed = true; release?.(); };
+  }, [appMode, onboardingVisible]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -220,6 +237,8 @@ function RootLayoutNav() {
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+          <Stack.Screen name="menu" options={{ headerShown: false, animation: "slide_from_right" }} />
+          <Stack.Screen name="voice-settings" options={{ headerShown: false, animation: "slide_from_right" }} />
         </Stack>
       </View>
     </ThemeProvider>
