@@ -9,6 +9,7 @@
 - 首页移除本地模式、底座/任务入口和语音测试面板，改用左滑菜单；自动中文唤醒归前台 App 统一管理，菜单内切换不关闭，后台与休眠暂停，返回后恢复。
 - 修正 Android 12+ 附近设备授权与 manifest；扫描即时展示，兼容两路设备名与短 UUID，支持退出取消，并在连接前等待扫描释放。
 - 已补权限拒绝、旧权限 manifest 迁移、扫描/取消、前台恢复及迟到回调测试；TypeScript 与相关检查通过。Android 生产 JS/Hermes 字节码已成功导出（1,930 个模块）；这不是原生 APK 构建。Windows 上两项 Bash 测试交给 Linux CI，完整结果按实际运行记录。
+- 本轮代码 `510b42b` 的 [GitHub Actions 完整检查](https://github.com/mypengpengli/myyaya/actions/runs/40511949851) 已成功：包括类型、更新源、49 项主检查及运动、BLE、急停、悬崖和 PCM 检查。Windows 本地通过其中 47 项，另两项需要 Bash 的检查已在该 Ubuntu 流程通过。
 - 按用户选择本轮先改代码，手机稍后连接；尚未生成 2.1.153 APK，也未实测其蓝牙或唤醒。不把下面 2.1.152 的构建结果当作本轮已构建。当前执行环境未配置 Android SDK/JDK 及原发布签名，重新打包需使用原构建环境或恢复对应工具与签名。
 - 范围、唤醒实现和实机清单见 [COMPANION-UX.md](COMPANION-UX.md)。以下为历史发布记录。
 
