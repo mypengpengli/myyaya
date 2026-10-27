@@ -10,6 +10,9 @@ import { voiceRuntime } from "@/src/perceivers/voice-runtime";
 import { parseRealtimePhysicalCommand } from "@/src/voice/realtime-physical-command";
 import { parseRealtimeVisualCommand } from "@/src/voice/realtime-visual-command";
 import { syncVoiceRuntime } from "@/src/core/app-bootstrap";
+import { useAppMode } from "@/src/setup/use-app-mode";
+import { AppModeSelector } from "@/src/setup/AppModeSelector";
+import { HermesConnectionSettings } from "@/src/hermes/HermesConnectionSettings";
 import { recordDiagnosticEvent, clearDiagnosticLog, getDiagnosticLogEntries } from "@/src/diagnostics/diagnostic-log";
 import {
   chooseDiagnosticExportFolder,
@@ -102,6 +105,7 @@ type RobotUiState = {
 };
 
 export default function SettingsScreen() {
+  const appMode = useAppMode();
   const { preferences, updatePreferences } = useUserStore();
   const { language: interfaceLanguage, t } = useUiText();
   const [advanced, setAdvanced] = useState(false);
@@ -196,13 +200,15 @@ export default function SettingsScreen() {
   useFocusEffect(useCallback(() => {
     recordDiagnosticEvent("navigation", "settings-focused");
     void voiceRuntime.suspendMainScreenConversation("settings-focused");
-    refreshOpenAi();
-    void refreshOpenAiModels();
-    void refreshModels();
+    if (appMode === "legacy_realtime") {
+      refreshOpenAi();
+      void refreshOpenAiModels();
+      void refreshModels();
+    }
     void refreshMemory();
     void refreshRobot();
     return () => recordDiagnosticEvent("navigation", "settings-blurred");
-  }, [refreshMemory, refreshModels, refreshOpenAi, refreshOpenAiModels, refreshRobot]));
+  }, [appMode, refreshMemory, refreshModels, refreshOpenAi, refreshOpenAiModels, refreshRobot]));
 
   useEffect(() => subscribeLooiRobotRuntimeState(() => setRobotRuntime(getLooiRobotRuntimeState())), []);
 
@@ -492,8 +498,10 @@ export default function SettingsScreen() {
 
   return (
     <DeviceShell title={t("settings.title")} eyebrow="MY LOOI">
+      <AppModeSelector />
+      <HermesConnectionSettings />
       <View style={styles.summaryGrid}>
-        <Summary
+        {appMode === "legacy_realtime" ? <Summary
           label="OpenAI"
           value={!openAiKeyConfigured
             ? t("settings.summary.keyNeeded")
@@ -503,8 +511,8 @@ export default function SettingsScreen() {
                 ? t("settings.openAiStatus.invalid_key")
                 : t("settings.summary.keySaved")}
           ok={openAiKeyConfigured && openAiApiStatus.kind !== "no_credits" && openAiApiStatus.kind !== "invalid_key"}
-        />
-        <Summary label={t("settings.summary.local")} value={sharedReady ? t("settings.summary.localReady") : t("settings.summary.localCheck")} ok={sharedReady} />
+        /> : null}
+        {appMode === "legacy_realtime" ? <Summary label={t("settings.summary.local")} value={sharedReady ? t("settings.summary.localReady") : t("settings.summary.localCheck")} ok={sharedReady} /> : null}
         <Summary label={t("settings.summary.robot")} value={robotRuntime.connected ? t("settings.summary.robotConnected") : robotUi.saved ? t("settings.summary.robotSaved") : t("settings.summary.robotNone")} ok={robotRuntime.connected} neutral={!robotRuntime.connected} />
       </View>
 
@@ -517,7 +525,7 @@ export default function SettingsScreen() {
         <ButtonRow>{RESPONSE_LANGUAGE_OPTIONS.map((item) => <SmallChoice key={item.id} selected={preferences.language === item.id} label={item.shortLabel} onPress={() => updatePreferences({ language: item.id })} />)}</ButtonRow>
       </Section>
 
-      <Section title="OpenAI">
+      {appMode === "legacy_realtime" ? <Section title="OpenAI">
         <Text style={styles.help}>{t("settings.openAiHelp")}</Text>
         <TextInput value={openAiKeyInput} onChangeText={setOpenAiKeyInput} secureTextEntry autoCapitalize="none" autoCorrect={false} placeholder={openAiKeyConfigured ? t("settings.newKey") : "OpenAI API key"} placeholderTextColor={looiTheme.muted} style={styles.input} />
         <ButtonRow>
@@ -571,9 +579,9 @@ export default function SettingsScreen() {
           {openAiModelsResult ? <Text style={styles.result}>{openAiModelsResult}</Text> : null}
           <Text style={styles.help}>{t("settings.costDisclaimer")}</Text>
         </View>
-      </Section>
+      </Section> : null}
 
-      <Section title={t("settings.voice")}>
+      {appMode === "legacy_realtime" ? <Section title={t("settings.voice")}>
         <Text style={styles.help}>{t("settings.voiceHelp")}</Text>
         <DisclosureRow label={t("settings.voiceSelected", { voice: curatedVoices.find((voice) => voice.id === preferences.ttsVoiceId)?.name ?? preferences.ttsVoiceId })} expanded={voicesExpanded} onPress={() => setVoicesExpanded((value) => !value)} />
         {voicesExpanded ? <View style={styles.disclosureBody}>
@@ -591,12 +599,12 @@ export default function SettingsScreen() {
         <Text style={styles.label}>{t("settings.voiceOutputGain")}</Text>
         <Text style={styles.help}>{t("settings.voiceOutputGainHelp")}</Text>
         <ButtonRow>{VOICE_OUTPUT_GAIN_OPTIONS.map((gain) => <SmallChoice key={gain} selected={preferences.voiceOutputGain === gain} label={gain === 1 ? t("settings.voiceOutputGainNormal") : `+${Math.round((gain - 1) * 100)}%`} onPress={() => updatePreferences({ voiceOutputGain: gain })} />)}</ButtonRow>
-      </Section>
+      </Section> : null}
 
       <VoiceCommandsSettings />
       <FaceAppearanceSettings />
 
-      {(Boolean(modelStatus) && !sharedReady) || modelBusy || Boolean(modelError) ? <Section title={t("settings.localModels")}>
+      {appMode === "legacy_realtime" && ((Boolean(modelStatus) && !sharedReady) || modelBusy || Boolean(modelError)) ? <Section title={t("settings.localModels")}>
         <Text style={styles.help}>{t("settings.localModelsMissingHelp")}</Text>
         <ModelLine label={t("settings.sharedStt")} status={modelStatus?.asr} />
         <ModelLine label={t("settings.wakeWord")} status={modelStatus?.kws} />

@@ -43,7 +43,8 @@ assert.match(realtimeConfig, /REALTIME_UPLINK_GAIN = 2\.0/);
 
 const pcm = read("src/voice/realtime-pcm-conversation.ts");
 const pcmHash = crypto.createHash("sha256").update(pcm).digest("hex");
-assert.equal(pcmHash, "a22924f9c8e5da6e93bdf94e10a17a88bab43ccae732fb5fac82c19861313ced");
+// myyaya: intentional session-generation guards; covered by local-setup-behavior.test.mjs.
+assert.equal(pcmHash, "9cf0a88ee1c636c47c3a7cad6c604f8ec3c97ae648608f5267f0cfb12ef43c64");
 const nativePcm = read("modules/local-realtime-audio-capture/android/src/main/java/com/superlooi/localrealtimecapture/RealtimePcmAudioModule.kt");
 const nativeHash = crypto.createHash("sha256").update(nativePcm).digest("hex");
 assert.equal(nativeHash, "667938b5ce3c8c2991b23f1d24661ef5db914a504482ded186f570c1614d77cc");

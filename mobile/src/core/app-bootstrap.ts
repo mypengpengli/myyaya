@@ -19,6 +19,8 @@ import { removeRetiredExperimentalVoiceAssets } from "../voice/retired-experimen
 import { retireLegacyNetworkCredentials } from "./legacy-network-credentials-retirement";
 import { startAmbientMotionController, stopAmbientMotionController } from "./ambient-motion";
 import { startSocialAttentionController, stopSocialAttentionController } from "./social-attention";
+import { isLegacyVoiceReady } from "../setup/setup-readiness";
+import { getAppMode } from "../setup/setup-storage";
 
 let bootstrapped = false;
 let paused = false;
@@ -86,7 +88,7 @@ export async function bootstrapApp(): Promise<void> {
     startSocialAttentionController("bootstrap");
 
     // Prewarm STT model so first wakeword doesn't pay 1.2s cold-start penalty.
-    prewarmOfflineStt();
+    if (await isLegacyVoiceReady()) prewarmOfflineStt();
   }
 
   console.log("[Bootstrap] App initialized. Active perceivers:", perceiverManager.getRegisteredNames());
@@ -215,6 +217,11 @@ function enqueueRuntimeLifecycle(task: () => Promise<void>): Promise<void> {
 /** Retry wakeword startup after setup changed models or microphone access. */
 export async function syncVoiceRuntime(): Promise<void> {
   if (!bootstrapped || paused || useUserStore.getState().robotSleeping) return;
+  if (!await isLegacyVoiceReady()) {
+    await voiceRuntime.stop();
+    return;
+  }
+  await voiceRuntime.start();
   await voiceRuntime.sync();
   const [{ kwsAudioFeeder }, { wakewordService }] = await Promise.all([
     import("../voice/kws-audio-feeder"),
@@ -232,6 +239,7 @@ export async function syncVoiceRuntime(): Promise<void> {
 }
 
 async function startRuntimePerceivers(): Promise<void> {
+  if (!await isLegacyVoiceReady()) return;
   const startedAt = Date.now();
   try {
     const perceiverStartAt = Date.now();
@@ -400,7 +408,7 @@ function prewarmOfflineStt(): void {
   const delayMs = 12_000;
   recordDiagnosticEvent("performance", "offline-stt-prewarm-scheduled", { delayMs });
   setTimeout(() => {
-    if (paused || useUserStore.getState().robotSleeping) return;
+    if (paused || getAppMode() !== "legacy_realtime" || useUserStore.getState().robotSleeping) return;
     const startedAt = Date.now();
     void recordPerformanceSnapshot("before-offline-stt-prewarm");
     void import("../voice/stt")
@@ -424,6 +432,7 @@ function prewarmOfflineStt(): void {
 
 
 function runOptInLiveVoiceAcceptanceOnBoot(): void {
+  if (getAppMode() !== "legacy_realtime") return;
   if (process.env.EXPO_PUBLIC_LOOI_RUN_LIVE_VOICE_ACCEPTANCE_ON_BOOT !== "1") return;
 
   void runLiveVoiceAcceptanceSequence().catch((error) => {
@@ -432,6 +441,7 @@ function runOptInLiveVoiceAcceptanceOnBoot(): void {
 }
 
 function runOptInOwnerEnrollmentOnBoot(): void {
+  if (getAppMode() !== "legacy_realtime") return;
   if (process.env.EXPO_PUBLIC_LOOI_ENROLL_OWNER_ON_BOOT !== "1") return;
 
   ownerEnrollmentPromise = runOwnerEnrollmentSequence().catch((error) => {

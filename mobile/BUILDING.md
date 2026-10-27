@@ -8,7 +8,7 @@
 - Android SDK 36
 - Android build-tools 36.0.0
 
-The standalone Android application ID is `io.github.razor79.mylooi`.
+The upstream Android application ID is `io.github.razor79.mylooi`. This fork's `app.config.js` overrides the final ID to `io.github.mypengpengli.myyaya`; verify the resolved Expo configuration before building. Fork-specific scope and acceptance criteria are in [the APK development plan](../docs/APK-DEVELOPMENT-PLAN.md).
 
 ## Install and validate
 

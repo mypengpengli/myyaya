@@ -6,14 +6,14 @@
 
 用户在[最新分享对话](https://chatgpt.com/share/6adf4c3e-e364-83e9-a865-a9f99f4e4150)中明确表示改用自己的小米 12 Pro（已升级澎湃 OS 3），并已下单 LOOI。项目计划开发可自定义模型与工具的 Android 应用，通过 BLE 接入底座；到货与实机情况尚待确认。
 
-此前读取的旧分享只包含早期 K50 / ESP32 讨论。本次已读取新的完整分享页，并据此纠正开发手机与扩展方向。用户已经作出的决定与对话中其他助手提出的建议分别记录，细节见 [PLAN.md](PLAN.md)。
+此前读取的旧分享只包含早期 K50 / ESP32 讨论。仓库 2026-10-26 的整理记录已读取新的完整分享页，并据此纠正开发手机与扩展方向。2026-10-27 用户确认 LOOI 即将到货、小米 12 Pro 已更新澎湃 OS 3；本次未重新完整读取分享原文，访问限制见 [APK 方案补充](APK-DEVELOPMENT-PLAN.md)。用户已经作出的决定与对话中其他助手提出的建议分别记录，细节见 [PLAN.md](PLAN.md)。
 
 ## 资料与用途
 
 | 来源 | 本次核实内容 | 对 myyaya 的用途 |
 | --- | --- | --- |
 | [LOOI 官方产品页](https://looirobot.com/products/looi-robot) | 厂商将手机作为交互主体，展示底座运动与传感等产品功能 | 核对购买型号、官方 App 的硬件基线与固定/供电条件 |
-| [GrinZero/super-looi](https://github.com/GrinZero/super-looi) | 包含 React Native / Expo 应用、服务端以及早期 TypeScript BLE SDK | 候选应用架构与底座适配参考，尚未选定或集成 |
+| [GrinZero/super-looi](https://github.com/GrinZero/super-looi) | 包含 React Native / Expo 应用、服务端以及早期 TypeScript BLE SDK | 架构与底座适配参考；当前已导入其衍生 My LOOI，未将此仓库另行集成 |
 | [社区 SDK 文档](https://github.com/GrinZero/super-looi/blob/main/packages/looi-sdk/README.md) | 描述移动、停止、头部位置、灯光、底座状态回调和原始 BLE 写入接口；标明早期版本 | 用于设计受控的连接与动作验证，不视为实机已通过 |
 | [razor79/my-looi](https://github.com/razor79/my-looi) | 非官方 Android 应用，提供语音、手机本地记忆与 BLE 控制，常规使用不要求配套后端 | 可研究 Android 与 BLE 生命周期；其现有模型路径不等于已支持本项目的 NewAPI / Hermes |
 

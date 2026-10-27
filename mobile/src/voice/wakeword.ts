@@ -1,4 +1,5 @@
 import { recordDiagnosticEvent } from "../diagnostics/diagnostic-log";
+import { getAppMode } from "../setup/setup-storage";
 import { triggerCharacterReaction } from "../character/character-reaction";
 import {
   getLooiRobotRuntimeState,
@@ -56,8 +57,10 @@ export class WakewordService {
   private voskPrewarmTimer: ReturnType<typeof setTimeout> | null = null;
 
   async start(): Promise<void> {
+    if (getAppMode() !== "legacy_realtime") return;
     if (!this.listening) {
       const { wakePhraseFallback } = await import("./wake-phrase-fallback");
+      if (getAppMode() !== "legacy_realtime") return;
       wakePhraseFallback.start();
       this.listening = true;
       this._state = "listening";

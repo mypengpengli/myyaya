@@ -93,6 +93,7 @@ export class RealtimeConversationService {
   private bargeInAssistTimer: ReturnType<typeof setInterval> | null = null;
   private bargeInAssistRestoreTimer: ReturnType<typeof setTimeout> | null = null;
   private active = false;
+  private sessionGeneration = 0;
   private configured = false;
   private generationActive = false;
   private playbackActive = false;
@@ -221,14 +222,19 @@ export class RealtimeConversationService {
   }
 
   async start(detection?: WakewordDetection): Promise<void> {
+    const requestedGeneration = this.sessionGeneration;
     if (this.stopPromise) await this.stopPromise;
+    if (requestedGeneration !== this.sessionGeneration) return;
     if (this.speakerRouteRestorePromise) await this.speakerRouteRestorePromise;
+    if (requestedGeneration !== this.sessionGeneration) return;
     if (this.active || this.stopping) return;
     if (this.lastStopReason !== "vad-health-recovery") {
       this.vadHealthRecoveryAttempts = 0;
     }
     this.lastStopReason = null;
     this.active = true;
+    const generation = ++this.sessionGeneration;
+    const isCurrent = () => this.active && generation === this.sessionGeneration;
     this.configured = false;
     this.generationActive = false;
     this.playbackActive = false;
@@ -301,6 +307,7 @@ export class RealtimeConversationService {
       // restore the exact same feeder when Realtime ends.
       const gateWasClosed = !kwsAudioFeeder.diagnosticStatus.appCaptureAllowed;
       await setIsAudioActiveAsync(true);
+      if (!isCurrent()) return;
       kwsAudioFeeder.setAppCaptureAllowed(true);
       if (gateWasClosed) {
         recordDiagnosticEvent("realtime", "foreground-audio-gate-recovered");
@@ -318,7 +325,7 @@ export class RealtimeConversationService {
       // mint an ephemeral Realtime client secret; SDP then authenticates with
       // that short-lived secret. No intermediary application backend participates.
       const clientSecret = await createOpenAiRealtimeClientSecret(sessionConfig);
-      if (!this.active) return;
+      if (!isCurrent()) return;
       recordDiagnosticEvent("realtime", "ephemeral-secret-created", {
         expiresAt: clientSecret.expiresAt,
         persisted: false,
@@ -340,10 +347,10 @@ export class RealtimeConversationService {
       });
       kwsAudioFeeder.setWakewordFeedingEnabled(false);
       await wakewordService.stop();
-      if (!this.active) return;
+      if (!isCurrent()) return;
       const fallbackIdleStartedAt = Date.now();
       await wakewordService.waitForFallbackIdle();
-      if (!this.active) return;
+      if (!isCurrent()) return;
       recordDiagnosticEvent("realtime", "entry-wake-quiesce-finished", {
         durationMs: Date.now() - wakeQuiesceStartedAt,
         fallbackIdleWaitMs: Date.now() - fallbackIdleStartedAt,
@@ -354,7 +361,7 @@ export class RealtimeConversationService {
 
       this.finalizeStartupPrerollCapture();
       await kwsAudioFeeder.stop();
-      if (!this.active) return;
+      if (!isCurrent()) return;
       recordDiagnosticEvent("realtime", "classic-capture-released", {
         feederRunning: kwsAudioFeeder.isRunning,
         wakewordListening: wakewordService.isListening,
@@ -366,7 +373,7 @@ export class RealtimeConversationService {
       // Classic capture a short, deterministic release barrier before asking
       // WebRTC to acquire the microphone again.
       await waitMs(WEBRTC_CAPTURE_RELEASE_SETTLE_MS);
-      if (!this.active) return;
+      if (!isCurrent()) return;
       recordDiagnosticEvent("realtime", "webrtc-capture-acquire-settled", {
         delayMs: WEBRTC_CAPTURE_RELEASE_SETTLE_MS,
         feederRunning: kwsAudioFeeder.isRunning,
@@ -380,7 +387,7 @@ export class RealtimeConversationService {
         const elapsedMs = Math.max(0, Date.now() - this.lastWebRtcMediaTeardownAt);
         const remainingMs = Math.max(0, WEBRTC_MEDIA_TEARDOWN_SETTLE_MS - elapsedMs);
         if (remainingMs > 0) await waitMs(remainingMs);
-        if (!this.active) return;
+        if (!isCurrent()) return;
         recordDiagnosticEvent("realtime", "webrtc-media-teardown-settle-before-start", {
           elapsedBeforeWaitMs: elapsedMs,
           waitedMs: remainingMs,
@@ -396,12 +403,12 @@ export class RealtimeConversationService {
       // This is the last routing-order A/B before instrumenting actual AEC.
       if (Platform.OS === "android") {
         const beforeRoute = await getRealtimeAudioRouteStatus();
-        if (!this.active) return;
+        if (!isCurrent()) return;
         this.recordAudioRoute("before-activation", beforeRoute, "before-get-user-media");
 
         if (beforeRoute.supported) {
           const preparedRoute = await activateRealtimeSpeakerRoute();
-          if (!this.active) return;
+          if (!isCurrent()) return;
           this.speakerRouteActive = preparedRoute.active && preparedRoute.speakerSelected;
           this.recordAudioRoute("activated", preparedRoute, "before-get-user-media");
           if (!preparedRoute.modeMatchesCommunication || !preparedRoute.speakerSelected) {
@@ -411,9 +418,9 @@ export class RealtimeConversationService {
           }
 
           await waitMs(WEBRTC_COMMUNICATION_ROUTE_SETTLE_MS);
-          if (!this.active) return;
+          if (!isCurrent()) return;
           const settledRoute = await getRealtimeAudioRouteStatus();
-          if (!this.active) return;
+          if (!isCurrent()) return;
           this.speakerRouteActive = settledRoute.active && settledRoute.speakerSelected;
           this.recordAudioRoute("verified", settledRoute, "before-get-user-media-settled");
           recordDiagnosticEvent("realtime", "webrtc-communication-speaker-route-settled", {
@@ -444,8 +451,9 @@ export class RealtimeConversationService {
         audio: WEBRTC_AUDIO_CONSTRAINTS as any,
         video: false,
       });
-      if (!this.active) {
+      if (!isCurrent()) {
         for (const track of localStream.getTracks()) track.stop();
+        peerConnection.close();
         return;
       }
       this.localStream = localStream;
@@ -481,7 +489,7 @@ export class RealtimeConversationService {
       // rather than repairing the route after capture and changing topology.
       if (Platform.OS === "android") {
         const postCaptureRoute = await getRealtimeAudioRouteStatus();
-        if (!this.active) return;
+        if (!isCurrent()) return;
         this.recordAudioRoute("verified", postCaptureRoute, "local-audio-ready-read-only");
         if (
           postCaptureRoute.supported &&
@@ -498,11 +506,13 @@ export class RealtimeConversationService {
       this.bindDataChannel(dataChannel);
 
       const offer = await peerConnection.createOffer();
+      if (!isCurrent()) return;
       const offerSdp = String(offer.sdp ?? "");
       recordDiagnosticEvent("realtime", "webrtc-offer-created", {
         sdpLength: offerSdp.length,
       });
       await peerConnection.setLocalDescription(offer);
+      if (!isCurrent()) return;
       recordDiagnosticEvent("realtime", "webrtc-local-description-set", {
         signalingState: String(peerConnection.signalingState ?? "unknown"),
       });
@@ -511,7 +521,7 @@ export class RealtimeConversationService {
       // createOffer(), preserve the returned SDP byte-for-byte, and wrap the
       // answer in react-native-webrtc's native RTCSessionDescription object.
       const answerSdp = await exchangeOpenAiRealtimeSdp(clientSecret.value, offerSdp);
-      if (!this.active) return;
+      if (!isCurrent()) return;
       recordDiagnosticEvent("realtime", "webrtc-answer-received", {
         sdpLength: answerSdp.length,
         endsWithCrLf: answerSdp.endsWith("\r\n"),
@@ -519,14 +529,15 @@ export class RealtimeConversationService {
       });
       const remoteAnswer = new RTCSessionDescription({ type: "answer", sdp: answerSdp });
       await peerConnection.setRemoteDescription(remoteAnswer);
+      if (!isCurrent()) return;
       recordDiagnosticEvent("realtime", "webrtc-remote-description-set", {
         signalingState: String(peerConnection.signalingState ?? "unknown"),
       });
 
       await this.waitForDataChannelOpen(dataChannel);
-      if (!this.active) return;
+      if (!isCurrent()) return;
       await this.ensureSpeakerRoute("data-channel-open");
-      if (!this.active) return;
+      if (!isCurrent()) return;
 
       // The client secret was minted with this configuration already. Updating
       // once more after the data channel opens gives us an explicit
@@ -540,6 +551,7 @@ export class RealtimeConversationService {
       });
       this.startWebRtcAudioStats();
     } catch (error) {
+      if (!isCurrent()) return;
       recordDiagnosticEvent("realtime", "session-start-failed", {
         error: error instanceof Error ? error.message : String(error),
       });
@@ -586,6 +598,7 @@ export class RealtimeConversationService {
   }
 
   async stop(reason = "explicit"): Promise<void> {
+    this.sessionGeneration += 1;
     if (this.stopPromise) return this.stopPromise;
     if (!this.active && !this.peerConnection && !this.dataChannel) return;
     const stopPromise = this.performStop(reason);
@@ -926,8 +939,9 @@ export class RealtimeConversationService {
   }
 
   private bindPeerConnection(peerConnection: LoosePeerConnection): void {
+    const generation = this.sessionGeneration;
     peerConnection.ontrack = (event: any) => {
-      if (!this.active) return;
+      if (!this.active || generation !== this.sessionGeneration) return;
       const tracks = event?.streams?.[0]?.getAudioTracks?.() ?? (event?.track ? [event.track] : []);
       for (const track of tracks) {
         try { track.enabled = true; } catch {}
@@ -946,14 +960,14 @@ export class RealtimeConversationService {
       void this.ensureSpeakerRoute("remote-audio-track");
     };
     peerConnection.onconnectionstatechange = () => {
-      if (!this.active) return;
+      if (!this.active || generation !== this.sessionGeneration) return;
       const state = String(peerConnection.connectionState ?? "unknown");
       recordDiagnosticEvent("realtime", "webrtc-connection-state", { state });
       if (state === "connected") void this.ensureSpeakerRoute("connection-connected");
       if (state === "failed" || state === "closed") void this.stop(`webrtc-${state}`);
     };
     peerConnection.oniceconnectionstatechange = () => {
-      if (!this.active) return;
+      if (!this.active || generation !== this.sessionGeneration) return;
       recordDiagnosticEvent("realtime", "webrtc-ice-state", {
         state: String(peerConnection.iceConnectionState ?? "unknown"),
       });
@@ -961,17 +975,18 @@ export class RealtimeConversationService {
   }
 
   private bindDataChannel(dataChannel: LooseDataChannel): void {
+    const generation = this.sessionGeneration;
     dataChannel.onmessage = (message: any) => {
       const event = safeJsonParse(message?.data);
-      if (!event || !this.active) return;
+      if (!event || !this.active || generation !== this.sessionGeneration) return;
       void this.handleEvent(event);
     };
     dataChannel.onerror = () => {
-      if (!this.active) return;
+      if (!this.active || generation !== this.sessionGeneration) return;
       recordDiagnosticEvent("realtime", "data-channel-error");
     };
     dataChannel.onclose = () => {
-      if (!this.active || this.stopping) return;
+      if (!this.active || this.stopping || generation !== this.sessionGeneration) return;
       recordDiagnosticEvent("realtime", "data-channel-closed");
       void this.stop("data-channel-closed");
     };

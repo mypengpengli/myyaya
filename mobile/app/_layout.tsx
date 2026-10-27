@@ -13,6 +13,7 @@ import { useColorScheme } from '@/components/useColorScheme';
 import { useUserStore } from '@/src/store/user';
 import { markRobotInteraction, startRobotInactivityTimer, stopRobotInactivityTimer } from '@/src/core/robot-inactivity';
 import { recordDiagnosticEvent } from '@/src/diagnostics/diagnostic-log';
+import { useAppMode } from '@/src/setup/use-app-mode';
 import { startPerformanceMonitor, stopPerformanceMonitor } from '@/src/diagnostics/performance-monitor';
 import {
   cancelBackgroundHardExit,
@@ -179,6 +180,7 @@ function ActiveRobotKeepAwake() {
 }
 
 function RootLayoutNav() {
+  const appMode = useAppMode();
   const colorScheme = useColorScheme();
   const router = useRouter();
   const segments = useSegments();
@@ -207,7 +209,7 @@ function RootLayoutNav() {
     return () => {
       cancelled = true;
     };
-  }, [currentRoot, router]);
+  }, [appMode, currentRoot, router]);
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>

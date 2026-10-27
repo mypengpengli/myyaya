@@ -1,10 +1,7 @@
-import { getRecordingPermissionsAsync } from "expo-audio";
-
 import { getLooiRobotRuntimeState } from "@/src/device-tools/looi-robot";
 import { getSavedLooiRobot } from "@/src/device-tools/looi-robot-autoconnect";
-import { hasOpenAiApiKey } from "@/src/openai/openai-api-key";
-import { checkAllSherpaModelReadiness, type SherpaModelCheck } from "@/src/voice/sherpa-models";
-import { getSetupStorageState, type SetupSkipState } from "./setup-storage";
+import type { SherpaModelCheck } from "@/src/voice/sherpa-models";
+import { getAppMode, getSetupStorageState, type AppMode, type SetupSkipState } from "./setup-storage";
 
 export type SetupStep = "openai" | "models" | "permissions" | "done";
 
@@ -16,6 +13,8 @@ export type SetupModelReadiness = {
 };
 
 export type SetupReadiness = {
+  appMode: AppMode;
+  legacyVoiceReady: boolean;
   openAiKeyConfigured: boolean;
   modelsReady: boolean;
   modelStatus: SetupModelReadiness | null;
@@ -33,6 +32,20 @@ export function areSherpaModelsReady(status: SetupModelReadiness): boolean {
 
 export async function computeSetupReadiness(): Promise<SetupReadiness> {
   const storageState = getSetupStorageState();
+  if (storageState.appMode === "local") {
+    // Opening the local UI must not load models, inspect a cloud key or ask for
+    // recording access. Individual local features request their own permissions.
+    return {
+      appMode: "local", legacyVoiceReady: false,
+      openAiKeyConfigured: false, modelsReady: false, modelStatus: null,
+      microphoneReady: false, robotReady: await getRobotReady(),
+      skipped: storageState.skipped, onboardingCompleted: storageState.onboardingCompleted,
+      requiredReady: true, nextStep: "done",
+    };
+  }
+  const [{ hasOpenAiApiKey }, { checkAllSherpaModelReadiness }] = await Promise.all([
+    import("@/src/openai/openai-api-key"), import("@/src/voice/sherpa-models"),
+  ]);
   const [openAiKeyConfigured, modelResult, microphoneReady, robotReady] = await Promise.all([
     hasOpenAiApiKey(),
     checkAllSherpaModelReadiness().catch((error) => {
@@ -47,6 +60,8 @@ export async function computeSetupReadiness(): Promise<SetupReadiness> {
   const requiredReady = openAiKeyConfigured && modelsReady && microphoneReady;
 
   return {
+    appMode: storageState.appMode,
+    legacyVoiceReady: requiredReady,
     openAiKeyConfigured,
     modelsReady,
     modelStatus: modelResult,
@@ -57,6 +72,17 @@ export async function computeSetupReadiness(): Promise<SetupReadiness> {
     requiredReady,
     nextStep: getNextSetupStep({ openAiKeyConfigured, modelsReady, microphoneReady }),
   };
+}
+
+export async function isLegacyVoiceReady(): Promise<boolean> {
+  if (getAppMode() !== "legacy_realtime") return false;
+  try {
+    const readiness = await computeSetupReadiness();
+    return getAppMode() === "legacy_realtime" && readiness.legacyVoiceReady;
+  } catch (error) {
+    console.warn("[Setup] Legacy voice readiness failed:", error);
+    return false;
+  }
 }
 
 function getNextSetupStep(state: {
@@ -72,6 +98,7 @@ function getNextSetupStep(state: {
 
 async function getMicrophoneReady(): Promise<boolean> {
   try {
+    const { getRecordingPermissionsAsync } = await import("expo-audio");
     const permission = await getRecordingPermissionsAsync();
     return Boolean(permission.granted);
   } catch (error) {

@@ -1,4 +1,5 @@
 import { recordDiagnosticEvent } from "../diagnostics/diagnostic-log";
+import { getAppMode } from "../setup/setup-storage";
 import { getLooiRobotRuntimeState } from "../device-tools/looi-robot";
 import { isDrivingControlSessionActive } from "./driving-control-session";
 
@@ -106,7 +107,7 @@ export class KwsAudioFeeder {
   private lastPcmAt = 0;
 
   async start(): Promise<void> {
-    if (!this.appCaptureAllowed) {
+    if (!this.appCaptureAllowed || getAppMode() !== "legacy_realtime") {
       this.desiredRunning = false;
       recordDiagnosticEvent("microphone", "feeder-start-blocked", {
         reason: "app-audio-gate-closed",
@@ -230,7 +231,7 @@ export class KwsAudioFeeder {
   private async startInternal(): Promise<void> {
     const startRequestedAt = Date.now();
     try {
-      if (!this.desiredRunning || !this.appCaptureAllowed) return;
+      if (!this.desiredRunning || !this.appCaptureAllowed || getAppMode() !== "legacy_realtime") return;
 
       const AudioStudioModule = await getAudioStudioModule();
       const permissions = await AudioStudioModule.getPermissionsAsync?.() as
@@ -239,7 +240,7 @@ export class KwsAudioFeeder {
       if (!permissions?.granted) {
         throw new Error("Microphone permission not granted; wakeword feeder not started");
       }
-      if (!this.desiredRunning || !this.appCaptureAllowed) return;
+      if (!this.desiredRunning || !this.appCaptureAllowed || getAppMode() !== "legacy_realtime") return;
 
       this.listener = AudioStudioModule.addListener(
         "AudioData",
@@ -249,7 +250,7 @@ export class KwsAudioFeeder {
       );
 
       await AudioStudioModule.prepareRecording(recordingConfig);
-      if (!this.desiredRunning || !this.appCaptureAllowed) {
+      if (!this.desiredRunning || !this.appCaptureAllowed || getAppMode() !== "legacy_realtime") {
         this.listener?.remove();
         this.listener = null;
         return;
@@ -267,7 +268,7 @@ export class KwsAudioFeeder {
         startLatencyMs: this.recordingStartedAt - startRequestedAt,
       });
 
-      if (!this.desiredRunning || !this.appCaptureAllowed) {
+      if (!this.desiredRunning || !this.appCaptureAllowed || getAppMode() !== "legacy_realtime") {
         await this.stopInternal();
       }
     } catch (error) {

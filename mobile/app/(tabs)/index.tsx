@@ -5,9 +5,11 @@ import {
 import {
   getLooiRobotRuntimeState,
   performLooiCharacterReaction,
+  stopLooiMotion,
   subscribeLooiRobotRuntimeState,
 } from "@/src/device-tools/looi-robot";
 import { voiceRuntime } from "@/src/perceivers/voice-runtime";
+import { useAppMode } from "@/src/setup/use-app-mode";
 import {
   computeSetupReadiness,
   type SetupReadiness,
@@ -43,6 +45,7 @@ function shortLanguage(language: "ru" | "uk" | "en"): string {
 }
 
 export default function IndexScreen() {
+  const appMode = useAppMode();
   const router = useRouter();
   const [languageMenu, setLanguageMenu] = useState<"listening" | "response" | null>(null);
   const [readiness, setReadiness] = useState<SetupReadiness | null>(null);
@@ -84,7 +87,7 @@ export default function IndexScreen() {
         reason: returningFromNavigation ? "navigation-return" : "initial",
       });
 
-      if (!useUserStore.getState().robotSleeping) {
+      if (appMode === "legacy_realtime" && !useUserStore.getState().robotSleeping) {
         if (returningFromNavigation) {
           // Returning from Settings/another in-app route is an attention signal
           // just like fresh launch. Do not require Луи/Макс or a face tap.
@@ -109,7 +112,7 @@ export default function IndexScreen() {
           console.warn("[Home] Failed to suspend Realtime on main blur:", error);
         });
       };
-    }, [])
+    }, [appMode])
   );
 
   useEffect(() => {
@@ -124,9 +127,9 @@ export default function IndexScreen() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [appMode]);
 
-  const repairStep = readiness?.modelsReady === false ? "models" : null;
+  const repairStep = appMode === "legacy_realtime" && readiness?.modelsReady === false ? "models" : null;
 
   const connectRobot = useCallback(async () => {
     const current = getLooiRobotRuntimeState();
@@ -179,6 +182,16 @@ export default function IndexScreen() {
   }, []);
 
   const handleAwakeFaceTap = useCallback(() => {
+    if (appMode === "local") {
+      if (getLooiRobotRuntimeState().motionActive || isDrivingControlSessionActive()) {
+        void stopLooiMotion("local-face-tap-stop").catch((error) => {
+          console.warn("[Home] Local touch stop failed:", error);
+        });
+        return;
+      }
+      triggerCharacterReaction("startled", { durationMs: 520, source: "local-face-tap" });
+      return;
+    }
     const current = getLooiRobotRuntimeState();
     const voiceState = useUserStore.getState().voiceState;
     const conversation = useConversationStore.getState();
@@ -267,7 +280,7 @@ export default function IndexScreen() {
         runIdlePhysicalReaction("angry");
       })();
     }, 280);
-  }, [runIdlePhysicalReaction]);
+  }, [appMode, runIdlePhysicalReaction]);
 
   const robotConnectionMode = robotRuntimeState.connecting
     ? "connecting"
@@ -311,22 +324,22 @@ export default function IndexScreen() {
         </Pressable>
       ) : null}
       <View style={styles.languagePicker}>
-        <Pressable
+        {appMode === "legacy_realtime" ? <Pressable
           accessibilityRole="button"
           accessibilityLabel={t("home.listeningLanguageA11y", { language: listeningLanguage })}
           onPress={() => setLanguageMenu((value) => value === "listening" ? null : "listening")}
           style={styles.languageButton}
         >
           <Text style={styles.languageText}>🎙 {shortLanguage(listeningLanguage)} ▾</Text>
-        </Pressable>
-        <Pressable
+        </Pressable> : null}
+        {appMode === "legacy_realtime" ? <Pressable
           accessibilityRole="button"
           accessibilityLabel={t("home.responseLanguageA11y", { language: responseLanguage })}
           onPress={() => setLanguageMenu((value) => value === "response" ? null : "response")}
           style={styles.languageButton}
         >
           <Text style={styles.languageText}>🔊 {shortLanguage(responseLanguage)} ▾</Text>
-        </Pressable>
+        </Pressable> : null}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t("home.settingsA11y")}
@@ -384,6 +397,10 @@ export default function IndexScreen() {
         ) : null}
       </View>
       <View style={styles.faceStage}>
+        {appMode === "local" ? <View pointerEvents="none" style={styles.repairBanner}>
+          <Text style={styles.repairTitle}>本地模式</Text>
+          <Text style={styles.repairText}>无需 OpenAI Key · 语音和 Pi / NewAPI 尚未启用</Text>
+        </View> : null}
         {repairStep ? (
           <Pressable
             accessibilityRole="button"
@@ -398,7 +415,7 @@ export default function IndexScreen() {
             <Text style={styles.repairText}>{t("home.repairModels")}</Text>
           </Pressable>
         ) : null}
-        {!robotSleeping ? (
+        {!robotSleeping && appMode === "legacy_realtime" ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t("home.choosePhotosA11y")}
@@ -430,8 +447,8 @@ export default function IndexScreen() {
           </View>
         ) : null}
       </View>
-      {!robotSleeping ? <ConversationOverlay /> : null}
-      {!robotSleeping ? <ImageOverlay /> : null}
+      {!robotSleeping && appMode === "legacy_realtime" ? <ConversationOverlay /> : null}
+      {!robotSleeping && appMode === "legacy_realtime" ? <ImageOverlay /> : null}
     </SafeAreaView>
   );
 }

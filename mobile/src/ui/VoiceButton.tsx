@@ -5,6 +5,7 @@ import { useConversationStore } from "../store/conversation";
 import { useUserStore } from "../store/user";
 import { looiTheme } from "./looi-theme";
 import { useUiText } from "@/src/i18n/use-ui-text";
+import { useAppMode } from "../setup/use-app-mode";
 
 async function getVoicePerceiver() {
   const { voiceRuntime } = await import("../perceivers/voice-runtime");
@@ -12,6 +13,7 @@ async function getVoicePerceiver() {
 }
 
 export function VoiceButton() {
+  const appMode = useAppMode();
   const isListening = useConversationStore((s) => s.isListening);
   const isProcessing = useConversationStore((s) => s.isProcessing);
   const voiceState = useUserStore((s) => s.voiceState);
@@ -19,7 +21,7 @@ export function VoiceButton() {
   const scale = useSharedValue(1);
   const pressTriggeredVoiceRef = useRef(false);
 
-  const disabled = isProcessing || voiceState === "speaking";
+  const disabled = appMode !== "legacy_realtime" || isProcessing || voiceState === "speaking";
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
   }));
@@ -59,7 +61,7 @@ export function VoiceButton() {
     }
   };
 
-  const label = isListening
+  const label = appMode === "local" ? "本地模式未开启语音；可在设置中选择旧版 Realtime" : isListening
     ? t("voiceButton.release")
     : isProcessing
       ? t("voiceButton.processing")

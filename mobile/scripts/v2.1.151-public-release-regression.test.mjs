@@ -25,7 +25,8 @@ assert.equal(
   crypto.createHash("sha256")
     .update(read("src/voice/realtime-pcm-conversation.ts"))
     .digest("hex"),
-  "a22924f9c8e5da6e93bdf94e10a17a88bab43ccae732fb5fac82c19861313ced"
+  // myyaya: intentional session-generation guards; behavior is covered by local-setup-behavior.test.mjs.
+  "9cf0a88ee1c636c47c3a7cad6c604f8ec3c97ae648608f5267f0cfb12ef43c64"
 );
 
 assert.equal(

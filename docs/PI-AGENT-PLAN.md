@@ -4,6 +4,10 @@
 
 本方案承接 [总体需求](PLAN.md)，保留小米 12 Pro / 澎湃 OS 3 + LOOI + 自有 Android APK，采用 Pi 作为任务理解和工具调用的核心。接口实测单独记录在 [模型测试记录](MODEL-PROBE-2026-10-26.md)。
 
+2026-10-27 补充：[APK 开工方案](APK-DEVELOPMENT-PLAN.md)将本方案细化为手机基线、媒体工具和 Pi 对话三批验收，补充 V1 手机桥、取消/恢复语义及源码中音视频和后台退出的实际约束；新增协议仍为开发草案。
+
+同日用户新增的媒体交互、固定唤醒、童声、任务框与导航需求见 [产品基线](PRODUCT-REQUIREMENTS.md)。语言选型、Viewer、异步 JobWorker、Hermes 能力发现和新 S0–S6 顺序以 [修订架构](ARCHITECTURE.md)为准；本文件的 P0–P7 保留作技术工作分解。上游 Key 门槛已在源码修复，新版 Pi 会话仍未实现。
+
 ## 1. 结论与运行位置
 
 已有需求中，中文问答、手机录像与播放、看图、长期记忆、内容展示、服务器任务和 APK 在线升级具有明确实施路径。人脸身份、中文昵称唤醒和转向看人需要专项实测；“过来”涉及距离、障碍和路径，保留为独立后期目标。
@@ -61,7 +65,7 @@ flowchart TD
 | 语音识别 | `TeleAI/TeleSpeechASR` | `/v1/audio/transcriptions` 接收 WAV；一段合成中文指令识别成功，昵称出现同音字；真实远场语音未测 |
 | 图片生成 | `agnes-image-2.5-flash` | `/v1/images/generations` 生成一张图片并下载到有效 PNG；与普通聊天分开 |
 | 视频生成 | `agnes-video-2.5` | 模型列表可见；尚未验证提交、状态查询和结果协议，暂不开放正式工具 |
-| 中文朗读 | Android 系统 TTS，待验证 | 需要在小米手机核对中文 voice、音色、离线可用性和打断；现有社区旧 `tts.ts` 已退休，不能直接复用 |
+| 中文朗读 | 首选童声候选 Azure `zh-CN-XiaoyouNeural`；系统中文 TTS 降级 | 用户本次要求可爱童声；候选需独立 Speech 凭据和试听，尚未接入。系统音色/离线/打断需真机测；现有社区旧 `tts.ts` 已退休 |
 
 NewAPI 地址配置为 `https://apichat.jiazhuangai.com/v1`，自定义 provider 名建议为 `myyaya-newapi`。模型 ID 按接口返回原样使用；不根据 `agnes` 名称推断其背后的厂商或真实模型。
 

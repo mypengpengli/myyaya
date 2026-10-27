@@ -2,6 +2,8 @@
 
 依据：[用户提供的完整分享对话](https://chatgpt.com/share/6adf4c3e-e364-83e9-a865-a9f99f4e4150)。整理日期：2026-10-26。
 
+2026-10-27 用户在当前对话补充完整使用流程和任务框草图，最新范围以 [PRODUCT-REQUIREMENTS.md](PRODUCT-REQUIREMENTS.md) 为准，技术决策与产品开发顺序见 [ARCHITECTURE.md](ARCHITECTURE.md)。固定唤醒为“小丫小丫”，增加多轮媒体产物、10 秒固定/关闭规则、持续对话与异步 Hermes 作业；本文保留此前背景与硬件扩展。
+
 本会话新增决定：采用 Pi 作为智能体核心。首版采用服务器 Pi + 手机工具执行层；当前已写方案和进行少量 NewAPI 接口测试，尚未完成 Pi SDK 与手机集成。详细架构、实施顺序和验收条件见 [PI-AGENT-PLAN.md](PI-AGENT-PLAN.md)，实测记录见 [MODEL-PROBE-2026-10-26.md](MODEL-PROBE-2026-10-26.md)。本文继续保留功能范围与硬件扩展需求；下面 V0.x 为先前按能力划分的阶段，实际开发顺序以 Pi 方案的 P0–P7 为准。
 
 ## 已确定的路线
@@ -26,7 +28,7 @@
 | V0.6 人物交互 | 先检测/跟踪人脸并看向目标，再做人脸登记、人物记忆及声纹关联 | 用不同人物和环境验证；区分检测、跟踪与身份识别 |
 | V0.7 内容与工作过程 | 文件、网页和 Hermes Screen | 实际服务端若提供画面流或事件，才实现对应展示；不假设已有远程桌面接口 |
 
-阶段是实施顺序，不是已实现版本或交付日期。已选择基于 Super LOOI 演进的 My LOOI（razor79/my-looi）作为当前基础，源码导入 `mobile/`，详见 [UPSTREAM.md](UPSTREAM.md)。用户新增明确要求：自己的 APK 支持在线下载与安装更新，日常升级无需 USB，方案见 [UPDATES.md](UPDATES.md)。
+上表仅按能力拆分，不再代表实施先后，也不是已实现版本或交付日期。实际顺序以 Pi 方案 P0–P7 为准；开工和首批交付细化见 [APK 开发方案补充](APK-DEVELOPMENT-PLAN.md)。已选择基于 Super LOOI 演进的 My LOOI（razor79/my-looi）作为当前基础，源码导入 `mobile/`，详见 [UPSTREAM.md](UPSTREAM.md)。用户新增明确要求：自己的 APK 支持在线下载与安装更新，日常升级无需 USB，方案见 [UPDATES.md](UPDATES.md)。
 
 ## “看向我”与“过来”分开验收
 

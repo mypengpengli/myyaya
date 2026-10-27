@@ -17,7 +17,10 @@ import {
   type SetupReadiness,
   type SetupStep,
 } from "@/src/setup/setup-readiness";
-import { setOnboardingCompleted, setOptionalCapabilitySkipped } from "@/src/setup/setup-storage";
+import { getAppMode, setOnboardingCompleted, setOptionalCapabilitySkipped } from "@/src/setup/setup-storage";
+import { createReadinessRefresher } from "@/src/setup/readiness-refresh";
+import { useAppMode } from "@/src/setup/use-app-mode";
+import { AppModeSelector } from "@/src/setup/AppModeSelector";
 import { syncVoiceRuntime } from "@/src/core/app-bootstrap";
 import { useUserStore } from "@/src/store/user";
 import { useUiText } from "@/src/i18n/use-ui-text";
@@ -59,6 +62,7 @@ async function requestMicrophoneAccess(deniedMessage: string): Promise<void> {
 }
 
 export default function OnboardingScreen() {
+  const appMode = useAppMode();
   const router = useRouter();
   const params = useLocalSearchParams<{ step?: string }>();
   const [activeStep, setActiveStep] = useState<SetupStep>(normalizeSetupStep(params.step));
@@ -76,24 +80,23 @@ export default function OnboardingScreen() {
   const interfaceLanguage = useUserStore((state) => state.preferences.interfaceLanguage);
   const updatePreferences = useUserStore((state) => state.updatePreferences);
 
-  const refreshReadiness = useCallback(async () => {
-    setLoadingReadiness(true);
-    try {
-      const next = await computeSetupReadiness();
+  const [readinessRefresher] = useState(() => createReadinessRefresher({
+    getMode: getAppMode,
+    compute: computeSetupReadiness,
+    commit: (next) => {
       setReadiness(next);
-      setActiveStep((current) => (current === "done" ? current : next.nextStep));
-      return next;
-    } finally {
-      setLoadingReadiness(false);
-    }
-  }, []);
+      setActiveStep(next.nextStep);
+    },
+    setLoading: setLoadingReadiness,
+  }));
+  const refreshReadiness = useCallback(() => readinessRefresher.refresh(), [readinessRefresher]);
 
   useEffect(() => {
     refreshReadiness().catch((error) => {
       console.warn("[Onboarding] Failed to load setup readiness:", error);
-      setLoadingReadiness(false);
     });
-  }, [refreshReadiness]);
+    return () => readinessRefresher.invalidate();
+  }, [appMode, readinessRefresher, refreshReadiness]);
 
   useEffect(() => {
     setActiveStep(normalizeSetupStep(params.step));
@@ -112,8 +115,8 @@ export default function OnboardingScreen() {
       const key = validateOpenAiApiKey(openAiKeyInput);
       await saveOpenAiApiKey(key);
       setOpenAiKeyInput("");
-      await refreshReadiness();
-      goToStep("models");
+      const next = await refreshReadiness();
+      if (next?.appMode === "legacy_realtime" && getAppMode() === "legacy_realtime") goToStep("models");
     } catch (error) {
       setOpenAiError(error instanceof Error ? error.message : t("onboarding.keySaveFailed"));
     } finally {
@@ -134,9 +137,10 @@ export default function OnboardingScreen() {
     setModelProgress(null);
     try {
       await downloadMissingSherpaModels(setModelProgress);
-      await refreshReadiness();
+      const next = await refreshReadiness();
+      if (next?.appMode !== "legacy_realtime" || getAppMode() !== "legacy_realtime") return;
       await syncVoiceRuntime().catch(() => undefined);
-      goToStep("permissions");
+      if (getAppMode() === "legacy_realtime") goToStep("permissions");
     } catch (error) {
       console.warn("[Onboarding] Local model download failed:", error);
       setModelError(t("onboarding.modelsDownloadFailed"));
@@ -167,6 +171,7 @@ export default function OnboardingScreen() {
 
   const finishOnboarding = useCallback(async () => {
     const next = await refreshReadiness();
+    if (!next || next.appMode !== getAppMode()) return;
     if (!next.requiredReady) {
       goToStep(next.nextStep);
       return;
@@ -176,7 +181,7 @@ export default function OnboardingScreen() {
     router.replace("/");
   }, [goToStep, refreshReadiness, router]);
 
-  const canFinish = readiness?.requiredReady ?? false;
+  const canFinish = readiness?.appMode === appMode && readiness.requiredReady;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -207,7 +212,8 @@ export default function OnboardingScreen() {
           </View>
         </View>
 
-        <View style={styles.steps}>
+        <AppModeSelector />
+        {appMode === "legacy_realtime" ? <View style={styles.steps}>
           {setupSteps.map((step) => {
             const active = step.id === activeStep;
             const complete = isStepComplete(step.id, readiness);
@@ -217,12 +223,16 @@ export default function OnboardingScreen() {
               </Pressable>
             );
           })}
-        </View>
+        </View> : null}
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           {loadingReadiness && !readiness ? <ActivityIndicator /> : null}
+          {appMode === "local" ? <Section title="本地功能已可进入">
+            <Text style={styles.help}>无需填写 OpenAI Key 或下载旧版语音模型。麦克风、相机和蓝牙权限由具体功能按需申请。</Text>
+            <PrimaryButton label="进入本地界面" onPress={finishOnboarding} disabled={!canFinish} />
+          </Section> : null}
 
-          {activeStep === "openai" ? (
+          {appMode === "legacy_realtime" && activeStep === "openai" ? (
             <Section title="OpenAI Realtime">
               <Text style={styles.help}>{t("onboarding.apiHelp")}</Text>
               <StatusRow label={t("onboarding.key")} ready={Boolean(readiness?.openAiKeyConfigured)} readyText={t("onboarding.keySaved")} pendingText={t("onboarding.keyNeeded")} />
@@ -245,7 +255,7 @@ export default function OnboardingScreen() {
             </Section>
           ) : null}
 
-          {activeStep === "models" ? (
+          {appMode === "legacy_realtime" && activeStep === "models" ? (
             <Section title={t("onboarding.modelsTitle")}>
               <Text style={styles.help}>{t("onboarding.modelsHelp")}</Text>
               {modelCapabilities.map((capability) => (
@@ -265,7 +275,7 @@ export default function OnboardingScreen() {
             </Section>
           ) : null}
 
-          {activeStep === "permissions" ? (
+          {appMode === "legacy_realtime" && activeStep === "permissions" ? (
             <Section title={t("onboarding.micRobot")}>
               <StatusRow label={t("onboarding.microphone")} ready={Boolean(readiness?.microphoneReady)} readyText={t("onboarding.micAllowed")} pendingText={t("onboarding.permissionNeeded")} />
               {!readiness?.microphoneReady ? <PrimaryButton label={permissionBusy ? t("common.wait") : t("onboarding.allowMic")} onPress={requestMicrophone} disabled={permissionBusy} /> : null}
@@ -278,7 +288,7 @@ export default function OnboardingScreen() {
             </Section>
           ) : null}
 
-          {activeStep === "done" ? (
+          {appMode === "legacy_realtime" && activeStep === "done" ? (
             <Section title={t("onboarding.doneTitle")}>
               <StatusRow label="OpenAI" ready={Boolean(readiness?.openAiKeyConfigured)} readyText={t("settings.summary.keySaved")} pendingText={t("onboarding.keyNotConfigured")} />
               <StatusRow label={t("onboarding.step.models")} ready={Boolean(readiness?.modelsReady)} readyText={t("onboarding.modelsReady")} pendingText={t("onboarding.modelsNotReady")} />

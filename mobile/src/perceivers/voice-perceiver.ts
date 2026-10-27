@@ -3,6 +3,7 @@ import type { MemoryResult, UserIntent } from "../core/context-service";
 import { createObservation } from "../core/observation";
 import { classifyCategory } from "../memory/metadata";
 import { wakewordService, type WakewordDetection } from "../voice/wakeword";
+import { getAppMode } from "../setup/setup-storage";
 import { voskDrivingCommandRecognizer } from "../voice/vosk-driving-command";
 import { kwsAudioFeeder } from "../voice/kws-audio-feeder";
 import { sttService } from "../voice/stt";
@@ -207,6 +208,7 @@ export class VoicePerceiver extends BasePerceiver {
   private freshLaunchAutoListenTimer: ReturnType<typeof setTimeout> | null = null;
 
   async start(): Promise<void> {
+    if (getAppMode() !== "legacy_realtime") return;
     if (this.isActive) {
       return;
     }
@@ -239,7 +241,7 @@ export class VoicePerceiver extends BasePerceiver {
     // Realtime adds a cold-start-only PCM stability barrier: physical 2.1.83
     // tests showed that starting WebRTC while the Classic AudioStudio recorder
     // was still producing its first transient correlated with delayed/poor VAD.
-    if (!this.freshLaunchAutoListenConsumed && !useUserStore.getState().robotSleeping) {
+    if (getAppMode() === "legacy_realtime" && !this.freshLaunchAutoListenConsumed && !useUserStore.getState().robotSleeping) {
       this.freshLaunchAutoListenConsumed = true;
       this.freshLaunchAutoListenTimer = setTimeout(() => {
         this.freshLaunchAutoListenTimer = null;
@@ -294,6 +296,7 @@ export class VoicePerceiver extends BasePerceiver {
    * Manually attract LOOI's attention and start listening.
    */
   async trigger(): Promise<void> {
+    if (getAppMode() !== "legacy_realtime") return;
     // Physical safety fallback: while wheels are moving, a face tap is never
     // interpreted as "start a conversation". It is an immediate local STOP.
     // This gives the user a deterministic escape hatch if voice recognition
@@ -621,6 +624,7 @@ export class VoicePerceiver extends BasePerceiver {
   }
 
   private isFreshLaunchAutoListenStillEligible(): boolean {
+    if (getAppMode() !== "legacy_realtime") return false;
     if (!this.isActive || useUserStore.getState().robotSleeping || !isMainScreenFocused()) return false;
     const conversation = useConversationStore.getState();
     const voiceState = useUserStore.getState().voiceState;
@@ -916,6 +920,7 @@ export class VoicePerceiver extends BasePerceiver {
    * Handle wakeword detection.
    */
   private async handleWakeword(detection?: WakewordDetection): Promise<void> {
+    if (getAppMode() !== "legacy_realtime") return;
     const userStore = useUserStore.getState();
     const conversationStore = useConversationStore.getState();
 
@@ -3197,6 +3202,7 @@ export class VoicePerceiver extends BasePerceiver {
   }
 
   private shouldRunWakewordFeeder(): boolean {
+    if (getAppMode() !== "legacy_realtime") return false;
     const userStore = useUserStore.getState();
     const conversationStore = useConversationStore.getState();
 

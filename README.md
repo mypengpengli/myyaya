@@ -2,9 +2,13 @@
 
 使用自己的小米 12 Pro 和已下单的 LOOI 底座，构建可以自定义模型、调用手机功能、执行服务器任务的桌面 AI 机器人。
 
-**当前状态：已导入社区 Android 应用基线，确定采用 Pi，完成方案与少量模型接口预验证。** `mobile/` 来自 My LOOI，包含 BLE、语音、记忆和 APK 更新模块；已配置 myyaya 应用身份与自己的更新源入口。尚未构建并在本机手机上验证 myyaya APK，Pi / NewAPI / Hermes / 录像播放等定制需求仍待集成。
+**当前状态：已导入社区 Android 基线，采用 Pi；已解除上游强制 OpenAI Key 的 App 入口门槛，新增默认本地模式。** `mobile/` 来自 My LOOI，包含表情、BLE、语音、记忆和 APK 更新模块；已配置 myyaya 应用身份与自己的更新源。无 Key、无旧语音模型、未授权麦克风时也能进入本地界面，旧 Realtime 仅在主动选择并配置后使用。尚未构建并在本机手机上验证 myyaya APK，Pi / NewAPI / Hermes / 新 Viewer / 录像播放等定制需求仍待集成。
 
-最新开发入口：[Pi 智能体实施方案](docs/PI-AGENT-PLAN.md)、[2026-10-26 模型接口测试](docs/MODEL-PROBE-2026-10-26.md)。首版由自有服务器运行 Pi，手机执行相机、媒体、记忆与 BLE 工具；完整 Pi 功能需要该服务在线，手机内嵌路线单独验证。
+最新入口：[小丫产品需求](docs/PRODUCT-REQUIREMENTS.md)、[修订架构与开发顺序](docs/ARCHITECTURE.md)、[Hermes 接入契约](docs/HERMES-INTEGRATION.md)、[认人/跟随/房间导航研究](docs/NAVIGATION-RESEARCH.md)、[本次接口核查](docs/INTEGRATION-CHECK-2026-10-27.md)。构建与协议细节继续参考 [APK 开发补充](docs/APK-DEVELOPMENT-PLAN.md)和 [Pi 智能体方案](docs/PI-AGENT-PLAN.md)。首版服务器运行 Pi，手机执行本地工具；完整 Pi 功能需要服务在线，手机内嵌单独验证。
+
+2026-10-27 用户确认：LOOI 即将到货，小米 12 Pro 已升级澎湃 OS 3。新需求固定唤醒词“小丫小丫”，补充童声、拍照后多轮改图/图生视频、10 秒可固定 Viewer、右下小表情与 Hermes 执行框、跟随和去客厅，以及微信/邮件扩展。代码本轮先修复入口和旧语音模式隔离，其余按修订架构分期实现。
+
+Hermes 服务地址已提供并完成电脑端只读鉴权/能力复核。App 设置中已新增 Hermes 连接入口：首次填写独立 Token，之后保存在 SecureStore，可直接测试连接。任务派单与手机网络仍待 APK 实机验证；调试凭据不随源码或安装包发布，详见 [接入契约](docs/HERMES-INTEGRATION.md)。
 
 代码来源、固定版本和开发方法见[社区代码来源](docs/UPSTREAM.md)；以后免 USB 更新应用的流程见[APK 在线更新](docs/UPDATES.md)。
 
@@ -113,6 +117,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-devices.ps1 
 README.md                            项目目标与当前主线
 docs/STATUS.md                       已完成事项与待验证项
 docs/PLAN.md                         最新需求、分期与扩展方案
+docs/PRODUCT-REQUIREMENTS.md          本次用户流程、Viewer 规则与验收需求
+docs/ARCHITECTURE.md                  语言选择、模块边界、异步作业与修订顺序
+docs/HERMES-INTEGRATION.md            现有 Ubuntu Hermes 版本、Runs/SSE 与文件回传契约
+docs/NAVIGATION-RESEARCH.md           认人、声源、跟随与房间导航的一手调研
+docs/INTEGRATION-CHECK-2026-10-27.md   本次中转请求与资料核查范围
+docs/APK-DEVELOPMENT-PLAN.md          APK 开工范围、工具桥协议与真机验收补充
 docs/PI-AGENT-PLAN.md                 Pi 架构、手机工具与阶段验收
 docs/MODEL-PROBE-2026-10-26.md         NewAPI 小样本实测结果与边界
 docs/LOOI.md                         LOOI 接入资料与验证计划

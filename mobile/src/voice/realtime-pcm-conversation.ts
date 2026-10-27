@@ -90,6 +90,7 @@ function applyPlaybackGainToPcm16Base64(base64: string, gain: number): { base64:
 
 export class RealtimePcmConversationService {
   private active = false;
+  private sessionGeneration = 0;
   private stopping = false;
   private configured = false;
   private webSocket: WebSocket | null = null;
@@ -207,11 +208,15 @@ export class RealtimePcmConversationService {
   }
 
   async start(detection?: WakewordDetection): Promise<void> {
+    const requestedGeneration = this.sessionGeneration;
     if (this.stopPromise) await this.stopPromise;
+    if (requestedGeneration !== this.sessionGeneration) return;
     if (this.active || this.stopping) return;
     if (Platform.OS !== "android") throw new Error("Realtime PCM experiment is Android-only");
 
     this.active = true;
+    const generation = ++this.sessionGeneration;
+    const isCurrent = () => this.active && generation === this.sessionGeneration;
     this.configured = false;
     this.generationActive = false;
     this.playbackActive = false;
@@ -264,6 +269,7 @@ export class RealtimePcmConversationService {
 
       const gateWasClosed = !kwsAudioFeeder.diagnosticStatus.appCaptureAllowed;
       await setIsAudioActiveAsync(true);
+      if (!isCurrent()) return;
       kwsAudioFeeder.setAppCaptureAllowed(true);
       if (gateWasClosed) recordDiagnosticEvent("realtime", "foreground-audio-gate-recovered");
 
@@ -273,7 +279,7 @@ export class RealtimePcmConversationService {
       mirrorSessionTouch(localSessionId, "realtime");
 
       const { facts: ambientMemories, strategy: memoryStrategy } = await retrieveConversationMemories("", { mode: "ambient" });
-      if (!this.active) return;
+      if (!isCurrent()) return;
       const memoryContext = ambientMemories
         .map((memory) => `- ${memory.memory.trim()}`)
         .filter((memory) => memory.length > 2)
@@ -292,7 +298,7 @@ export class RealtimePcmConversationService {
       );
       const sessionConfig = (sessionUpdate.session ?? {}) as Record<string, unknown>;
       const clientSecret = await createOpenAiRealtimeClientSecret(sessionConfig);
-      if (!this.active) return;
+      if (!isCurrent()) return;
       recordDiagnosticEvent("realtime", "pcm-ephemeral-secret-created", {
         expiresAt: clientSecret.expiresAt,
         persisted: false,
@@ -303,9 +309,9 @@ export class RealtimePcmConversationService {
       // Classic before the app-owned VOICE_COMMUNICATION AudioRecord is made.
       kwsAudioFeeder.setWakewordFeedingEnabled(false);
       await wakewordService.stop();
-      if (!this.active) return;
+      if (!isCurrent()) return;
       await wakewordService.waitForFallbackIdle();
-      if (!this.active) return;
+      if (!isCurrent()) return;
 
       const detectionSamples = detection?.hasCommandSuffix && detection.commandPrerollSamples?.length
         ? detection.commandPrerollSamples.slice()
@@ -316,25 +322,28 @@ export class RealtimePcmConversationService {
         : null;
 
       await kwsAudioFeeder.stop();
-      if (!this.active) return;
+      if (!isCurrent()) return;
       recordDiagnosticEvent("realtime", "pcm-classic-capture-released", {
         feederRunning: kwsAudioFeeder.isRunning,
         wakewordListening: wakewordService.isListening,
       });
 
       await waitMs(CAPTURE_RELEASE_SETTLE_MS);
-      if (!this.active) return;
+      if (!isCurrent()) return;
 
       const beforeRoute = await getRealtimeAudioRouteStatus();
+      if (!isCurrent()) return;
       if (beforeRoute.supported) {
         const prepared = await activateRealtimeSpeakerRoute();
-        if (!this.active) return;
+        if (!isCurrent()) return;
         this.speakerRouteActive = prepared.active && prepared.speakerSelected;
         if (!prepared.modeMatchesCommunication || !prepared.speakerSelected) {
           throw new Error("Realtime PCM could not establish Android communication speaker route");
         }
         await waitMs(COMMUNICATION_ROUTE_SETTLE_MS);
+        if (!isCurrent()) return;
         const settled = await getRealtimeAudioRouteStatus();
+        if (!isCurrent()) return;
         if (!settled.modeMatchesCommunication || !settled.speakerSelected) {
           throw new Error("Realtime PCM communication route did not remain stable before capture");
         }
@@ -347,7 +356,7 @@ export class RealtimePcmConversationService {
       this.webSocket = ws;
       this.bindWebSocket(ws);
       await this.waitForWebSocketOpen(ws);
-      if (!this.active) return;
+      if (!isCurrent()) return;
       this.send(sessionUpdate);
       recordDiagnosticEvent("realtime", "pcm-openai-connected", {
         transport: "websocket",
@@ -355,6 +364,7 @@ export class RealtimePcmConversationService {
         model: this.sessionModel,
       });
     } catch (error) {
+      if (!isCurrent()) return;
       const message = error instanceof Error ? error.message : String(error);
       const issue = classifyOpenAiError("", message);
       if (issue === "no_credits" || issue === "invalid_key") {
@@ -403,6 +413,7 @@ export class RealtimePcmConversationService {
   }
 
   async stop(reason = "explicit"): Promise<void> {
+    this.sessionGeneration += 1;
     if (this.stopPromise) return this.stopPromise;
     if (!this.active && !this.webSocket) return;
     const promise = this.performStop(reason);
@@ -475,20 +486,25 @@ export class RealtimePcmConversationService {
   }
 
   private bindNativeAudioEvents(): void {
+    const generation = this.sessionGeneration;
     this.removeNativeAudioEvents();
     const audio = getRealtimePcmAudioModule();
     this.captureAudioSubscription = audio.addListener("onAudioData", (event: RealtimePcmAudioDataEvent) => {
+      if (!this.active || generation !== this.sessionGeneration) return;
       this.handleCapturedAudio(event);
     }) as Subscription;
     this.captureErrorSubscription = audio.addListener("onCaptureError", (event: { stage: string; message: string }) => {
+      if (!this.active || generation !== this.sessionGeneration) return;
       recordDiagnosticEvent("realtime", "pcm-capture-error", event);
       useConversationStore.getState().setRealtimeReadiness("microphone-error");
       void this.stop("capture-error");
     }) as Subscription;
     this.playbackDrainedSubscription = audio.addListener("onPlaybackDrained", (event: { playedDurationMs: number }) => {
+      if (!this.active || generation !== this.sessionGeneration) return;
       void this.handlePlaybackDrained(event.playedDurationMs);
     }) as Subscription;
     this.playbackErrorSubscription = audio.addListener("onPlaybackError", (event: { message: string }) => {
+      if (!this.active || generation !== this.sessionGeneration) return;
       recordDiagnosticEvent("realtime", "pcm-playback-error", event);
     }) as Subscription;
   }
@@ -562,8 +578,9 @@ export class RealtimePcmConversationService {
   }
 
   private bindWebSocket(ws: WebSocket): void {
+    const generation = this.sessionGeneration;
     ws.onmessage = (message) => {
-      if (!this.active) return;
+      if (!this.active || generation !== this.sessionGeneration) return;
       try {
         const event = JSON.parse(String(message.data ?? "")) as RealtimeEvent;
         void this.handleEvent(event);
@@ -574,11 +591,11 @@ export class RealtimePcmConversationService {
       }
     };
     ws.onerror = () => {
-      if (!this.active) return;
+      if (!this.active || generation !== this.sessionGeneration) return;
       recordDiagnosticEvent("realtime", "pcm-websocket-error");
     };
     ws.onclose = (event) => {
-      if (!this.active || this.stopping) return;
+      if (!this.active || this.stopping || generation !== this.sessionGeneration) return;
       const issue = classifyOpenAiError(event.code, event.reason);
       if (issue === "no_credits" || issue === "invalid_key") {
         useConversationStore.getState().setRealtimeIssue(issue);
@@ -613,6 +630,7 @@ export class RealtimePcmConversationService {
   }
 
   private async handleEvent(event: RealtimeEvent): Promise<void> {
+    const generation = this.sessionGeneration;
     const type = String(event.type ?? "");
     if (type === "session.created") {
       recordDiagnosticEvent("realtime", "pcm-openai-session-created", {
@@ -627,13 +645,14 @@ export class RealtimePcmConversationService {
       try {
         status = await audio.startCapture();
       } catch (error) {
+        if (!this.active || generation !== this.sessionGeneration) return;
         const message = error instanceof Error ? error.message : String(error);
         recordDiagnosticEvent("realtime", "pcm-capture-start-failed", { error: message });
         useConversationStore.getState().setRealtimeReadiness("microphone-error");
         void this.stop("capture-start-failed");
         return;
       }
-      if (!this.active) return;
+      if (!this.active || generation !== this.sessionGeneration) return;
       if (!status.aecEnabled || status.audioSource !== "VOICE_COMMUNICATION" || status.captureSampleRate !== 16_000) {
         recordDiagnosticEvent("realtime", "pcm-capture-profile-mismatch", {
           supported: status.supported,
