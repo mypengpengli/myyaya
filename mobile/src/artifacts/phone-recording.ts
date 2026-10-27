@@ -1,5 +1,5 @@
 import { AppState, PermissionsAndroid } from "react-native";
-import { chineseVoice } from "../voice/chinese-voice-runtime";
+import { chineseVoice, resumeAutomaticChineseVoice } from "../voice/chinese-voice-runtime";
 import { pauseSocialCamera } from "../core/social-attention";
 import { saveVideoArtifact, type Artifact } from "./artifact-store";
 import { resultPresentation } from "./presentation";
@@ -85,4 +85,5 @@ export async function stopPhoneRecording(): Promise<Artifact | undefined> {
 async function restoreVoice() {
   const resume = resumeVoice; resumeVoice = undefined;
   await resume?.().catch(() => {});
+  resumeAutomaticChineseVoice();
 }

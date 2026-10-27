@@ -35,7 +35,7 @@ let lease = async () => () => { releases++; }, microphonePermission = true;
 const offered = [];
 const recording = load("src/artifacts/phone-recording.ts", {
   "react-native": { AppState: { currentState: "active" }, PermissionsAndroid: { PERMISSIONS: { CAMERA: "camera", RECORD_AUDIO: "mic" }, check: async (name) => name !== "mic" || microphonePermission } },
-  "../voice/chinese-voice-runtime": { chineseVoice: { pauseCaptureForRecording: async () => { pauses++; return async () => { resumes++; }; } } },
+  "../voice/chinese-voice-runtime": { chineseVoice: { pauseCaptureForRecording: async () => { pauses++; return async () => { resumes++; }; } }, resumeAutomaticChineseVoice() {} },
   "../core/social-attention": { pauseSocialCamera: () => lease() },
   "./artifact-store": { saveVideoArtifact: async () => { saves++; return video; } },
   "./presentation": { resultPresentation: { offer: (item) => offered.push(item) } },

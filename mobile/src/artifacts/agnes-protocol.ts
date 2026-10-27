@@ -41,3 +41,11 @@ export function mediaRejectionNotice(status: number, value: unknown): string | u
   if (status === 400 || status === 422) return "媒体接口拒绝了生成参数，请检查模型对应的请求格式。";
   return;
 }
+export function videoDownloadCandidates(baseUrl: string, remoteId?: string, resultUrl?: string): string[] {
+  return [...new Set([remoteId ? `${baseUrl}/videos/${encodeURIComponent(remoteId)}/content` : "",
+    resultUrl?.startsWith("https://") ? resultUrl : ""].filter(Boolean))];
+}
+export function mediaDownloadHeaders(baseUrl: string, targetUrl: string, apiKey: string): Record<string, string> {
+  return { "User-Agent": "myyaya-planning-probe/1",
+    ...(new URL(baseUrl).origin === new URL(targetUrl).origin ? { Authorization: `Bearer ${apiKey}` } : {}) };
+}

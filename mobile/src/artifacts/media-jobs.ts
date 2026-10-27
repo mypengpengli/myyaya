@@ -9,7 +9,7 @@ import { findArtifact, savePhotoArtifact, saveVideoArtifact } from "./artifact-s
 import { resultPresentation } from "./presentation";
 import { MediaJobService, MediaRequestRejected, type MediaJob, type MediaJobTransport } from "./media-job-service";
 import { agnesVideoPollPaths, buildAgnesImageRequest, buildAgnesVideoRequest, extractAgnesVideoUrl,
-  mediaRejectionNotice, parseAgnesVideoSubmission } from "./agnes-protocol";
+  mediaRejectionNotice, parseAgnesVideoSubmission, videoDownloadCandidates, mediaDownloadHeaders } from "./agnes-protocol";
 
 let database: SQLite.SQLiteDatabase | undefined, service: MediaJobService | undefined;
 function db() {
@@ -66,7 +66,7 @@ async function saveImage(data: { data?: { b64_json?: string; url?: string }[] },
 async function saveRemoteVideo(config: NewApiConfig, urlInput: string, job: MediaJob) {
   const url = new URL(urlInput);
   if (url.protocol !== "https:" || url.username || url.password) throw new Error("视频地址无效");
-  const headers = url.origin === new URL(config.baseUrl).origin ? { Authorization: `Bearer ${config.apiKey}` } : undefined;
+  const headers = mediaDownloadHeaders(config.baseUrl, url.href, config.apiKey);
   const response = await fetch(url.href, { redirect: "error", signal: AbortSignal.timeout(120_000), headers });
   if (!response.ok || Number(response.headers.get("Content-Length")) > 200 * 1024 * 1024) throw new Error("视频下载失败或文件过大");
   const bytes = new Uint8Array(await response.arrayBuffer());
@@ -100,9 +100,11 @@ function transport(config: NewApiConfig): MediaJobTransport {
       if (data.status === "failed") return { status: "failed" };
       const videoId = typeof data.video_id === "string" && data.video_id ? data.video_id : job.videoId;
       if (data.status !== "completed") return { status: "running", ...(videoId ? { videoId } : {}) };
-      const url = extractAgnesVideoUrl(data) || (job.remoteId ? config.baseUrl + "/videos/" + encodeURIComponent(job.remoteId) + "/content" : "");
-      if (!url) throw new Error("视频已完成但尚无可下载结果");
-      return { status: "completed", artifactId: await saveRemoteVideo(config, url, job) };
+      for (const url of videoDownloadCandidates(config.baseUrl, job.remoteId, extractAgnesVideoUrl(data))) {
+        try { return { status: "completed", artifactId: await saveRemoteVideo(config, url, job) }; }
+        catch { /* Try the result URL without exposing gateway credentials to another host. */ }
+      }
+      throw new Error("视频已完成，暂时未能下载；稍后只重试查询和下载，不重复生成");
     },
   };
 }

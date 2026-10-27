@@ -27,4 +27,8 @@ const nested404 = { code: "fail_to_fetch_task", message: JSON.stringify({ error:
 assert.match(api.mediaRejectionNotice(404, nested404), /当前分组/);
 assert.equal(api.mediaRejectionNotice(404, { code: "fail_to_fetch_task", message: "temporary unknown" }), undefined, "ambiguous task-fetch failures cannot prove the POST was rejected");
 assert.match(api.mediaRejectionNotice(401, {}), /凭据/);
+assert.deepEqual(api.videoDownloadCandidates("https://relay.test/v1", "relay-task", "https://cdn.test/movie.mp4"),
+  ["https://relay.test/v1/videos/relay-task/content", "https://cdn.test/movie.mp4"]);
+assert.equal(api.mediaDownloadHeaders("https://relay.test/v1", "https://relay.test/v1/videos/task/content", "fixture-token").Authorization, "Bearer fixture-token");
+assert.equal(api.mediaDownloadHeaders("https://relay.test/v1", "https://cdn.test/movie.mp4", "fixture-token").Authorization, undefined, "gateway credentials never follow a video URL to another host");
 console.log("Agnes protocol: owner's site-compatible text/keyframe video, distinct task/video IDs, polling fallback, image reference JSON and nested group-error classification: PASS");

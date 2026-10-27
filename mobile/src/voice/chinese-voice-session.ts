@@ -40,8 +40,8 @@ export class ChineseVoiceSession {
   private current(generation: number) { return generation === this.generation && this.allowed(); }
   private removeListeners() { this.subscriptions.forEach((item) => item.remove()); this.subscriptions = []; }
   start(mode: "wake" | "dictation" = "wake"): Promise<void> {
+    if (this.capturePaused) return Promise.resolve();
     const generation = ++this.generation;
-    this.capturePaused = false;
     this.cancelResponse(); this.conversationUntil = 0;
     this.gate.reset(); this.removeListeners(); this.native.stopChineseSpeech();
     this.update({ phase: "loading", mode, partial: "", notice: "正在加载手机内置中文模型，首次可能较慢" });
@@ -75,7 +75,6 @@ export class ChineseVoiceSession {
     });
   }
   stop(notice = "中文语音已关闭"): Promise<void> {
-    this.capturePaused = false;
     this.cancelResponse(); this.conversationUntil = 0;
     ++this.generation; this.gate.reset(); this.removeListeners(); this.native.stopChineseSpeech();
     void this.stopHardware().catch(() => {});
@@ -129,12 +128,15 @@ export class ChineseVoiceSession {
     const generation = this.generation;
     const hadCapture = ["listening", "thinking", "speaking"].includes(this.state.phase);
     this.capturePaused = true;
-    await this.enqueue(() => this.native.stopChineseCapture());
+    let failed = false;
+    await this.enqueue(async () => { try { await this.native.stopChineseCapture(); } catch { failed = true; } });
+    if (failed) { this.capturePaused = false; throw new Error("录像前无法释放麦克风，请重试"); }
     let released = false;
     return async () => {
       if (released) return; released = true;
-      if (!this.current(generation) || !this.capturePaused) return;
+      const paused = this.capturePaused;
       this.capturePaused = false;
+      if (!this.current(generation) || !paused) return;
       if (hadCapture) await this.enqueue(async () => {
         if (this.current(generation)) await this.native.startChineseCapture();
       });

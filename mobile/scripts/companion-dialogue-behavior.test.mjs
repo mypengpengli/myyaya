@@ -12,9 +12,9 @@ const commands = load("src/voice/chinese-command.ts");
 const { ChineseVoiceSession } = load("src/voice/chinese-voice-session.ts", { "./chinese-command": commands });
 const drain = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
 const events = new Map(), calls = [], spoken = [], motions = [];
-let id = 0, speech, pending, captureStops = 0, foreground = true;
+let id = 0, speech, pending, captureStops = 0, captureStarts = 0, foreground = true;
 const native = {
-  prepareChinese: async () => ({ sessionId: ++id }), startChineseCapture: async () => {}, stopChineseCapture: async () => { captureStops++; },
+  prepareChinese: async () => ({ sessionId: ++id }), startChineseCapture: async () => { captureStarts++; }, stopChineseCapture: async () => { captureStops++; },
   speakChinese: (text) => { spoken.push(text); return new Promise((resolve, reject) => { speech = { resolve, reject }; }); },
   stopChineseSpeech: () => { speech?.reject(new Error("cancelled")); speech = null; },
   addListener(name, fn) { const set = events.get(name) ?? new Set(); set.add(fn); events.set(name, set); return { remove: () => set.delete(fn) }; },
@@ -47,5 +47,14 @@ foreground = true; await voice.start(); emit("小丫小丫讲故事"); await dra
 pending.resolve("这个故事说到停止的时候。"); await drain();
 emit("停止", true); await drain();
 assert.equal(voice.getSnapshot().phase, "listening", "STOP wins even when its word occurs in the spoken reply");
+await voice.stop();
+await voice.start();
+const resume = await voice.pauseCaptureForRecording(), beforeResume = captureStarts;
+assert.equal(voice.isCapturePaused(), true);
+await voice.stop(); await voice.start();
+assert.equal(captureStarts, beforeResume, "settings/lifecycle restart cannot steal the recording microphone");
+await resume(); assert.equal(voice.isCapturePaused(), false, "release clears ownership even after a voice generation change");
+assert.equal(captureStarts, beforeResume, "an old capture lease cannot resurrect the stopped session");
+await voice.start(); assert.equal(captureStarts, beforeResume + 1);
 await voice.stop();
 console.log("Companion dialogue: wake, endpoint-only submission, follow-up, live STOP capture, echo guard, cancellation and background fences: PASS");

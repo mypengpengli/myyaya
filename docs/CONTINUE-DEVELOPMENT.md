@@ -24,16 +24,16 @@
 最小请求使用 `mode: text`、`seconds` 字符串、`size: 720P`、`aspect_ratio`；单图视频改用 `mode: keyframe` 与 `first_frame`。中转任务 ID 与提供商 `video_id` 分开保存；先查 `/v1/videos/{id}`，必要时按网站逻辑查询同一中转主机的 `/agnesapi?video_id=…&model_name=…`，不把用户 Key 转发给 Agnes 官方主机。
 
 - `agnes-video-2.5` 的真实 404 返回为 `fail_to_fetch_task` 包裹的 `AgnesAI_error/model_not_found`，内容说明模型不在当前分组可用范围。**不能据此断言中转不支持视频。**
-- 同一个测试 Key、同一个中转，`agnes-video-2.5-flash` 提交返回 HTTP 200 和任务 ID，随后 6 次只读查询均返回 queued。当前尚未验证最终成片下载。
+- 同一个测试 Key、同一个中转，`agnes-video-2.5-flash` 提交返回 HTTP 200，排队后完成。通过 `/v1/videos/{id}/content` 下载得到 118620 字节 MP4，文件头和容器时长已验证（约 4.48 秒）；SHA256 为 `75576cc62d8ac6397bb7bb2494c3925c597b50615749606ebdd74cdf2d0dd708`。这是电脑端 API 验证，手机播放器仍需验收。
 - 默认视频模型改为已接受任务的 Flash，设置页保留模型名编辑。没有对失败的标准版静默重新提交，也不自动更换模型重复计费。
 - 图像修改按 [Agnes Image 2.5 文档](https://wiki.agnes-ai.com/en/docs/agnes-image-25-flash.md) 使用 `/v1/images/generations` 的 `extra_body.image`，不沿用其他模型的 multipart 编辑协议。新版改图请求仍需实测。
 
-任务 ID 属于测试记录，不是凭据：`task_T9p2xjOluXT7Xlj1d6Tq6mZMeqaNv18e`。接下来只查询这个任务，不重新生成；查询需要在本机安全输入测试 Key。
+任务 ID 属于测试记录，不是凭据：`task_T9p2xjOluXT7Xlj1d6Tq6mZMeqaNv18e`，已完成。需要复核时只查询或下载，不重新生成；查询需要在本机安全输入测试 Key。下载优先走中转站内容代理，外部 CDN 地址仅作回退，不携带中转 Key。
 
 ## 验证和待完成事项
 
 - TypeScript 和新增 Pi、对话、作品/手动录像、媒体任务、Agnes 协议行为测试已通过。实际 Pi + 中转模型完成过一次工具调用和结果复述。
-- 当前 Windows 上跑全量检查，其中依赖 Bash/zip 的两项无法运行，需要看 GitHub 的 Ubuntu CI；其余检查结果应以最新提交的 CI 为准。
+- `a86ee2e` 的 [Ubuntu CI](https://github.com/mypengpengli/myyaya/actions/runs/40522819338) 全部通过：54 项默认检查，以及更新客户端、运动安全、BLE 生命周期/重试、STOP 和 PCM 检查。Windows 上不能运行的 Bash/zip 检查也在该流程通过。后续小修以最新提交的 CI 为准。
 - Android Metro/Hermes 导出已通过，包含 Pi 和媒体代码；这不能代替原生 APK 构建与真机验收。
 - 本机正在首次准备原生构建，已安装 JDK/SDK/NDK，构建缓存留本机；**还不能标记为新 APK 构建成功或已安装**。
 - 本次 ADB 曾识别到 Xiaomi 12 Pro、Android 15/API 35、ARM64，旧包 152 的相机/麦克风/蓝牙权限已允许。兼容目标仍包含 Redmi K50，不绑定型号。
