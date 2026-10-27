@@ -9,7 +9,7 @@ module.exports = () => ({
   name: 'myyaya',
   slug: 'myyaya',
   scheme: 'myyaya',
-  plugins: integrationBuild ? base.plugins.filter((plugin) => plugin !== './plugins/with-vosk-command-models') : base.plugins,
+  plugins: [...(integrationBuild ? base.plugins.filter((plugin) => plugin !== './plugins/with-vosk-command-models') : base.plugins), './plugins/with-shared-android-toolchain'],
   android: { ...base.android, package: 'io.github.mypengpengli.myyaya' },
   ios: { ...base.ios, bundleIdentifier: 'io.github.mypengpengli.myyaya' },
   extra: {

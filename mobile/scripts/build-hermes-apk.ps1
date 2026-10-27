@@ -1,10 +1,11 @@
 param(
-  [string]$BuildDirectory = (Join-Path $env:LOCALAPPDATA ("myyaya\build\" + (Get-Date -Format 'yyyyMMdd-HHmmss')))
+  [string]$BuildDirectory = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) ("myyaya-build\" + (Get-Date -Format 'yyyyMMdd-HHmmss')))
 )
 $ErrorActionPreference = 'Stop'
 $sourceDirectory = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $buildRoot = [IO.Path]::GetFullPath($BuildDirectory)
 if ($buildRoot -match '[^\x00-\x7F]') { throw 'Use an ASCII-only absolute build path on Windows.' }
+if ($buildRoot.Length -gt 48) { throw 'Use a build path of 48 characters or fewer for the Windows native toolchain.' }
 if (Test-Path -LiteralPath $buildRoot) { throw 'Use a fresh build directory to avoid stale native source.' }
 foreach ($name in @('JAVA_HOME','ANDROID_HOME','MY_LOOI_RELEASE_KEYSTORE','MY_LOOI_RELEASE_STORE_PASSWORD','MY_LOOI_RELEASE_KEY_ALIAS','MY_LOOI_RELEASE_KEY_PASSWORD')) {
   if (-not [Environment]::GetEnvironmentVariable($name)) { throw "Missing build environment: $name" }
@@ -37,7 +38,8 @@ $env:MYYAYA_BUILD_PROFILE = 'hermes-integration'
 $env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
 Push-Location $buildRoot
 try {
-  Invoke-Checked { corepack.cmd pnpm install --frozen-lockfile }
+  # Flat native module paths avoid CMake/Ninja limits with pnpm's isolated peer directories.
+  Invoke-Checked { corepack.cmd pnpm install --frozen-lockfile --node-linker=hoisted }
   Invoke-Checked { corepack.cmd pnpm exec tsc --noEmit }
   Invoke-Checked { node scripts/hermes-connection-behavior.test.mjs }
   Invoke-Checked { node scripts/hermes-runs-behavior.test.mjs }

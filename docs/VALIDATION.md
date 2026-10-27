@@ -8,9 +8,16 @@
 - 任务专项行为测试通过：以 node:sqlite 驱动真实仓库 SQL，验证提交前持久化、崩溃/重开恢复、响应丢失后的相同幂等键和请求体、凭据/地址绑定、停止非终态、终态竞争、公开事件过滤和分块 UTF-8 SSE。
 - 真实 HTTPS 联调通过：同一份 TypeScript 客户端提交只读 pwd，获得 completed 和结果，重复提交返回同一 run_id，收到工具开始/完成/任务完成事件。Token 仅经进程 stdin 传递，不进入源码或输出。
 - 本轮 51 项跨平台源码/行为检查全部通过，包括新增任务检查；两项原有 Linux bash/zip 测试仍由 Ubuntu CI 执行。公开仓库审计曾发现联调脚本写死本机目录，已改成通用目录结果检查并重跑通过。
+- 对应开发提交 `56726c54f8776c802e9f3ecd47b8675846ed7cba` 的 [Ubuntu 完整 CI](https://github.com/mypengpengli/myyaya/actions/runs/40473991754) 已通过，包含上述两项 Linux 工具回归；此 CI 仍只验证源码，不代表 APK 或真机通过。
 - JDK 17.0.21.0.2 与 Android 命令行工具下载均核对官方 SHA256；SDK/build-tools 36、NDK 27.1.12297006、CMake 3.22.1 已安装。Sherpa 原生二进制 postinstall 已完成。
-- 原中文目录 Expo prebuild 失败；独立 ASCII 目录使用 SDK 56 固定模板 56.0.38 预构建通过。已创建永久发布签名材料，Gradle release 编译进行中，尚不算构建通过。
+- 原中文目录 Expo prebuild 失败；独立短 ASCII 目录使用 SDK 56 固定模板 56.0.38、hoisted 依赖预构建通过，最终 Gradle release 完整构建通过：1180 项任务，首次完整成功构建用时 18 分 47 秒。
+- Android Metro 导出通过，生成约 6.2 MB 的 Hermes 字节码 bundle。补充监视器行为测试通过：后台释放流与暂停查询、前台恢复只查询、不重复派单、迟到事件与凭据切换隔离。
+- 实际构建发现并处理额外 NDK/build-tools 默认版本和 Windows pnpm/CMake 长路径问题；生成插件统一工具链，Windows 构建改为短路径及 hoisted 依赖。React Native AAR 的官方地址下载超时，替代下载已与 Maven 官方 SHA256 核对一致后缓存，未关闭 TLS 校验。
+- 本地安装包 `mobile/output/android/myyaya-hermes-arm64.apk`：128217986 字节；SHA256 `09c7b1d80bdbf729ac209894bef1fcc447eec2e14c9dde459a9eccb1a6e7782f`。已校验包名 io.github.mypengpengli.myyaya、应用名称 myyaya、versionCode 151、minSdk 24 / targetSdk 36、唯一 ABI arm64-v8a、独立运行所需 JS bundle 与 ZIP 完整性。
+- `apksigner verify --verbose --print-certs` 通过 APK v2 签名；证书 CN=myyaya Android，RSA 3072。证书 SHA256 为 `9cbd68acd1dce6768a9f5be3756dbfc24444e1222980e51e26f57608521addce`；`zipalign -c -P 16 4` 通过。
+- 包内逐文件检查通过：没有本机 Hermes Token、签名密码、独立 API Key 格式或私钥/环境配置文件。签名文件和密码都不进入 Git；原件与密码继续保存在本机独立目录及 Windows 凭据管理器。
 - ADB 列表为空，手机端网络、原生安全存储、界面、恢复、安装和 BLE 尚未验证。
+- 用户明确选择先交付 APK、稍后自行安装测试；本轮没有将电脑端联调或静态检查当作真机通过，也没有发布 GitHub Release。
 
 下面旧验证记录保持原日期与范围，当前实现状态见[首轮 APK](APK-ITERATION-1.md)。
 

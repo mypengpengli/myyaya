@@ -8,7 +8,7 @@
 - 已实现首轮 Hermes 文字任务闭环：任务面板与右下表情、能力发现、幂等提交、SQLite 恢复、SSE 进度、最终文本和停止请求。首轮直接使用现有 Hermes，后续再接 Pi / NewAPI 主线。
 - 同一份 TypeScript 客户端已在真实 HTTPS 服务完成只读 pwd 任务、同键重试和 SSE 联调；不是仅验证网页可访问。手机端运行仍待验收。
 - 已准备 JDK 17、SDK/build-tools 36、NDK 27.1、CMake 3.22.1 和独立 ASCII 构建目录；原生二进制安装已完成，永久签名密钥已创建，密码保存在当前用户凭据管理器。签名材料没有提交 Git。
-- 已进入 Gradle ARM64 release 构建；在构建结束和签名校验前，不算已产出可安装 APK。
+- Gradle ARM64 release 完整构建通过（1180 项任务），已生成本地永久签名 APK：`mobile/output/android/myyaya-hermes-arm64.apk`。版本 2.1.151，约 122.3 MiB；包名、架构、签名、ZIP 完整性/对齐与包内密钥检查通过。
 - 最新 ADB 检查没有连接设备，尚未做手机安装/权限/网络/前后台或 BLE 验收。具体边界与顺序见[首轮 APK](APK-ITERATION-1.md)。
 
 下面保留各阶段准备记录；涉及“尚未接入”的早期表述以本节和首轮 APK 记录为准。
@@ -53,10 +53,10 @@
 
 ## Hermes 地址与手机连接设置（同日后续）
 
-- 用户提供正式 HTTPS 服务地址 `https://hermes.jiazhuangai.com`，并报告真实 Runs 任务与 SSE 工具事件通过。本机已独立核验 health 200、无 Token 模型 401、带 Token 模型 200、capabilities 200 和四项 Runs 能力；未提交新任务。
+- 用户提供正式 HTTPS 服务地址 `https://hermes.jiazhuangai.com`。本机已核验 health 200、无 Token 模型 401、带 Token 模型 200、capabilities 200 和四项 Runs 能力，随后用实际 TypeScript 客户端完成只读 pwd 任务与 SSE 联调。
 - 独立调试 Token 保存在当前 Windows 用户凭据管理器，后续由 `scripts/check-hermes.py` 读取；公开源码、文档与 APK 安装包不包含该值。
 - 用户选择手机首次填写 Token。已新增设置页连接卡片、SecureStore 保存/读取/替换/删除与只读测试，不要求旧 OpenAI Key。电脑与手机存储不自动同步，首次输入只需独立 Token，不粘贴整个服务端 .env。
-- 已记录 run_id 恢复、同任务幂等键复用，以及当前 SSE 类型来自 data JSON event 字段；派单、进度 UI、手机网络与文件返回仍待后续实现/实机验收。
+- 已实现 run_id 状态恢复、同任务幂等键复用、data JSON event 解析、派单与进度 UI；手机网络仍待实机验收，文件产物返回尚待实现。
 
 ## 历史准备记录（不作为当前依赖）
 
@@ -69,13 +69,13 @@
 - 本次 ADB 实测（2026-10-27）没有检测到 Android 设备。
 - 小米 12 Pro 的底层 Android 版本、LOOI 型号、固件版本及 BLE 兼容性尚未确认；澎湃 OS 3 目前来自用户说明。
 - 尚未验证 LOOI 状态读取、停止、运动、传感器或手机固定与供电。
-- 已导入社区 Android / BLE / 语音 / 更新源码，Hermes 文字任务已接入并通过电脑真实客户端联调；签名 APK 正在构建，NewAPI/Pi 与手机/LOOI 验收尚未完成。
-- 用户已选择将 myyaya 仓库公开，现已改为公开；默认使用其 GitHub Releases 作为更新源。首个签名 APK、永久发布签名和首轮覆盖安装验收尚未完成。
+- 已导入社区 Android / BLE / 语音 / 更新源码，Hermes 文字任务已接入并通过电脑真实客户端联调；签名 APK 已构建并完成静态校验，NewAPI/Pi 与手机/LOOI 验收尚未完成。
+- 用户已选择将 myyaya 仓库公开；默认使用其 GitHub Releases 作为更新源。首个 APK 与永久签名已完成，安装包保留本地、未发布 Release；首轮覆盖安装验收尚未完成。
 - 上述模型测试是在 Windows 上直接请求接口，尚未验证 Pi SDK 集成、Android 端运行和整机闭环；agnes-video-2.5 仅确认模型列表可见，未发起生成任务。中文 TTS、真实手机语音和录像资源协调仍待验证。
 
 ## 下一步
 
-1. 完成首轮签名 APK 构建与安装验收，在手机验证 Hermes 网络、任务进度、恢复与停止。
+1. 用户已选择稍后自行安装首轮签名 APK；随后在手机验证 Hermes 网络、任务进度、恢复与停止。
 2. 接入 NewAPI 中文对话/ASR、Azure 晓悠 TTS 与“小丫小丫”唤醒，并按 Pi 方案验证工具循环与手机工具桥。
 3. 尽早验收录像/播放、统一 Viewer 及录制期间语音停止，完成手机内覆盖更新测试。
 4. LOOI 到货后确认型号、固件与官方 App 基础功能，再验证 BLE、停止和受限动作。

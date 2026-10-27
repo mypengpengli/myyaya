@@ -44,7 +44,7 @@
 | capability 与四项 Runs 能力 | 建议先发现实际能力 | HTTP 200，run_submission/run_status/run_events_sse/run_stop 均为 true |
 | 真实任务提交、状态、终端执行 | 202 → completed，`pwd` 返回实际工作目录 | 实际 TypeScript 客户端提交 pwd 并获得 completed/结果，同键重试返回同一 run_id |
 | SSE 工具开始、完成、任务完成 | 收到 tool.started/tool.completed/run.completed | 实际收到这三类事件，支持 data JSON event 字段 |
-| 实际模型 | custom / gpt-6.1-sol | 未发起推理请求重新核对模型 |
+| 实际模型 | custom / gpt-6.1-sol | 客户端联调未采集 runtime 字段；底层模型仍以服务器配置为准 |
 
 ## Runs API 映射
 
@@ -53,7 +53,7 @@
 | discover | `GET /v1/capabilities` | 检查 run_submission / run_status / run_events_sse / run_stop 与 auth；保存能力快照 |
 | submit | `POST /v1/runs` | 先保存本地 Job 与固定请求体/幂等键，再提交并关联 run_id |
 | status | `GET /v1/runs/{run_id}` | 获取真实状态、最终 output 与运行信息；手机恢复不重新提交任务 |
-| events | `GET /v1/runs/{run_id}/events` | SSE 由 Pi 消费并转为持久公开事件，再推送手机 |
+| events | `GET /v1/runs/{run_id}/events` | 首轮手机直连并保存公开进度；正式拓扑由 Pi 持久化事件后推送手机 |
 | cancel | `POST /v1/runs/{run_id}/stop` | stopping 只表示已请求，等实际 cancelled/终态；不宣称请求返回就已停止 |
 
 服务鉴权使用 `Authorization: Bearer <服务端私有 Token>`。myyaya 不覆盖 Hermes 的 custom provider 和 gpt-6.1-sol 模型设置，不把 NewAPI Key 当成 Hermes API Token。
@@ -63,6 +63,8 @@
 同一 Job 保持相同 `Idempotency-Key` 和 JSON 请求体；提交响应丢失时使用原键核对，不能随意生成新任务。对应版本文档描述 24 小时幂等保留，本项目仍自行保存长期 taskId/runId/结果；不能超出服务保留期承诺永久去重。
 
 ## 执行框与断线恢复
+
+下面包含正式目标与已实现部分。首轮手机直接消费 SSE，只显示公开中间说明和工具/子任务生命周期，不渲染 message.delta；SQLite 保留收到的最近 100 条公开进度与最终文本。Pi 的 task_events/seq 补齐、文件展示队列和持续语音对话仍待实现。服务端终态记录有保留边界，手机离线跨过该边界时，不能承诺仅凭 run_id 找回未收到的最终结果；后续由 Pi 持久 Job 层补齐。
 
 - 消费工具生命周期、公开中间说明与任务终态，映射为步骤、耗时、失败原因和文件结果。`tool.completed` 需检查 error，不能因收到 completed 就画成功。
 - `message.delta` 和 `message.interim` 依据 already_streamed 去重；最终汇报以最终结果为准。中间说明和工具事实展示给用户，原始隐藏推理不作为界面内容。

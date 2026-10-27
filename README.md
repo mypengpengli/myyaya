@@ -14,7 +14,7 @@ Hermes 服务地址已提供并完成电脑端只读鉴权/能力复核。App �
 
 ## 当前方案
 
-2026-10-27 已完成方案并进入 APK 开发。首轮已接入 Hermes 文字派单、SQLite 任务恢复、SSE 进度和右下角表情，同一份客户端已通过真实 HTTPS 任务/幂等/SSE 联调；正在构建签名 APK，手机端尚待验收。使用步骤与后续范围见[首轮 APK](docs/APK-ITERATION-1.md)。
+2026-10-27 已完成方案并生成首个永久签名 ARM64 联调 APK。已接入 Hermes 文字派单、SQLite 任务恢复、SSE 进度和右下角表情，同一份客户端已通过真实 HTTPS 任务/幂等/SSE 联调；Android release 构建与签名/包内校验通过，手机端尚待验收。使用步骤与后续范围见[首轮 APK](docs/APK-ITERATION-1.md)。
 
 根据[最新需求讨论](https://chatgpt.com/share/6adf4c3e-e364-83e9-a865-a9f99f4e4150)，2026-10-26 将主线明确为 **小米 12 Pro + LOOI + 自定义 Android APK**。用户表示手机已升级澎湃 OS 3，保留现有系统；底层 Android 版本和设备能力仍以 ADB / 实机检查为准。K50 是早期候选，不再是当前开发目标。
 
@@ -136,7 +136,7 @@ scripts/create-update-feed.py         生成 APK 更新 manifest 与 SHA-256
 mobile/                              导入并定制的社区 Android 应用源码
 ```
 
-本地 `.tools/` 中的下载工具不随仓库上传。当前已包含社区运动控制源码，但尚无构建验收通过的 myyaya APK。
+本地 `.tools/` 中的下载工具与 `mobile/output/` 安装包不随源码上传。首个 ARM64 联调 APK 已通过 release 构建和静态校验；运动控制仍需 LOOI 真机验收。
 
 ## 参考资料
 

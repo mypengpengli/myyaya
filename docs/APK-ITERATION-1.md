@@ -2,6 +2,16 @@
 
 日期：2026-10-27。开发方案已具备实施条件，本次先完成直接连接现有 Hermes 的最小闭环。最终 Pi / NewAPI 主线保持不变；本阶段不要求先部署新的 Pi 服务。
 
+## 已生成的本地安装包
+
+文件：`mobile/output/android/myyaya-hermes-arm64.apk`，约 122.3 MiB，附 `.apk.sha256` 校验文件。包名 `io.github.mypengpengli.myyaya`，版本 `2.1.151` / versionCode `151`，minSdk 24、targetSdk 36，仅 ARM64。
+
+SHA256：`09c7b1d80bdbf729ac209894bef1fcc447eec2e14c9dde459a9eccb1a6e7782f`。
+
+Gradle release 构建完整通过，永久 RSA 3072 签名的 APK v2 校验通过，ZIP 完整性与对齐检查通过。包内检查确认没有 Hermes Token、签名密码、私钥文件或独立 API Key。安装包保留在本地输出目录，未发布 GitHub Release。
+
+用户选择稍后自行安装测试。当前不把真机安装、手机网络、权限、前后台或 BLE 计为通过。
+
 ## 本轮范围
 
 - 默认进入已有表情界面，不要求上游 OpenAI Key。

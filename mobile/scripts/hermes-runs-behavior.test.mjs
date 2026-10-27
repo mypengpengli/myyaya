@@ -105,4 +105,69 @@ assert.equal(fetchCalls[2].options.headers["Idempotency-Key"], task.id);
 fetchMock = async () => new Response("secret_response_must_not_escape", { status: 401 });
 await assert.rejects(transport.status("run_fixture"), (error) => error instanceof HermesHttpError && error.status === 401 && !error.message.includes("secret_response"));
 sql.close();
-console.log("Hermes runs: durable SQLite intent, idempotent retry, credential binding, stop reconciliation, bounded SSE and UTF-8: PASS");
+
+// Run the production monitor with controlled app state and clock scheduling.
+// Restoring a known run must use GET, never create another server job.
+const nativeSetTimeout = globalThis.setTimeout, nativeClearTimeout = globalThis.clearTimeout;
+const scheduled = new Map(); let timerId = 0;
+let currentConnection = { version: 1, baseUrl: origin, token: "fixture-token" };
+let connectionRead = async () => currentConnection;
+let onAppState = null;
+const appState = { currentState: "active", addEventListener: (_name, listener) => {
+  onAppState = listener; return { remove: () => { onAppState = null; } };
+} };
+const savedTasks = [ { ...task, runId: "run_restored", status: "running", output: "", progress: [] }, { ...task, id: "pending_restored", runId: null } ];
+const memoryRepository = { list: () => savedTasks, save: (value) => {
+  const index = savedTasks.findIndex((item) => item.id === value.id); savedTasks[index] = value;
+} };
+let queries = 0, creates = 0;
+const attached = [];
+const monitorClient = {
+  status: async () => { queries++; return { run_id: "run_restored", status: "running" }; },
+  submit: async () => { creates++; throw new Error("monitor_must_not_submit"); },
+  events: async (_id, signal, emit) => {
+    attached.push({ signal, emit });
+    await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+  },
+};
+const drain = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+let disposeMonitor;
+try {
+  globalThis.setTimeout = (fn, delay) => { const id = ++timerId; scheduled.set(id, { fn, delay }); return id; };
+  globalThis.clearTimeout = (id) => { scheduled.delete(id); };
+  const runtime = load("src/hermes/task-runtime.ts", {
+    "expo-crypto": { randomUUID: uuid, CryptoDigestAlgorithm: { SHA256: "SHA256" },
+      digestStringAsync: async (_algorithm, value) => value.endsWith("fixture-token") ? account : "other-account" },
+    "react-native": { AppState: appState }, "./connection": { readHermesConnection: () => connectionRead() },
+    "./run-client": { createRunClient: () => monitorClient }, "./run-protocol": protocol,
+    "./run-store": { hermesTaskRepository: memoryRepository }, "./task-service": { HermesTaskService },
+  });
+  const poll = async () => {
+    const next = [...scheduled.entries()].find(([, value]) => value.delay === 3_000);
+    assert.ok(next, "monitor must schedule its next bounded poll");
+    scheduled.delete(next[0]); next[1].fn(); await drain();
+  };
+  disposeMonitor = runtime.startHermesTaskMonitor(); await drain();
+  assert.equal(queries, 1); assert.equal(creates, 0); assert.equal(attached.length, 1);
+  attached[0].emit({ event: "tool.started", tool: "terminal" });
+  assert.equal(runtime.getHermesTaskService().list().find((item) => item.id === task.id).progress.length, 1);
+  appState.currentState = "background"; onAppState("background"); await drain();
+  assert.equal(attached[0].signal.aborted, true, "background must release the stream without stopping the server job");
+  attached[0].emit({ event: "tool.completed", tool: "late" });
+  await poll(); assert.equal(queries, 1, "background must not keep polling");
+  appState.currentState = "active"; onAppState("active"); await poll();
+  assert.equal(queries, 2); assert.equal(creates, 0);
+  assert.equal(runtime.getHermesTaskService().list().find((item) => item.id === task.id).progress.length, 1,
+    "events arriving after transport cancellation must not mutate restored task state");
+  currentConnection = { ...currentConnection, token: "other-token" }; await poll();
+  assert.equal(queries, 2, "changed credentials must not query or replay tasks from another binding");
+  disposeMonitor(); await drain(); assert.equal(scheduled.size, 0);
+  let resolveConnection;
+  connectionRead = () => new Promise((resolve) => { resolveConnection = resolve; });
+  disposeMonitor = runtime.startHermesTaskMonitor(); disposeMonitor();
+  resolveConnection(currentConnection); await drain();
+  assert.equal(scheduled.size, 0, "late configuration loading cannot revive a disposed monitor");
+} finally {
+  disposeMonitor?.(); globalThis.setTimeout = nativeSetTimeout; globalThis.clearTimeout = nativeClearTimeout;
+}
+console.log("Hermes runs: SQLite recovery, idempotency, stop reconciliation, UTF-8 SSE and foreground monitor lifecycle: PASS");
