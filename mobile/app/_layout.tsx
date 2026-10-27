@@ -14,6 +14,7 @@ import { useUserStore } from '@/src/store/user';
 import { markRobotInteraction, startRobotInactivityTimer, stopRobotInactivityTimer } from '@/src/core/robot-inactivity';
 import { recordDiagnosticEvent } from '@/src/diagnostics/diagnostic-log';
 import { useAppMode } from '@/src/setup/use-app-mode';
+import { startHermesTaskMonitor } from '@/src/hermes/task-runtime';
 import { startPerformanceMonitor, stopPerformanceMonitor } from '@/src/diagnostics/performance-monitor';
 import {
   cancelBackgroundHardExit,
@@ -34,6 +35,7 @@ export const unstable_settings = {
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
+  useEffect(() => startHermesTaskMonitor(), []);
   const robotSleeping = useUserStore((state) => state.robotSleeping);
   const [loaded, error] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),

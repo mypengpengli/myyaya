@@ -57,7 +57,7 @@ export function HermesConnectionSettings() {
 
   return <View style={styles.card}>
     <Text style={styles.title}>Hermes 服务器连接</Text>
-    <Text style={styles.help}>首次填写一次 Token，之后保存在本机安全存储中。此处用于检查连接，办公派单功能待接入。</Text>
+    <Text style={styles.help}>首次填写一次 Token，之后保存在本机安全存储中。保存并测试连接后，可从表情首页进入“执行任务”。</Text>
     <TextInput accessibilityLabel="Hermes 服务地址" value={baseUrl} onChangeText={setBaseUrl} editable={!busy}
       autoCapitalize="none" autoCorrect={false} keyboardType="url" style={styles.input} />
     <TextInput accessibilityLabel="Hermes API Token" value={token} onChangeText={setToken} editable={!busy}

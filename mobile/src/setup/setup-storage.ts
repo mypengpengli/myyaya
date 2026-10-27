@@ -1,4 +1,5 @@
 import { createMMKV } from "react-native-mmkv";
+import { isHermesIntegrationBuild } from "./build-profile";
 
 export type OptionalSetupCapability = "robot";
 
@@ -40,7 +41,7 @@ export function getSetupStorageState(): SetupStoragePayload {
     const migrated: SetupStoragePayload = {
       version: 3,
       // Existing OpenAI credentials never imply consent to enable cloud voice.
-      appMode: parsed.appMode === "legacy_realtime" ? "legacy_realtime" : "local",
+      appMode: !isHermesIntegrationBuild() && parsed.appMode === "legacy_realtime" ? "legacy_realtime" : "local",
       onboardingCompleted: Boolean(parsed.onboardingCompleted),
       skipped: { robot: Boolean(parsed.skipped?.robot) },
       updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : defaultSetupState.updatedAt,
@@ -56,7 +57,7 @@ export function getSetupStorageState(): SetupStoragePayload {
 }
 
 export function getAppMode(): AppMode {
-  return getSetupStorageState().appMode;
+  return isHermesIntegrationBuild() ? "local" : getSetupStorageState().appMode;
 }
 
 export function subscribeAppMode(listener: () => void): () => void {
@@ -66,6 +67,7 @@ export function subscribeAppMode(listener: () => void): () => void {
 
 export function setAppMode(appMode: AppMode): void {
   if (appMode !== "local" && appMode !== "legacy_realtime") throw new Error("Unsupported app mode");
+  if (appMode === "legacy_realtime" && isHermesIntegrationBuild()) throw new Error("Legacy voice is unavailable in this integration build");
   const state = getSetupStorageState();
   if (state.appMode === appMode) return;
   setupStorage.set(SETUP_STORAGE_KEY, JSON.stringify({ ...state, appMode, updatedAt: new Date().toISOString() }));

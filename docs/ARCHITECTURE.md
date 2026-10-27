@@ -124,7 +124,7 @@ Agent 每个会话串行，首版 `toolExecution: "sequential"`；外部作业�
 
 ## 8. Hermes 适配：复用真实服务能力
 
-用户已确认 NousResearch Hermes `v0.21.6+199.g1744a19`，直接安装于 Linux，通过 systemd 用户服务 hermes-gateway.service 启动；底层 custom/gpt-6.1-sol 的凭据留服务器。已提供 `https://hermes.jiazhuangai.com`，用户实测真实任务/SSE，本机复核健康、鉴权与四项 Runs 能力通过。手机提供首次手填 Token 的 SecureStore 设置与只读连接测试；真正派单和手机网络仍待验收。具体契约见 [HERMES-INTEGRATION.md](HERMES-INTEGRATION.md)。
+用户已确认 NousResearch Hermes `v0.21.6+199.g1744a19`，直接安装于 Linux，通过 systemd 用户服务 hermes-gateway.service 启动；底层 custom/gpt-6.1-sol 的凭据留服务器。已提供 `https://hermes.jiazhuangai.com`，健康、鉴权与四项 Runs 能力通过。手机已实现 SecureStore 连接设置、文字派单、SQLite 恢复、SSE 执行面板与停止请求；实际 TypeScript 客户端已完成真实任务/幂等/SSE 联调。首轮手机直接连接 Hermes，正式 Pi 转接随后接入；手机网络与原生行为仍待真机验收。具体契约见 [HERMES-INTEGRATION.md](HERMES-INTEGRATION.md)。
 
 优先流程：能力发现 → 幂等提交 run → 持久化外部 run_id → 事件/状态 → 取消 → 产物导入。当前官方文档描述 `GET /v1/capabilities`、`POST /v1/runs`、状态/事件和 stop；插件按运行服务发现结果接线，不依赖私有 Python 内部结构。[官方 API 文档](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server)
 

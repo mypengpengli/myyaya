@@ -1,5 +1,17 @@
 # Building My LOOI
 
+## myyaya Hermes integration APK on Windows
+
+The first implementation scope and device checks are in [APK iteration 1](../docs/APK-ITERATION-1.md).
+Use JDK 17, Android platform/build-tools 36, NDK `27.1.12297006`, CMake `3.22.1`, Node 22+ and pnpm 10.34.5.
+Install the SDK from [Google's official tools](https://developer.android.com/studio) and JDK from [Microsoft OpenJDK](https://learn.microsoft.com/java/openjdk/download).
+
+Set `JAVA_HOME`, `ANDROID_HOME` and the four `MY_LOOI_RELEASE_*` signing variables described below in the build process environment. They are read by Gradle only; no API Token is needed to build. Do not put credentials in `app.config.js` or `EXPO_PUBLIC_*` variables.
+
+Run `powershell -File scripts/build-hermes-apk.ps1` from the mobile directory. The helper copies Git-visible source into a fresh ASCII-only build path, pins the Expo SDK 56 template (`56.0.38`), validates code, and builds a signed ARM64 release APK at `output/android/myyaya-hermes-arm64.apk` with its SHA256 file. Build and cache directories must also use ASCII paths on Windows; direct prebuild in the original Chinese workspace failed before native compilation.
+
+The `hermes-integration` profile excludes the unused upstream RU/UK/EN Vosk model assets and prevents legacy Realtime startup. It supports the default local expression UI and Hermes task panel. The normal full build below retains all offline model resources. Neither build embeds the user's Hermes Token: enter it once in connection settings after installation.
+
 ## Toolchain
 
 - Node.js 22

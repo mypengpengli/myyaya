@@ -324,6 +324,10 @@ export default function IndexScreen() {
         </Pressable>
       ) : null}
       <View style={styles.languagePicker}>
+        {appMode === "local" ? <Pressable accessibilityRole="button" accessibilityLabel="打开 Hermes 执行任务"
+          onPress={() => router.replace("/tasks")} style={styles.languageButton}>
+          <Text style={styles.languageText}>执行任务</Text>
+        </Pressable> : null}
         {appMode === "legacy_realtime" ? <Pressable
           accessibilityRole="button"
           accessibilityLabel={t("home.listeningLanguageA11y", { language: listeningLanguage })}
@@ -399,7 +403,7 @@ export default function IndexScreen() {
       <View style={styles.faceStage}>
         {appMode === "local" ? <View pointerEvents="none" style={styles.repairBanner}>
           <Text style={styles.repairTitle}>本地模式</Text>
-          <Text style={styles.repairText}>无需 OpenAI Key · 语音和 Pi / NewAPI 尚未启用</Text>
+          <Text style={styles.repairText}>可通过“执行任务”连接 Hermes · 语音和 Pi / NewAPI 尚未启用</Text>
         </View> : null}
         {repairStep ? (
           <Pressable

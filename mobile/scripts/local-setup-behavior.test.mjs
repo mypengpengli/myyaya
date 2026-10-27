@@ -22,7 +22,9 @@ function loadTs(file, mocks) {
 }
 
 const values = new Map();
+let integrationBuild = false;
 const storage = loadTs("src/setup/setup-storage.ts", {
+  "./build-profile": { isHermesIntegrationBuild: () => integrationBuild },
   "react-native-mmkv": { createMMKV: () => ({
     getString: (key) => values.get(key),
     set: (key, value) => values.set(key, value),
@@ -45,6 +47,13 @@ storage.setAppMode("legacy_realtime");
 assert.equal(notifications, 1);
 storage.setAppMode("local");
 unsubscribe();
+integrationBuild = true;
+values.set("looi.setup.v1", JSON.stringify({ version: 3, appMode: "legacy_realtime" }));
+assert.equal(storage.getAppMode(), "local", "integration APK must not start legacy voice without its offline models");
+assert.equal(storage.getSetupStorageState().appMode, "local", "readiness must see the effective build mode too");
+assert.throws(() => storage.setAppMode("legacy_realtime"), /unavailable/);
+integrationBuild = false;
+storage.setAppMode("local");
 
 let hasKey = false;
 let hasModels = false;

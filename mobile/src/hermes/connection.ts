@@ -1,4 +1,5 @@
 import * as SecureStore from "expo-secure-store";
+import { fetch } from "expo/fetch";
 
 export const DEFAULT_HERMES_ORIGIN = "https://hermes.jiazhuangai.com";
 export const HERMES_MODEL_ALIAS = "hermes-agent";

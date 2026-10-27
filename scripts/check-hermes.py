@@ -7,6 +7,8 @@ import argparse
 import ctypes
 from ctypes import wintypes
 import json
+from pathlib import Path
+import subprocess
 import sys
 from urllib import error, parse, request
 
@@ -135,12 +137,22 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=DEFAULT_ORIGIN)
     parser.add_argument("--timeout", type=float, default=15)
+    parser.add_argument("--run-smoke", action="store_true", help="Submit one read-only pwd run through the APK's real TypeScript client")
     args = parser.parse_args()
     try:
         if not 0 < args.timeout <= 30:
             raise ValueError("Timeout must be between 0 and 30 seconds")
         origin = normalize_origin(args.base_url)
-        result = probe(origin, load_token(origin), args.timeout)
+        token = load_token(origin)
+        if args.run_smoke:
+            mobile = Path(__file__).resolve().parent.parent / "mobile"
+            completed = subprocess.run(["node", "scripts/hermes-runs-live.mjs"], cwd=mobile,
+                input=json.dumps({"baseUrl": origin, "token": token}), text=True, capture_output=True, timeout=170)
+            # The child reports allowlisted metadata only. Never forward exception text/stderr.
+            result = json.loads(completed.stdout)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if completed.returncode == 0 and result.get("passed") is True else 1
+        result = probe(origin, token, args.timeout)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result["passed"] else 1
     except Exception as exc:

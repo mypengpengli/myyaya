@@ -1,6 +1,6 @@
 # 现有 Ubuntu Hermes 接入契约
 
-日期：2026-10-27。状态：用户已实测真实 Runs/SSE 任务；本机已完成只读 HTTPS、鉴权与能力核验。手机连接设置已实现，待构建 APK 后进行手机网络实测；任务派单尚未接入 App。
+日期：2026-10-27。状态：手机连接设置、文字派单、SQLite 恢复、SSE 执行面板与停止请求已实现。同一份 TypeScript 客户端已通过真实 HTTPS 任务/幂等/SSE 联调，手机网络与安装后行为待真机验收。范围见[首轮 APK](APK-ITERATION-1.md)。
 
 ## 已确认的部署信息
 
@@ -35,13 +35,15 @@
 - 测试按钮只执行健康、无鉴权模型、带鉴权模型、能力发现四类 GET，不提交任务或执行终端命令；保存连接不要求启用旧 OpenAI Realtime，也不阻塞默认本地模式。
 - 本机调试 Token 已保存至当前 Windows 用户的凭据管理器，目标名为 `myyaya/hermes/https://hermes.jiazhuangai.com`；源码、APK 安装包、公开文档和 `.env` 文件都没有该值。
 - 后续电脑调试运行 `python scripts/check-hermes.py`；脚本自动读取上述凭据，不打印 Token，只作只读检查。手机上的 SecureStore 与电脑凭据管理器分别保存，不能自动互通。
+- `python scripts/check-hermes.py --run-smoke` 额外用 APK 的实际客户端提交一个只读 `pwd` 任务，验证状态、SSE 和同键重试；目前已经通过。
+- 首轮联调使用手机 → Hermes 直连，以尽早交付可安装闭环；Pi → Hermes 的正式拓扑仍是后续整合目标，尚无 Pi 服务可连接。
 
 | 验证项 | 用户提供的实测 | 本机本次复核 |
 | --- | --- | --- |
 | HTTPS 健康 / 无 Token 模型 / 带 Token 模型 | 200 / 401 / 200 | 200 / 401 / 200 |
 | capability 与四项 Runs 能力 | 建议先发现实际能力 | HTTP 200，run_submission/run_status/run_events_sse/run_stop 均为 true |
-| 真实任务提交、状态、终端执行 | 202 → completed，`pwd` 返回实际工作目录 | 未重复提交任务 |
-| SSE 工具开始、完成、任务完成 | 收到 tool.started/tool.completed/run.completed | 本次只读检查未创建新的 SSE 任务 |
+| 真实任务提交、状态、终端执行 | 202 → completed，`pwd` 返回实际工作目录 | 实际 TypeScript 客户端提交 pwd 并获得 completed/结果，同键重试返回同一 run_id |
+| SSE 工具开始、完成、任务完成 | 收到 tool.started/tool.completed/run.completed | 实际收到这三类事件，支持 data JSON event 字段 |
 | 实际模型 | custom / gpt-6.1-sol | 未发起推理请求重新核对模型 |
 
 ## Runs API 映射

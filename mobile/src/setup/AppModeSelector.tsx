@@ -5,9 +5,11 @@ import { syncVoiceRuntime } from "../core/app-bootstrap";
 import { looiTheme } from "../ui/looi-theme";
 import { setAppMode, type AppMode } from "./setup-storage";
 import { useAppMode } from "./use-app-mode";
+import { isHermesIntegrationBuild } from "./build-profile";
 
 export function AppModeSelector() {
   const appMode = useAppMode();
+  const integrationBuild = isHermesIntegrationBuild();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,12 +31,12 @@ export function AppModeSelector() {
 
   return <View style={styles.card}>
     <Text style={styles.title}>运行模式</Text>
-    <Text style={styles.help}>{appMode === "local"
+    <Text style={styles.help}>{integrationBuild ? "Hermes 联调版：表情和文字任务已接入；中文语音、媒体生成及 Pi 服务将分阶段加入。请先填写下方 Hermes 连接设置。" : appMode === "local"
       ? "本地模式：无需 OpenAI Key，可进入表情、本地记忆和设备设置；不会自动开启麦克风或旧版云端语音。录像和 Pi / NewAPI 尚未接入。"
       : "旧版 Realtime：仅此功能需要 OpenAI Key、本地语音模型和麦克风权限，可能产生 OpenAI 费用。Pi / NewAPI 尚未接入。"}</Text>
     <View style={styles.row}>
       <Pressable disabled={busy} accessibilityRole="button" accessibilityState={{ selected: appMode === "local" }} onPress={() => void selectMode("local")} style={[styles.button, appMode === "local" && styles.selected]}><Text style={styles.label}>本地模式（默认）</Text></Pressable>
-      <Pressable disabled={busy} accessibilityRole="button" accessibilityState={{ selected: appMode === "legacy_realtime" }} onPress={() => void selectMode("legacy_realtime")} style={[styles.button, appMode === "legacy_realtime" && styles.selected]}><Text style={styles.label}>配置旧版 OpenAI Realtime</Text></Pressable>
+      {!integrationBuild ? <Pressable disabled={busy} accessibilityRole="button" accessibilityState={{ selected: appMode === "legacy_realtime" }} onPress={() => void selectMode("legacy_realtime")} style={[styles.button, appMode === "legacy_realtime" && styles.selected]}><Text style={styles.label}>配置旧版 OpenAI Realtime</Text></Pressable> : null}
     </View>
     {error ? <Text style={styles.help}>{error}</Text> : null}
   </View>;

@@ -12,6 +12,7 @@ export default function TabLayout() {
       <Tabs.Screen name="conversation" />
       <Tabs.Screen name="memories" />
       <Tabs.Screen name="settings" />
+      <Tabs.Screen name="tasks" />
     </Tabs>
   );
 }

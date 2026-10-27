@@ -15,6 +15,7 @@ const code = ts.transpileModule(fs.readFileSync("src/hermes/connection.ts", "utf
 }).outputText;
 const module = { exports: {} };
 new Function("exports", "require", "module", code)(module.exports, (name) => {
+  if (name === "expo/fetch") return { fetch: (...args) => globalThis.fetch(...args) };
   assert.equal(name, "expo-secure-store");
   return secureStore;
 }, module);
