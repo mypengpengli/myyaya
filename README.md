@@ -1,84 +1,60 @@
 # 小丫 · myyaya
 
-运行在 Android 手机上的 LOOI 机器人应用，目标包括小米 12 Pro、红米 K50 等 ARM64 手机，不限定某一机型。手机提供表情、麦克风、扬声器和摄像头，LOOI 底座通过蓝牙连接；需要处理服务器任务时，可以接入自己的 Hermes Agent。
+小丫是运行在 Android 手机上的 LOOI 陪伴机器人应用。手机负责表情、中文对话、摄像头和作品展示，通过蓝牙控制底座；办公、浏览器等任务可以交给自己的 Hermes Agent。
 
-基于 [My LOOI](https://github.com/razor79/my-looi) 开发，保留社区的底座协议、动作控制和表情能力，增加中文离线语音、中文控制界面与 Hermes 任务面板。
+基于 [My LOOI](https://github.com/razor79/my-looi) 开发，复用社区底座协议、动作与表情。手机端使用 TypeScript / React Native，硬件、相机和文件功能使用 Kotlin。
 
-**开发中的 2.1.153：** 已接入 Pi/自有中转对话、授权与连接引导、表情首页和底部小字进度；增加作品保存/回放、手动停止有声录像、异步媒体任务代码。源码与协议验证正在完成，原生 APK 和真实手机闭环尚未验收，下面下载链接仍为 2.1.152。**换电脑继续请先读 [开发交接](docs/CONTINUE-DEVELOPMENT.md)**；交互说明见 [陪伴体验](docs/COMPANION-UX.md)。
+## 下载
 
-## 下载安装
+**[下载最新 APK](https://github.com/mypengpengli/myyaya/releases/latest)**
 
-**[下载最新版本](https://github.com/mypengpengli/myyaya/releases/latest)**
-
-当前版本：[v2.1.152 · ARM64 APK](https://github.com/mypengpengli/myyaya/releases/download/v2.1.152/myyaya-2.1.152-arm64.apk)，约 164 MB。支持 Android 7.0 及以上的 ARM64 设备，横屏使用；主要适配目标为小米 12 Pro + LOOI。
-
-下载 APK 后在手机上打开安装。首次安装可能需要允许浏览器或文件管理器“安装未知应用”。本地表情、底座控制和中文识别不需要 OpenAI Key。
-
-## 当前功能
-
-| 功能 | 说明 |
-| --- | --- |
-| 机器人表情 | 全屏表情、触摸互动，任务面板中保留小表情 |
-| 蓝牙底座控制 | 扫描连接、保存选择、前台重连、断开连接 |
-| 动作与灯光 | 前进、后退、转向、抬头、低头、回正、点头、跳舞、开关灯 |
-| 中文离线口令 | 内置中文模型；开启后用“小丫小丫”唤醒，短口令控制动作 |
-| 中文听写与朗读 | 听写后检查文字，发送给 Hermes；可使用系统中文离线音色朗读结果 |
-| Hermes 任务 | 提交文字任务、显示执行进度和结果、请求停止、重开后查询已保存的任务 |
-| 人脸注视 | 可开启本地人脸检测与头部、身体朝向修正 |
-| 应用内更新 | 检查 GitHub Releases、下载校验、确认安装新版 |
-
-当前为早期测试版。构建、签名和源码回归检查已通过；手机与底座的识别效果、动作角度和固件兼容性仍需真机测试。转向采用社区的时间估算，动作保留传感器保护与超时停止机制。
+支持 Android 7.0 及以上 ARM64 手机，横屏使用。本轮在小米 12 Pro / HyperOS 3 和 LOOI 上验证；具体版本、安装包与校验文件以 Release 页面为准。当前开发版本为 **2.1.162**，验证边界见[手机验收](docs/PHONE-CHECK-2026-10-28.md)与[功能完成度](docs/FEATURE-COMPLETION-2026-10-28.md)。
 
 ## 开始使用
 
-### 连接底座
+1. 安装后按引导允许蓝牙、麦克风和相机权限。
+2. 给 LOOI 通电，按语音提示长按触控区约 3 秒，黄灯呼吸后松手。连接页持续搜索 90 秒，也可点 **已变黄，开始搜索** 立即重搜。保存过的底座自动匹配；发现多个新底座时选择自己的那台。看到“LOOI 已连接”后再测试动作。
+3. 填写自己的模型中转站、Key 和模型名称。默认采用 Agnes 对话与媒体模型；本地中文唤醒和底座控制不需要 OpenAI Key。
+4. 回到表情页，说 **“小丫小丫”** 唤醒。从右向左滑动打开菜单，可修改模型、Tavily 搜索及其他设置。
 
-首页 → **底座控制** → **扫描附近 LOOI**，选择底座连接。连接后可测试头部动作、灯光和短时移动。红色“立即停止”按钮随时可用。
+模型、搜索和 Hermes 的密钥分别填写，保存在手机安全存储中，不预置在源码或安装包里。当前使用系统中文声音，不要求另配 Azure。
 
-如果无法连接，请检查蓝牙、附近设备权限和底座电源，并退出其他占用底座连接的应用。
+## 主要功能
 
-### 中文语音
+| 功能 | 使用方式 |
+| --- | --- |
+| 中文陪伴对话 | 本地唤醒后，由手机内的 Pi Agent 调用模型与手机工具，表情显示当前状态 |
+| 底座动作 | 前后移动、左右转、抬头、低头、回正、点头、灯光等；短动作自动停止，“停止”无需唤醒 |
+| 拍照与观察 | “拍张照片”显示确认、重拍和取消；“看看眼前是什么”后台实拍并分析，默认不弹图 |
+| 录像与作品 | 录像手动停止并保存；图片、视频和文档可重开、固定、关闭，视频支持暂停、重播与跳转 |
+| 图片与视频生成 | 后台生成、改图和图生视频，保留版本与输入来源；接口可用性取决于自己的模型服务 |
+| 联网搜索 | 设置 Tavily Key 后调用搜索，回答依据实际返回的来源 |
+| Hermes 办公任务 | 显示真实进度、取回文件、完成通知、查询旧任务和沿原会话续办 |
+| Word / PPT 原文件 | 保留 DOCX / PPTX，可保存到手机或交给 WPS 打开编辑；不自动转 PDF |
+| 应用内更新 | 从自己的 GitHub Releases 检查、下载并校验新版，再由 Android 确认安装 |
 
-点击 **开启中文口令**，允许麦克风权限，等待中文模型加载完成。例如：
+图片默认显示 10 秒，可固定；视频正常播放结束后再倒计时 10 秒。关闭展示不会删除作品。App 内 Office 预览以内容为主，完整排版和编辑交给 WPS 等应用，编辑后可另存并重新导入。
 
-- “小丫小丫，前进。”
-- “后退”“左转”“右转”“抬头”“点头”“跳舞”“开灯”。
-- “停止”无需唤醒。
+前后移动与左右转、抬头、回正已有用户现场确认；WPS Word 编辑另存、两页 PPT 显示、拍照重拍确认、后台视觉问答及录像播放已完成首轮真机验证。多轮媒体生成、模型接口超时和完整升级流程仍按验收记录核对。
 
-唤醒后 15 秒内可以继续说动作口令。语音识别在手机本地运行，退出页面或进入后台会关闭监听。点击“听写一句话”只生成文字，不自动执行动作；在任务页点击“采用这句话”后可以编辑再发送。
+## 连接 Hermes
 
-朗读需要手机已安装中文离线音色。Azure 晓悠童声是后续可选接入，当前版本不依赖 Azure。
+在设置中填写自己的 HTTPS 服务地址与独立 API Token。服务器使用 Runs API 和 SSE；APK 保存 run_id 和幂等键，恢复前台后继续查询，不重复提交同一次请求。
 
-### 连接 Hermes
+服务器返回办公文件需要配置[文件桥](server/README.md)，APK 校验后存入作品库。旧任务和会话可以查询，用户明确要求继续处理时才创建续办记录。详见 [Hermes 接入](docs/HERMES-INTEGRATION.md)。
 
-设置 → **Hermes 服务器连接**，填写服务地址和独立 API Token，点击 **保存并测试连接**。之后从首页进入 **执行任务**。
+## 更新与后续开发
 
-服务器需要提供兼容的 Runs API 与 SSE 进度接口，详见 [Hermes 接入说明](docs/HERMES-INTEGRATION.md)。Token 保存在手机安全存储中，安装包不预置用户密钥。
+菜单 → 设置 → 更新 → 检查更新，发现新版后下载并确认安装。首次可能需要允许小丫“安装未知应用”。相同包名和签名可覆盖升级，通常保留配置、任务和作品；不提供静默安装。
 
-### 更新应用
+目前尚未完成全部原始需求。认人、身形身份、声源定位、跟随、房间导航及指定微信联系人或邮箱自动发送仍属于后续开发；现有的人脸检测和注视不代表具备这些能力。当前不以更换音色为开发重点。
 
-设置 → **更新（Updates）** → **检查更新（Check for updates）**，发现新版后下载并确认安装。首次在 App 内更新时，按系统提示允许 myyaya 安装应用。
+## 开发文档
 
-后续版本使用相同包名与签名发布，可覆盖升级，正常情况下保留设置和任务数据，无需 USB 连接。当前不提供静默安装；首次手机端覆盖升级仍待实测。详见 [更新说明](docs/UPDATES.md)。
+- [继续开发与交接](docs/CONTINUE-DEVELOPMENT.md) · [构建方法](mobile/BUILDING.md)
+- [功能完成度](docs/FEATURE-COMPLETION-2026-10-28.md) · [本轮计划](docs/NEXT-DEVELOPMENT-2026-10-28.md)
+- [手机验收](docs/PHONE-CHECK-2026-10-28.md) · [当前进度](docs/STATUS.md)
+- [产品需求](docs/PRODUCT-REQUIREMENTS.md) · [架构](docs/ARCHITECTURE.md)
+- [社区能力](docs/COMMUNITY-CAPABILITIES.md) · [代码来源](docs/UPSTREAM.md) · [更新说明](docs/UPDATES.md)
 
-## 后续开发
-
-- 连续中文语音对话、NewAPI 模型接入和 Azure 晓悠。
-- 拍照、生图、图生图、视频生成与统一媒体查看器。
-- 手机工具与服务器智能体协作、文件返回和办公文档查看。
-- 人物识别、跟随与房间导航。
-
-以上功能尚未全部实现。当前的人脸注视不等同于跟随行走或自主导航。
-
-## 开发与文档
-
-手机端采用 React Native / Expo + TypeScript，硬件与音频使用 Kotlin 原生模块。源码位于 `mobile/`，构建方法见 [BUILDING](mobile/BUILDING.md)。
-
-- [当前进度](docs/STATUS.md) · [构建与验证](docs/VALIDATION.md)
-- [社区能力与测试顺序](docs/COMMUNITY-CAPABILITIES.md) · [代码来源](docs/UPSTREAM.md)
-- [产品需求](docs/PRODUCT-REQUIREMENTS.md) · [架构设计](docs/ARCHITECTURE.md)
-- [APK 在线更新](docs/UPDATES.md) · [导航研究](docs/NAVIGATION-RESEARCH.md)
-
-## 致谢与许可
-
-感谢 [razor79/my-looi](https://github.com/razor79/my-looi) 与 [GrinZero/super-looi](https://github.com/GrinZero/super-looi) 的开源工作。社区代码的 MIT 许可保留于 [mobile/LICENSE](mobile/LICENSE)，模型和依赖说明见 [第三方声明](mobile/THIRD_PARTY_NOTICES.md)。
+感谢 [razor79/my-looi](https://github.com/razor79/my-looi) 与 [GrinZero/super-looi](https://github.com/GrinZero/super-looi) 的开源工作。MIT 许可保留于 [mobile/LICENSE](mobile/LICENSE)，模型与依赖见[第三方声明](mobile/THIRD_PARTY_NOTICES.md)。

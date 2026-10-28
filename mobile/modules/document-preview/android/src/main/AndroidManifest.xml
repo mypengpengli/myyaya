@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<queries><intent><action android:name="android.intent.action.VIEW" /><data android:mimeType="*/*" /></intent></queries>
+<application>
+  <provider android:name="com.myyaya.documentpreview.DocumentFileProvider" android:authorities="${applicationId}.myyaya.documents" android:exported="false" android:grantUriPermissions="true">
+    <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/myyaya_document_paths" />
+  </provider>
+</application></manifest>

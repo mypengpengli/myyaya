@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { listArtifacts, presentArtifact } from "@/src/artifacts/artifact-store";
+import { importLocalArtifact } from "@/src/artifacts/artifact-import";
 import { getMediaJobs } from "@/src/artifacts/media-jobs";
 import { looiTheme as theme } from "@/src/ui/looi-theme";
 const labels = { submitting: "正在提交", running: "正在生成", completed: "已保存", failed: "生成失败", unknown: "结果待核对" };
@@ -10,12 +11,22 @@ export default function Artifacts() {
   const router = useRouter(), service = getMediaJobs();
   const jobs = useSyncExternalStore(service.subscribe, service.list, service.list);
   const [items, setItems] = useState(listArtifacts);
+  const [importing, setImporting] = useState(false), [notice, setNotice] = useState("");
+  const importFile = async () => {
+    if (importing) return;
+    setImporting(true); setNotice("");
+    try { const file = await importLocalArtifact(); if (file) { setItems(listArtifacts()); setNotice("文件已保存，可点击打开"); } }
+    catch { setNotice("文件导入失败，请选择支持的文档、图片或 MP4，且不超过 25 MB。"); }
+    finally { setImporting(false); }
+  };
   useFocusEffect(useCallback(() => { setItems(listArtifacts()); }, []));
   useEffect(() => { setItems(listArtifacts()); }, [jobs]);
   const open = (id: string) => { presentArtifact(id); router.replace("/"); };
   return <SafeAreaView style={styles.safe}>
     <View style={styles.header}><Text style={styles.title}>作品与录像</Text><Pressable onPress={() => router.replace("/menu")}><Text style={styles.link}>返回菜单</Text></Pressable></View>
     <ScrollView contentContainerStyle={styles.body}>
+      <Pressable accessibilityRole="button" disabled={importing} onPress={() => void importFile()} style={styles.card}><Text style={styles.link}>{importing ? "正在导入…" : "导入本地文件"}</Text><Text style={styles.detail}>PDF、Word、PPT、文本、图片或 MP4 · 单文件不超过 25 MB</Text></Pressable>
+      {notice ? <Text accessibilityLiveRegion="polite" style={styles.detail}>{notice}</Text> : null}
       {jobs.filter((job) => job.status !== "completed").map((job) => <View key={job.id} style={styles.card}>
         <Text style={styles.text}>{labels[job.status]} · {job.kind === "video" ? "视频" : "图片"}</Text>
         <Text style={styles.detail}>{job.prompt}</Text><Text style={styles.detail}>{job.notice}</Text>

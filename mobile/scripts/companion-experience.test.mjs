@@ -70,14 +70,15 @@ assert.equal(discovery.isLooiAdvertisement({ name: "Headphones", serviceUUIDs: [
 assert.equal(discovery.looiAdvertisementName({ name: "stale", localName: "LOOI Robot" }), "LOOI Robot");
 
 // Run actual scanning: incremental candidates arrive before timeout; abort
-// waits for stop/destroy, and a powered-off adapter produces an actionable error.
+// waits for scan stop without destroying the shared GATT client, and a
+// powered-off adapter produces an actionable error.
 let scanCallback;
 let adapterState = "PoweredOn";
-let stopped = 0, destroyed = 0, scans = 0;
+let stopped = 0, destroyed = 0, scans = 0, existingGattConnected = true;
 const manager = {
   state: async () => adapterState,
   startDeviceScan: async (_filters, options, callback) => { scans++; assert.equal(options.allowDuplicates, true); scanCallback = callback; },
-  stopDeviceScan: async () => { stopped++; }, destroy: async () => { destroyed++; },
+  stopDeviceScan: async () => { stopped++; }, destroy: async () => { destroyed++; existingGattConnected = false; },
 };
 const transport = load("src/device-tools/react-native-ble-transport.ts", {
   "react-native": { Platform: platform },
@@ -94,12 +95,13 @@ await drain(); assert.equal(scans, 1);
 scanCallback(null, { id: "test", name: "", localName: "LOOI", rssi: -40 });
 assert.equal(updates[0][0].name, "LOOI");
 controller.abort(); assert.deepEqual(await scanning, []);
-assert.equal(stopped, 1); assert.equal(destroyed, 1);
+assert.equal(stopped, 1); assert.equal(destroyed, 0);
+assert.equal(existingGattConnected, true, "stopping discovery must preserve an existing shared GATT connection");
 scanCallback(null, { id: "late", localName: "LOOI" });
 assert.equal(updates.length, 1, "cancelled scans cannot publish late candidates");
 adapterState = "PoweredOff";
 await assert.rejects(transport.scanLooiRobotCandidates(), /蓝牙未开启/);
-assert.equal(scans, 1); assert.equal(destroyed, 2);
+assert.equal(scans, 1); assert.equal(destroyed, 0);
 
 // Auto wake is a foreground lifecycle policy, not an extra microphone dialog.
 const timers = new Map(); let timerId = 0;

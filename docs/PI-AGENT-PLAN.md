@@ -65,7 +65,7 @@ flowchart TD
 | 语音识别 | `TeleAI/TeleSpeechASR` | `/v1/audio/transcriptions` 接收 WAV；一段合成中文指令识别成功，昵称出现同音字；真实远场语音未测 |
 | 图片生成 | `agnes-image-2.5-flash` | `/v1/images/generations` 生成一张图片并下载到有效 PNG；与普通聊天分开 |
 | 视频生成 | `agnes-video-2.5` | 模型列表可见；尚未验证提交、状态查询和结果协议，暂不开放正式工具 |
-| 中文朗读 | 首选童声候选 Azure `zh-CN-XiaoyouNeural`；系统中文 TTS 降级 | 用户本次要求可爱童声；候选需独立 Speech 凭据和试听，尚未接入。系统音色/离线/打断需真机测；现有社区旧 `tts.ts` 已退休 |
+| 中文朗读 | 当前使用手机系统中文 TTS | 2026-10-28 用户听到并接受现有声音，Azure 晓悠降为最低优先级、现在不用；重点验证打断与音频交接；现有社区旧 `tts.ts` 已退休 |
 
 NewAPI 地址配置为 `https://apichat.jiazhuangai.com/v1`，自定义 provider 名建议为 `myyaya-newapi`。模型 ID 按接口返回原样使用；不根据 `agnes` 名称推断其背后的厂商或真实模型。
 

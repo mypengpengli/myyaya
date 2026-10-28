@@ -1,5 +1,5 @@
 export type RunStatus = "pending" | "started" | "queued" | "running" | "waiting_for_approval" | "stopping" | "completed" | "failed" | "cancelled" | "interrupted";
-export type RunSnapshot = { run_id: string; status: RunStatus; output?: string };
+export type RunSnapshot = { run_id: string; status: RunStatus; output?: string; session_id?: string };
 export type RunEvent = { event: string; [key: string]: unknown };
 export const terminalRun = (status: RunStatus) => ["completed", "failed", "cancelled", "interrupted"].includes(status);
 
@@ -10,6 +10,7 @@ export function parseRunSnapshot(value: unknown): RunSnapshot {
     throw new Error("invalid_run_response");
   }
   return { run_id: data.run_id, status: data.status as RunStatus,
+    ...(typeof data.session_id === "string" && /^[A-Za-z0-9_-]{1,200}$/.test(data.session_id) ? { session_id: data.session_id } : {}),
     ...(typeof data.output === "string" ? { output: data.output } : {}) };
 }
 

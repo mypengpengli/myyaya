@@ -2,7 +2,8 @@ import { useCallback, useRef, useState } from "react";
 import { useFocusEffect, useRouter } from "expo-router";
 import { PermissionsAndroid, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { connectSelectedLooiRobot, scanLooiRobotCandidates, clearSavedLooiRobot, type LooiRobotCandidate } from "@/src/device-tools/looi-robot-autoconnect";
+import { clearSavedLooiRobot } from "@/src/device-tools/looi-robot-autoconnect";
+import { LooiPairingPanel } from "@/src/setup/LooiPairingPanel";
 import { getLooiRobotRuntimeState, stopLooiMotion, subscribeLooiRobotRuntimeState, clearLooiNearEdgeAfterManualReposition } from "@/src/device-tools/looi-robot";
 import { executeChineseRobotCommand } from "@/src/device-tools/chinese-robot-control";
 import type { ChineseRobotCommand } from "@/src/voice/chinese-command";
@@ -24,9 +25,9 @@ export default function RobotScreen() {
   const router = useRouter();
   const cameraAttention = useUserStore((state) => state.preferences.cameraAttentionEnabled);
   const [runtime, setRuntime] = useState(getLooiRobotRuntimeState);
-  const [candidates, setCandidates] = useState<LooiRobotCandidate[]>([]);
+  const [pairingBusy, setPairingBusy] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState("到货后可直接扫描连接，再逐项测试动作。转向角度沿用社区时间标定，需要按实机调整。");
+  const [notice, setNotice] = useState("每个动作都会自动停止。转向角度按时间估算，实际角度受地面和电量影响。");
   const operation = useRef(false);
   const active = useRef(false);
   const lease = useRef(0);
@@ -58,20 +59,11 @@ export default function RobotScreen() {
     <ScrollView contentContainerStyle={styles.content}>
       <Text style={styles.status}>{runtime.connected ? "蓝牙已连接" : runtime.connecting ? "正在连接" : "底座未连接"} · {runtime.motionActive ? "动作进行中" : "当前静止"}</Text>
       <Text accessibilityLiveRegion="polite" style={styles.notice}>{notice}</Text>
-      <View style={styles.row}><Button label={busy ? "处理中…" : "扫描附近 LOOI"} disabled={busy} onPress={() => void run(async () => {
-        const token = lease.current; const found = await scanLooiRobotCandidates();
-        if (!active.current || token !== lease.current) return;
-        setCandidates(found); setNotice(found.length ? "选择底座连接；若连接失败，请先退出其他占用蓝牙的控制应用" : "未找到底座，请检查底座电源、手机蓝牙及附近设备权限");
-      })} /><Button label="断开并忘记底座" disabled={busy} onPress={() => void run(async () => {
-        lease.current++; await clearSavedLooiRobot(); if (active.current) { setCandidates([]); setNotice("已断开并忘记保存的底座"); }
+      <LooiPairingPanel onBusy={setPairingBusy} />
+      <View style={styles.row}><Button label="断开并忘记底座" disabled={busy || pairingBusy} onPress={() => void run(async () => {
+        lease.current++; await clearSavedLooiRobot(); if (active.current) setNotice("已断开并忘记保存的底座；重新进入此页可再次配对");
       })} /></View>
-      {candidates.map((item) => <Button key={item.id} label={`${item.name} · ${item.rssi ?? "?"} dBm${item.selected ? " · 已保存" : ""}`} disabled={busy}
-        onPress={() => void run(async () => {
-          const token = lease.current; await connectSelectedLooiRobot(item);
-          if (!active.current || token !== lease.current) { await stopLooiMotion("late-manual-connect"); return; }
-          setNotice("底座已连接；可依次测试抬头、点头、灯光与受限移动");
-        })} />)}
-      <View style={styles.grid}>{actions.map(([label, command]) => <Button key={label} label={label} disabled={busy || !runtime.connected}
+      <View style={styles.grid}>{actions.map(([label, command]) => <Button key={label} label={label} disabled={busy || pairingBusy || !runtime.connected}
         onPress={() => void run(async () => { const message = await executeChineseRobotCommand(command); if (active.current) setNotice(message); })} />)}</View>
       <Text style={styles.detail}>传感器：悬崖 {runtime.sensors.cliffSafe === null ? "未知" : runtime.sensors.cliffSafe ? "地面安全" : "检测到边缘"} · 前方距离 {runtime.sensors.tofDistanceMm === null ? "未知 / 无目标" : `${runtime.sensors.tofDistanceMm} mm`} · 驱动通道 {runtime.driveControlReady ? "已就绪" : "等待校验"}</Text>
       <Text selectable style={styles.detail}>保护状态：{runtime.safety.lastMotionBlockReason ?? runtime.safety.reason ?? "无阻断"} · 最近停止：{runtime.safety.lastSafetyStopReason ?? "无"}</Text>

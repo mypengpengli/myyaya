@@ -1,22 +1,26 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { getHermesTaskService, retryHermesTask, stopHermesTask, submitNewHermesTask } from "@/src/hermes/task-runtime";
+import { getHermesTaskService, retryHermesTask, retryHermesFiles, stopHermesTask, submitNewHermesTask } from "@/src/hermes/task-runtime";
+import { findArtifact, presentArtifact } from "@/src/artifacts/artifact-store";
 import { terminalRun, type RunStatus } from "@/src/hermes/run-protocol";
 import { RobotFace } from "@/src/ui/RobotFace";
 import { looiTheme as theme } from "@/src/ui/looi-theme";
 import { ChineseVoiceControls } from "@/src/ui/ChineseVoiceControls";
 import { chineseVoice } from "@/src/voice/chinese-voice-runtime";
+import { readArtifactFocus, updateArtifactFocus } from "@/src/artifacts/artifact-focus";
 
 const statusNames: Record<RunStatus, string> = { pending: "待提交 / 待确认", started: "已提交", queued: "排队中", running: "执行中", waiting_for_approval: "等待服务器端审批",
   stopping: "正在停止", completed: "已完成", failed: "执行失败", cancelled: "已取消", interrupted: "服务器中断" };
 
 export default function TasksScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ taskId?: string }>();
   const service = getHermesTaskService();
   const tasks = useSyncExternalStore(service.subscribe, service.list, service.list);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => readArtifactFocus().taskId ?? null);
+  useEffect(() => { if (params.taskId) setSelectedId(params.taskId); }, [params.taskId]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -24,6 +28,7 @@ export default function TasksScreen() {
   const operation = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const selected = tasks.find((task) => task.id === selectedId) ?? tasks[0];
+  useEffect(() => { if (selected) updateArtifactFocus({ taskId: selected.id }); }, [selected?.id]);
   const action = async (kind: "submit" | "retry" | "stop") => {
     if (operation.current) return;
     operation.current = true;
@@ -49,7 +54,7 @@ export default function TasksScreen() {
           <Button label="连接设置" onPress={() => router.replace("/settings")} />
           <Button label="返回表情" onPress={() => router.replace("/")} />
         </View>
-        <Text style={styles.hint}>把办公、浏览器等任务交给服务器 Hermes；此页显示执行进度和结果。语音接入中。</Text>
+        <Text style={styles.hint}>此页显示服务器的实际执行进度与结果；等待时可以继续和小丫说话。</Text>
         <ScrollView horizontal style={styles.history} contentContainerStyle={styles.historyContent}>
           {tasks.map((task) => <Pressable key={task.id} onPress={() => setSelectedId(task.id)}
             accessibilityRole="button" accessibilityLabel={task.input} style={[styles.chip, selected?.id === task.id && styles.activeChip]}>
@@ -68,6 +73,9 @@ export default function TasksScreen() {
             </View>)}
             {selected.notice ? <Text style={styles.notice}>{selected.notice}</Text> : null}
             {selected.output ? <Text selectable style={styles.result}>{selected.output}</Text> : null}
+            {selected.delivery?.notice ? <Text style={styles.notice}>{selected.delivery.notice}</Text> : null}
+            {selected.delivery?.artifactIds.map((id) => <Button key={id} label={`打开 ${findArtifact(id)?.title ?? "任务文件"}`} onPress={() => { presentArtifact(id); router.replace("/"); }} />)}
+            {selected.status === "completed" && selected.delivery?.files === "failed" ? <Button label="重试取回文件" onPress={() => retryHermesFiles(selected.id)} /> : null}
             {terminalRun(selected.status) && !selected.output ? <Text style={styles.hint}>此任务没有返回文本结果。</Text> : null}
             {!selected.runId ? <Button label="用原幂等键重试提交" disabled={busy} onPress={() => void action("retry")} /> : null}
             {selected.runId && !terminalRun(selected.status) ? <Button label={selected.status === "stopping" ? "重试停止" : "停止任务"}

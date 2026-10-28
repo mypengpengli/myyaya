@@ -1,4 +1,4 @@
-export type PresentationItem = { id: string; kind: "image" | "video" | "document"; title: string; uri: string; text?: string };
+export type PresentationItem = { id: string; kind: "image" | "video" | "document"; title: string; uri: string; text?: string; mimeType?: string };
 export type PresentationState = { active: PresentationItem | null; queue: PresentationItem[]; pinned: boolean;
   ready: boolean; ended: boolean; suspended: boolean; deadline: number | null };
 
@@ -20,7 +20,16 @@ export class ResultPresentation {
   }
   open(item: PresentationItem) { this.update({ active: item, pinned: false, ready: false, ended: false, deadline: null,
     queue: this.state.queue.filter((queued) => queued.id !== item.id) }); }
-  close() {
+  next(id?: string): PresentationItem {
+    const next = id ? this.state.queue.find((item) => item.id === id) : this.state.queue[0];
+    if (!next) throw new Error(id ? "指定作品不在待展示队列中" : "没有其他待展示结果");
+    this.open(next); return next;
+  }
+  close(advanceQueue = true) {
+    if (!advanceQueue) {
+      this.update({ active: null, pinned: false, ready: false, ended: false, deadline: null });
+      return;
+    }
     const [next, ...queue] = this.state.queue;
     this.update({ active: next ?? null, queue, pinned: false, ready: false, ended: false, deadline: null });
   }
@@ -28,7 +37,10 @@ export class ResultPresentation {
   videoEnded(id: string) { if (this.state.active?.id !== id) return; this.update({ ready: true, ended: true }); this.update({ deadline: this.deadline() }); }
   videoResumedOrSeeking(id: string) { if (this.state.active?.id === id) this.update({ ended: false, deadline: null }); }
   loadingOrFailed(id: string) { if (this.state.active?.id === id) this.update({ ready: false, ended: false, deadline: null }); }
-  pin() { this.update({ pinned: !this.state.pinned }); this.update({ deadline: this.deadline() }); }
+  pin(value = !this.state.pinned) {
+    if (!this.state.active || value === this.state.pinned) return;
+    this.update({ pinned: value }); this.update({ deadline: this.deadline() });
+  }
   interact() { this.update({ deadline: this.deadline() }); }
   suspend(value: boolean) { this.update({ suspended: value }); this.update({ deadline: this.deadline() }); }
   tick() { if (this.state.deadline !== null && this.now() >= this.state.deadline) this.close(); }

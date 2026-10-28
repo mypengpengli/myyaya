@@ -13,6 +13,7 @@ import { syncVoiceRuntime } from "@/src/core/app-bootstrap";
 import { useAppMode } from "@/src/setup/use-app-mode";
 import { AppModeSelector } from "@/src/setup/AppModeSelector";
 import { HermesConnectionSettings } from "@/src/hermes/HermesConnectionSettings";
+import { TavilyConnectionSettings } from "@/src/search/TavilyConnectionSettings";
 import { recordDiagnosticEvent, clearDiagnosticLog, getDiagnosticLogEntries } from "@/src/diagnostics/diagnostic-log";
 import {
   chooseDiagnosticExportFolder,
@@ -500,6 +501,7 @@ export default function SettingsScreen() {
     <DeviceShell title={t("settings.title")} eyebrow="MY LOOI">
       <AppModeSelector />
       <HermesConnectionSettings />
+      <TavilyConnectionSettings />
       <View style={styles.summaryGrid}>
         {appMode === "legacy_realtime" ? <Summary
           label="OpenAI"

@@ -27,6 +27,9 @@ import { classifyFaceTapImmediateRoute } from "@/src/character/face-tap-routing"
 import { isDrivingControlSessionActive } from "@/src/voice/driving-control-session";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import Animated, { LinearTransition } from "react-native-reanimated";
+import { photoCapture } from "@/src/artifacts/phone-camera";
+import { PhotoCaptureOverlay } from "@/src/artifacts/PhotoCaptureOverlay";
 import { PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -80,6 +83,7 @@ export default function IndexScreen() {
 
       return () => {
         setMainScreenFocused(false);
+        photoCapture.cancel();
         recordDiagnosticEvent("navigation", "main-blurred");
         // Internal navigation is not Android background. It has its own explicit
         // Realtime ownership boundary so Settings never inherits a live session.
@@ -212,6 +216,8 @@ export default function IndexScreen() {
   const progress = useSyncExternalStore(subscribeCompanionProgress, getCompanionProgress, getCompanionProgress);
   const presentation = useSyncExternalStore(resultPresentation.subscribe, resultPresentation.getSnapshot, resultPresentation.getSnapshot);
   const recording = useSyncExternalStore(subscribePhoneRecording, getPhoneRecording, getPhoneRecording);
+  const photo = useSyncExternalStore(photoCapture.subscribe, photoCapture.getSnapshot, photoCapture.getSnapshot);
+  const cameraVisible = photo.phase !== "idle" || ["preparing", "recording", "saving"].includes(recording.phase);
   useFocusEffect(useCallback(() => { if (appMode === "local") resumeAutomaticChineseVoice(); }, [appMode]));
   const swipe = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponderCapture: (_, gesture) => gesture.dx < -30 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.5,
@@ -224,8 +230,8 @@ export default function IndexScreen() {
     : speech.phase === "error" ? speech.notice || "语音暂不可用" : speech.phase === "speaking" ? "小丫在说话"
     : speech.partial || (speech.phase === "listening" ? interactionNotice || "小丫 · 我在听" : "小丫");
   return <SafeAreaView style={styles.home} {...swipe.panHandlers}>
-    <View style={presentation.active && appMode === "local" ? styles.smallFace : styles.faceStage}>
-      <RobotFace mode={presentation.active && appMode === "local" ? "avatar" : "fullscreen"} labelVisible={false}
+    <Animated.View layout={LinearTransition.duration(240)} style={cameraVisible ? styles.cameraFace : presentation.active && appMode === "local" ? styles.smallFace : styles.faceStage}>
+      <RobotFace mode={cameraVisible || (presentation.active && appMode === "local") ? "avatar" : "fullscreen"} labelVisible={false}
         onLongPress={() => router.push("/menu")}
         onPress={() => {
           if (robotSleeping) {
@@ -233,12 +239,13 @@ export default function IndexScreen() {
             void wakeRobotFromFace().catch((error) => console.warn("[Home] Wake failed:", error));
           } else handleAwakeFaceTap();
         }} />
-    </View>
+    </Animated.View>
     {appMode === "local" || robotSleeping ? <View pointerEvents="none" style={styles.caption}>
       <Text numberOfLines={1} style={styles.captionText}>{caption}</Text>
     </View> : <ConversationOverlay />}
     {!robotSleeping && appMode === "legacy_realtime" ? <ImageOverlay /> : null}
-    {appMode === "local" ? <ResultOverlay /> : null}
+    {appMode === "local" && !cameraVisible ? <ResultOverlay /> : null}
+    {appMode === "local" ? <PhotoCaptureOverlay /> : null}
     <Pressable accessibilityRole="button" accessibilityLabel="打开菜单，也可以向左滑动" onPress={() => router.push("/menu")} style={styles.menuHandle}>
       <Text style={styles.handle}>‹</Text>
     </Pressable>
@@ -248,6 +255,7 @@ const styles = StyleSheet.create({
   home: { flex: 1, backgroundColor: looiTheme.bg, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   faceStage: { flex: 1, width: "100%", alignItems: "center", justifyContent: "center" },
   smallFace: { position: "absolute", right: "2%", top: "35%", bottom: "35%", width: "15%", alignItems: "center", justifyContent: "center" },
+  cameraFace: { position: "absolute", left: "3%", top: "22%", bottom: "22%", width: "35%", alignItems: "center", justifyContent: "center" },
   caption: { position: "absolute", bottom: 8, left: 16, right: 48, alignItems: "flex-start" },
   captionText: { color: looiTheme.muted, fontSize: 10, opacity: 0.65 },
   menuHandle: { position: "absolute", right: 0, top: "38%", bottom: "38%", width: 38, justifyContent: "center", alignItems: "center" },

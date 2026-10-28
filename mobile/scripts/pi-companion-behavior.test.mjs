@@ -71,4 +71,12 @@ assert.equal(requests, 2);
 const converted = toNewApiMessages([{ role: "assistant", content: [{ type: "thinking", thinking: "private" }, { type: "text", text: "公开回复" }], timestamp: 0 }]);
 assert.equal(converted[0].content, "公开回复");
 assert.equal(JSON.stringify(converted).includes("private"), false);
+// A gateway can leave its HTTP stream open after [DONE]. Finish without waiting for EOF/timeout.
+let cancelledOpenStream = false;
+const openStream = new CompanionAgent(config, createNewApiStream(config, async () => new Response(new ReadableStream({
+  start(controller) { controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(choice({ content: "已经完成" }))}\n\ndata: ${JSON.stringify(choice({}, "stop"))}\n\ndata: [DONE]\n\n`)); },
+  cancel() { cancelledOpenStream = true; },
+}))), [], () => {});
+assert.equal(await openStream.reply("完成了吗", new AbortController().signal), "已经完成");
+assert.equal(cancelledOpenStream, true);
 console.log("Actual Pi agent + NewAPI: fragmented UTF-8 SSE, tool replay/validation, public progress, truncation, HTTP errors and cancellation: PASS");

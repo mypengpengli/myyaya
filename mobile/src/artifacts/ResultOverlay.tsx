@@ -2,10 +2,14 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { AppState, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { VideoView, useVideoPlayer } from "expo-video";
 import { resultPresentation as presentation, type PresentationItem } from "./presentation";
+import { videoControl } from "./video-control";
+import { DocumentResult } from "./DocumentResult";
+import { findArtifact, selectArtifact } from "./artifact-store";
 
 function VideoResult({ item }: { item: PresentationItem }) {
   const player = useVideoPlayer(item.uri, (instance) => { instance.loop = false; instance.play(); });
   useEffect(() => {
+    const releaseControl = videoControl.bind(item.id, player);
     player.timeUpdateEventInterval = 0.25;
     let last = 0;
     const subscriptions = [player.addListener("playToEnd", () => presentation.videoEnded(item.id)),
@@ -16,13 +20,14 @@ function VideoResult({ item }: { item: PresentationItem }) {
         last = currentTime;
       })];
     const app = AppState.addEventListener("change", (state) => { if (state !== "active") player.pause(); });
-    return () => { subscriptions.forEach((subscription) => subscription.remove()); app.remove(); };
+    return () => { releaseControl(); subscriptions.forEach((subscription) => subscription.remove()); app.remove(); };
   }, [player, item.id]);
   return <VideoView player={player} nativeControls contentFit="contain" surfaceType="textureView" style={styles.content} />;
 }
 export function ResultOverlay() {
   const state = useSyncExternalStore(presentation.subscribe, presentation.getSnapshot, presentation.getSnapshot);
   const [now, setNow] = useState(Date.now());
+  useEffect(() => { if (state.active) { const item = findArtifact(state.active.id); if (item) selectArtifact(item); } }, [state.active?.id]);
   useEffect(() => {
     presentation.suspend(AppState.currentState !== "active");
     const app = AppState.addEventListener("change", (value) => presentation.suspend(value !== "active"));
@@ -35,11 +40,11 @@ export function ResultOverlay() {
     {item.kind === "video" ? <VideoResult key={item.id} item={item} /> : item.kind === "image" ?
       <Image key={item.id} source={{ uri: item.uri }} resizeMode="contain" style={styles.content}
         onLoad={() => presentation.loaded(item.id)} onError={() => presentation.loadingOrFailed(item.id)} /> :
-      <ScrollView onLayout={() => presentation.loaded(item.id)} style={styles.document}><Text style={styles.text}>{item.text ?? "文档预览暂不可用"}</Text></ScrollView>}
+      <DocumentResult key={item.id} item={item} />}
     <View style={styles.top}>
       <Pressable accessibilityRole="button" accessibilityLabel={state.pinned ? "取消固定" : "固定结果"} onPress={() => presentation.pin()} style={styles.button}><Text style={styles.text}>{state.pinned ? "已固定" : "固定"}</Text></Pressable>
       <Text numberOfLines={1} style={styles.title}>{item.title}</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="关闭结果" onPress={() => presentation.close()} style={styles.button}><Text style={styles.text}>×</Text></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="关闭结果" onPress={() => presentation.close(false)} style={styles.button}><Text style={styles.text}>×</Text></Pressable>
     </View>
     <Text style={styles.countdown}>{state.deadline !== null ? `${Math.max(0, Math.ceil((state.deadline - now) / 1000))} 秒` : state.pinned ? "已固定" : ""}{state.queue.length ? ` · 另有 ${state.queue.length} 个结果` : ""}</Text>
   </View>;

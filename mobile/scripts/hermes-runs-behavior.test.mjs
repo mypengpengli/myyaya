@@ -141,6 +141,7 @@ try {
     "react-native": { AppState: appState }, "./connection": { readHermesConnection: () => connectionRead() },
     "./run-client": { createRunClient: () => monitorClient }, "./run-protocol": protocol,
     "./run-store": { hermesTaskRepository: memoryRepository }, "./task-service": { HermesTaskService },
+    "../artifacts/artifact-focus": { updateArtifactFocus() {} }, "./history-client": { createHermesHistoryClient() { throw Error("history not needed during monitor"); } },
   });
   const poll = async () => {
     const next = [...scheduled.entries()].find(([, value]) => value.delay === 3_000);

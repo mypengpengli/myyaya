@@ -28,6 +28,7 @@ export class ChineseVoiceSession {
   private response?: AbortController;
   private speakingText = "";
   private capturePaused = false;
+  private lastInputAt = 0;
   constructor(private readonly native: ChineseSpeechNative,
     private readonly permission: () => Promise<boolean>, private readonly allowed: () => boolean,
     private readonly execute: (command: ChineseRobotCommand) => Promise<string>,
@@ -96,6 +97,7 @@ export class ChineseVoiceSession {
   }
   private onResult(event: { text: string; partial: boolean }) {
     if (!event.text.trim()) return;
+    this.lastInputAt = Date.now();
     const addressed = splitChineseWake(event.text);
     // AEC is enabled natively. This additional guard prevents an exact fragment
     // of our own spoken reply from becoming a wake/STOP command on weak devices.
@@ -108,7 +110,8 @@ export class ChineseVoiceSession {
       return;
     }
     if (result.command) {
-      if (result.command.kind === "stop") this.interrupt(false);
+      // A direct physical instruction supersedes any pending model/tool action.
+      this.interrupt(result.command.kind !== "stop");
       const generation = this.generation;
       void this.execute(result.command).then((notice) => { if (this.current(generation)) this.update({ notice }); })
         .catch((error) => { if (this.current(generation)) this.update({ notice: error instanceof Error ? error.message : "动作执行失败" }); });
@@ -143,6 +146,23 @@ export class ChineseVoiceSession {
     };
   }
   isCapturePaused(): boolean { return this.capturePaused; }
+  /** Announcements wait for idle; never abort a user turn, a photo review or recording. */
+  async announce(text: string): Promise<boolean> {
+    if (!this.allowed() || this.state.phase !== "listening" || this.capturePaused || this.response || this.state.partial || Date.now() - this.lastInputAt < 1500) return false;
+    const generation = this.generation, turn = this.turn;
+    this.speakingText = compactChinese(text);
+    this.update({ phase: "speaking", notice: "后台任务有结果了" });
+    try { await this.native.speakChinese(text); }
+    catch { if (this.current(generation) && this.turn === turn) return false; }
+    finally {
+      if (this.current(generation) && this.turn === turn) {
+        this.speakingText = ""; this.conversationUntil = Date.now() + 15_000; this.gate.open(Date.now());
+        this.update({ phase: "listening", notice: "我在听" });
+      }
+    }
+    // If a user interrupted after speech started, avoid repeatedly announcing it.
+    return true;
+  }
   /** Face tap or local STOP cancels model/TTS immediately, retaining microphone ownership. */
   interrupt(openWindow = true): void {
     this.cancelResponse(); this.native.stopChineseSpeech();

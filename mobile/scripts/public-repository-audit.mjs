@@ -47,7 +47,7 @@ const forbiddenTermPatterns = [
   new RegExp(["sooper", "chargeforbots"].join(""), "i"),
   new RegExp(["splatty", "doesstuff"].join(""), "i"),
 ];
-const secretLike = /\bsk-[A-Za-z0-9_-]{20,}\b/;
+const secretLike = /\b(?:sk-|tvly-)[A-Za-z0-9_-]{20,}\b/;
 const absoluteUserPath = /(?:^|["'\s])(?:\/home\/[^/\s"']+|\/Users\/[^/\s"']+)/m;
 const emailLike = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
 const ipv4Like = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;

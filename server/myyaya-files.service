@@ -1,0 +1,19 @@
+[Unit]
+Description=myyaya Hermes result files
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/myyaya-server
+EnvironmentFile=%h/.hermes/.env
+ExecStart=/usr/bin/python3 %h/myyaya-server/file_bridge.py serve
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=%h/.local/share/myyaya-files
+
+[Install]
+WantedBy=default.target

@@ -16,6 +16,8 @@ import { recordDiagnosticEvent } from '@/src/diagnostics/diagnostic-log';
 import { useAppMode } from '@/src/setup/use-app-mode';
 import { RecordingOverlay } from '@/src/artifacts/RecordingOverlay';
 import { startHermesTaskMonitor } from '@/src/hermes/task-runtime';
+import { TaskCompletionBanner } from '@/src/hermes/TaskCompletionBanner';
+import { startIntegrationControl } from '@/src/diagnostics/integration-control';
 import { startPerformanceMonitor, stopPerformanceMonitor } from '@/src/diagnostics/performance-monitor';
 import {
   cancelBackgroundHardExit,
@@ -36,6 +38,7 @@ export const unstable_settings = {
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
+  useEffect(() => startIntegrationControl(), []);
   useEffect(() => startHermesTaskMonitor(), []);
   const robotSleeping = useUserStore((state) => state.robotSleeping);
   const [loaded, error] = useFonts({
@@ -247,9 +250,11 @@ function RootLayoutNav() {
           <Stack.Screen name="menu" options={{ headerShown: false, animation: "slide_from_right" }} />
           <Stack.Screen name="voice-settings" options={{ headerShown: false, animation: "slide_from_right" }} />
           <Stack.Screen name="model-settings" options={{ headerShown: false, animation: "slide_from_right" }} />
+          <Stack.Screen name="search-settings" options={{ headerShown: false, animation: "slide_from_right" }} />
           <Stack.Screen name="artifacts" options={{ headerShown: false, animation: "slide_from_right" }} />
         </Stack>
         {appMode === 'local' && !onboardingVisible ? <RecordingOverlay /> : null}
+        {appMode === 'local' && !onboardingVisible ? <TaskCompletionBanner /> : null}
       </View>
     </ThemeProvider>
   );

@@ -6,6 +6,9 @@ export type HermesTask = {
   id: string; baseUrl: string; accountId: string; input: string; payload: string;
   createdAt: number; runId: string | null; status: RunStatus; output: string;
   progress: TaskProgress[]; notice: string;
+  wantsFiles?: boolean;
+  sessionId?: string; previousTaskId?: string;
+  delivery?: { files: "none" | "pending" | "saved" | "failed"; artifactIds: string[]; notice: string; notified: boolean; dismissed?: boolean };
 };
 export interface TaskRepository { list(): HermesTask[]; save(task: HermesTask): void }
 const REPLAY_WINDOW = 23 * 60 * 60 * 1000;
@@ -25,16 +28,25 @@ export class HermesTaskService {
     this.tasks = [task, ...this.tasks.filter((item) => item.id !== task.id)].sort((a, b) => b.createdAt - a.createdAt);
     this.listeners.forEach((listener) => listener());
   }
-  create(input: string, baseUrl: string, accountId: string): HermesTask {
+  create(input: string, baseUrl: string, accountId: string, returnFiles = /文件|文档|报告|演示|幻灯|表格|简历|海报|图片|视频|\b(?:pptx?|docx?|pdf|word)\b/i.test(input), continuation?: { sessionId: string; previousTaskId: string; history?: { role: string; content: string }[] }): HermesTask {
     const text = input.trim();
     if (!text || text.length > 10_000) throw new Error("请输入 1–10000 字的任务");
     if (this.tasks.filter((task) => !terminalRun(task.status)).length >= 8) throw new Error("请先处理已有任务，最多保留 8 个进行中的任务");
     const id = this.uuid();
+    const sessionId = continuation?.sessionId ?? `myyaya-${id}`;
+    if (!/^[A-Za-z0-9_-]{1,200}$/.test(sessionId)) throw new Error("服务器会话编号无效");
+    const delivery = returnFiles ? `\n\n[手机文件交付要求]\n本任务的手机 task_id 为 ${id}。需要交付的文件请生成到 ~/myyaya-output/${id}/，不要把凭据或其他任务的文件放入此目录。保留用户要求的文件格式：Word 交付可编辑的 DOCX，PPT 交付可编辑的 PPTX；不得只返回文字或用 PDF 替代原文件，不自动转 PDF，只有用户明确要求 PDF 时才生成该格式。生成后执行 python3 ~/myyaya-server/file_bridge.py publish --task-id ${id} 加上实际文件的绝对路径，发布只读交付清单。最终用中文简要说明结果，不要输出文件的 base64，不编造下载链接。桥未安装或发布失败时如实说明，不自行改动服务配置。` : "";
     const task: HermesTask = { id, baseUrl, accountId, input: text,
-      payload: JSON.stringify({ input: text, session_id: `myyaya-${id}` }), createdAt: this.now(),
-      runId: null, status: "pending", output: "", progress: [], notice: "" };
+      payload: JSON.stringify({ input: text + delivery, session_id: sessionId, ...(continuation?.history?.length ? { conversation_history: continuation.history } : {}) }), createdAt: this.now(), sessionId, ...(continuation ? { previousTaskId: continuation.previousTaskId } : {}),
+      runId: null, status: "pending", output: "", progress: [], notice: "", wantsFiles: returnFiles,
+      delivery: { files: returnFiles ? "pending" : "none", artifactIds: [], notice: "", notified: false } };
     this.save(task);
     return task;
+  }
+  updateDelivery(id: string, patch: Partial<NonNullable<HermesTask["delivery"]>>) {
+    const task = this.get(id);
+    if (!task.delivery) return;
+    this.save({ ...task, delivery: { ...task.delivery, ...patch } });
   }
   private bound(id: string, baseUrl: string, accountId: string) {
     const task = this.get(id);
@@ -59,7 +71,7 @@ export class HermesTaskService {
     // A stale poll or stop acknowledgement must never resurrect a completed run.
     if (terminalRun(task.status)) return;
     const status = task.status === "stopping" && !terminalRun(snapshot.status) ? "stopping" : snapshot.status;
-    this.save({ ...task, runId: snapshot.run_id, status,
+    this.save({ ...task, runId: snapshot.run_id, status, ...(snapshot.session_id ? { sessionId: snapshot.session_id } : {}),
       output: snapshot.output ?? task.output, notice: "" });
   }
   async refresh(id: string, baseUrl: string, accountId: string, client: RunTransport): Promise<void> {

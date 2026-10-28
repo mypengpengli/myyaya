@@ -25,5 +25,7 @@ jobs:
       - run: corepack pnpm install --frozen-lockfile --ignore-scripts
       - run: corepack pnpm exec tsc --noEmit
       - run: corepack pnpm run test:myyaya
+      - run: corepack pnpm run test:pairing
+      - run: python3 -m unittest discover -s ../server -p 'test_*.py'
       - run: corepack pnpm test
       - run: corepack pnpm run motion:safety-test && corepack pnpm run ble:lifecycle-test && corepack pnpm run ble:adoption-test && corepack pnpm run ble:foreground-retry-test && corepack pnpm run vosk:emergency-stop-test && corepack pnpm run motion:cliff-test && corepack pnpm run realtime:pcm-types-test

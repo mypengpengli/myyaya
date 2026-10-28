@@ -25,6 +25,6 @@ export function RecordingOverlay() {
     <Pressable accessibilityRole="button" accessibilityLabel="停止录像" onPress={() => void stopPhoneRecording()} style={styles.stop}><Text style={styles.text}>停止录像</Text></Pressable>
   </View>;
 }
-const styles = StyleSheet.create({ overlay: { position: "absolute", top: "12%", left: "5%", right: "20%", bottom: "12%", borderRadius: 20, overflow: "hidden", backgroundColor: "#101726" },
+const styles = StyleSheet.create({ overlay: { position: "absolute", top: "8%", left: "43%", right: "5%", bottom: "10%", borderRadius: 20, overflow: "hidden", backgroundColor: "#101726" },
   camera: { flex: 1 }, notice: { position: "absolute", top: 10, left: 10, color: "white", fontSize: 12, backgroundColor: "#101726bb", padding: 8 },
   stop: { position: "absolute", bottom: 10, right: 10, borderRadius: 14, padding: 10, backgroundColor: "#9e2938" }, text: { color: "white", fontSize: 14 } });

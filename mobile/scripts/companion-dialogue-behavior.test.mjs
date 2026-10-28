@@ -57,4 +57,18 @@ await resume(); assert.equal(voice.isCapturePaused(), false, "release clears own
 assert.equal(captureStarts, beforeResume, "an old capture lease cannot resurrect the stopped session");
 await voice.start(); assert.equal(captureStarts, beforeResume + 1);
 await voice.stop();
+// Server reports preserve live STOP capture and wait until the user turn is idle.
+const realNow = Date.now;
+try {
+  Date.now = () => realNow() + 10_000;
+  await voice.start();
+  const notification = voice.announce("后台任务完成了，文件已经保存。"); await drain();
+  assert.equal(voice.getSnapshot().phase, "speaking");
+  assert.equal(await voice.announce("不能插入第二条"), false);
+  emit("停止", true); await drain();
+  assert.equal(await notification, true, "an interrupted announcement is not repeated indefinitely");
+  assert.equal(motions.at(-1).kind, "stop");
+  foreground = false; assert.equal(await voice.announce("后台不能播报"), false); foreground = true;
+  await voice.stop(); assert.equal(await voice.announce("关闭语音后不能播报"), false);
+} finally { Date.now = realNow; }
 console.log("Companion dialogue: wake, endpoint-only submission, follow-up, live STOP capture, echo guard, cancellation and background fences: PASS");

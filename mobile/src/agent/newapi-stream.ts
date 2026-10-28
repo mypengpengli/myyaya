@@ -56,12 +56,13 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport): 
         stream.push({ type: "start", partial: output });
         reader = response.body.getReader();
         const decoder = new TextDecoder();
-        let pending = "", textIndex = -1, finished = false;
+        let pending = "", textIndex = -1, finished = false, streamDone = false;
         const calls = new Map<number, { index: number; raw: string }>();
         const consume = (line: string) => {
           if (!line.startsWith("data:")) return;
           const raw = line.slice(5).trim();
-          if (!raw || raw === "[DONE]") return;
+          if (!raw) return;
+          if (raw === "[DONE]") { streamDone = true; return; }
           const chunk = JSON.parse(raw);
           if (chunk.error) throw new Error("模型服务返回错误，请检查模型和额度");
           if (chunk.usage) {
@@ -109,7 +110,7 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport): 
           if (pending.length > 1_000_000) throw new Error("模型流式消息过长");
           const lines = pending.split("\n"); pending = lines.pop()!;
           for (const line of lines) consume(line.trimEnd());
-          if (next.done) break;
+          if (next.done || streamDone) break;
         }
         if (pending.trim()) consume(pending.trimEnd());
         if (!finished) throw new Error("模型连接中断，请重试");

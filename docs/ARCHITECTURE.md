@@ -113,7 +113,7 @@ Agent 每个会话串行，首版 `toolExecution: "sequential"`；外部作业�
 | 图片生成/编辑 | `agnes-image-2.5-flash` | 文生图此前通过；图生图图片字段与一致性还未测试 |
 | 视频生成/图生视频 | `agnes-video-2.5` | 模型可见；提交/查询/取消/引用图片和产物下载仍待验证 |
 | 中文 ASR | `TeleAI/TeleSpeechASR` | 此前合成中文 WAV 通过；真实手机远场另测 |
-| 用户已选首发童声 | Azure `zh-CN-XiaoyouNeural`，voiceProfile=`child-cn` | 用户同意另配 Azure Speech；官方列为普通话儿童女声，未试听/接入；需独立 Speech 资源/Key/region |
+| 当前声音与未来可选童声 | 手机系统中文 TTS；未来候选 Azure `zh-CN-XiaoyouNeural` | 2026-10-28 用户确认当前声音够用，Azure 调为最低优先级、现在不接入，也不要求提供 Azure 配置 |
 | TTS 降级 | Android 当前引擎提供的中文 voice | 待实机 `getVoices()`；不能保证系统自带童声 |
 
 用户已选的 TTS 音色依据 [Azure 官方音色表](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/language-support?tabs=tts)，认证和区域音色表见 [TTS REST](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/rest-text-to-speech)。标准 Xiaoyou 音色没有列出 cute 风格，不套用别的音色 style 参数；“可爱”以接入后试听为准。换供应商/音色只变 TtsProvider 配置，不改会话核心；Azure 凭据不进入 APK。
@@ -169,6 +169,6 @@ S2/S3 的相机与麦克风原型仍要在 S1 尽早交叉验证；表中是产�
 
 ## 12. 当前需要补齐的信息
 
-Hermes 地址/鉴权/能力已在电脑核验，下一步验证手机网络、任务与文件回传，并确定 Pi 部署位置。手机联调 Token 由用户首次手填后存 SecureStore；生产 Pi 转接仍可只在服务器保存 Hermes Token。用户已同意 Azure Speech / 晓悠，待提供 Speech 资源区域与私有凭据，再试听。图生图/图生视频在中转上用非个人样本逐项验证。LOOI 到货后提供手机连接与底座固件条件。
+Hermes 地址/鉴权/能力及手机能力探测已通过，文件回传仍需开发；Pi 已内嵌手机主线。手机 Token 存 SecureStore。当前使用已试听通过的系统中文 TTS，用户不要求现在接入 Azure。图生图/图生视频仍需完成手机闭环。LOOI 已到货，第一次握手成功，重连和整机动作尚未通过。
 
 这些信息分别解锁接口集成和实机验证；不阻塞本地门槛修复、Viewer 状态设计、产物模型与任务协议。本文没有把设计中的目录、接口或候选硬件标记为已实现。

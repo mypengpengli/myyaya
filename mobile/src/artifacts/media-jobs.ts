@@ -60,10 +60,11 @@ async function saveImage(data: { data?: { b64_json?: string; url?: string }[] },
     try { base64 = await file.base64(); } finally { file.delete(); }
   }
   if (!base64 || base64.length > 30_000_000 || !/^(iVBORw0KGgo|\/9j\/)/.test(base64)) throw new Error("图片返回格式无效或过大");
-  const item = await savePhotoArtifact(base64, base64.startsWith("/9j/") ? "image/jpeg" : "image/png", job.kind === "edit" ? "修改后的照片" : "生成的图片", job.parentId);
+  const item = await savePhotoArtifact(base64, base64.startsWith("/9j/") ? "image/jpeg" : "image/png", job.kind === "edit" ? "修改后的照片" : "生成的图片", job.parentId, { select: false, sourceTaskId: job.id, id: `media_${job.id}` });
   resultPresentation.offer(item); return item.id;
 }
 async function saveRemoteVideo(config: NewApiConfig, urlInput: string, job: MediaJob) {
+  const existing = findArtifact(`media_${job.id}`); if (existing) return existing.id;
   const url = new URL(urlInput);
   if (url.protocol !== "https:" || url.username || url.password) throw new Error("视频地址无效");
   const headers = mediaDownloadHeaders(config.baseUrl, url.href, config.apiKey);
@@ -72,7 +73,7 @@ async function saveRemoteVideo(config: NewApiConfig, urlInput: string, job: Medi
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (bytes.length < 12 || bytes.length > 200 * 1024 * 1024 || String.fromCharCode(...bytes.slice(4, 8)) !== "ftyp") throw new Error("视频不是有效的 MP4 文件");
   const file = new File(FileSystem.cacheDirectory!, `myyaya-video-${job.id}.mp4`); file.write(bytes);
-  const item = await saveVideoArtifact(file.uri); resultPresentation.offer(item); return item.id;
+  const item = await saveVideoArtifact(file.uri, { title: "生成的视频", parentId: job.parentId, sourceTaskId: job.id, id: `media_${job.id}` }); resultPresentation.offer(item); return item.id;
 }
 function transport(config: NewApiConfig): MediaJobTransport {
   return {
@@ -89,9 +90,24 @@ function transport(config: NewApiConfig): MediaJobTransport {
         const parent = findArtifact(job.parentId)!;
         data = await request(config, "/images/generations", JSON.stringify(buildAgnesImageRequest(job.prompt, `data:${parent.mimeType};base64,${await file.base64()}`)));
       } else data = await request(config, "/images/generations", JSON.stringify(buildAgnesImageRequest(job.prompt)));
-      return { artifactId: await saveImage(data, job) };
+      const result = data.data?.[0];
+      if (!result || typeof result.b64_json !== "string" && typeof result.url !== "string" || (result.b64_json?.length ?? 0) > 30_000_000 || (result.url?.length ?? 0) > 4096) throw new Error("媒体接口没有返回有效图片");
+      const directory = FileSystem.documentDirectory + "myyaya-media-receipts/";
+      await FileSystem.makeDirectoryAsync(directory, { intermediates: true });
+      const imageResultPath = `${directory}${job.id}.json`;
+      await FileSystem.writeAsStringAsync(imageResultPath, JSON.stringify({ data: [{ ...(result.b64_json ? { b64_json: result.b64_json } : {}), ...(result.url ? { url: result.url } : {}) }] }));
+      return { imageResultPath };
     },
     async poll(job) {
+      if (job.imageResultPath) {
+        if (job.imageResultPath !== `${FileSystem.documentDirectory}myyaya-media-receipts/${job.id}.json`) throw new Error("图片结果记录无效");
+        const existing = findArtifact(`media_${job.id}`);
+        if (existing) return { status: "completed", artifactId: existing.id };
+        const data = JSON.parse(await FileSystem.readAsStringAsync(job.imageResultPath));
+        const artifactId = await saveImage(data, job);
+        await FileSystem.deleteAsync(job.imageResultPath, { idempotent: true }).catch(() => {});
+        return { status: "completed", artifactId };
+      }
       let data;
       for (const path of agnesVideoPollPaths(job)) {
         try { data = await request(config, path, undefined, true); break; } catch { /* Read-only fallback to Agnes video_id + model_name. */ }
@@ -121,7 +137,14 @@ export function startMediaJobMonitor(): () => void {
   const poll = async () => {
     if (closed || busy || AppState.currentState !== "active") return;
     busy = true;
-    try { const { config, binding } = await connection(); if (!closed) await getMediaJobs().poll(binding, transport(config)); } catch { /* Settings may not be configured yet. */ }
+    try {
+      const { config, binding } = await connection();
+      if (!closed) await getMediaJobs().poll(binding, transport(config));
+      if (!closed && AppState.currentState === "active") {
+        const { reportMediaCompletions } = await import("./media-completion-runtime");
+        await reportMediaCompletions(getMediaJobs(), binding, async () => !closed && AppState.currentState === "active" && (await connection()).binding === binding);
+      }
+    } catch { /* Settings may not be configured yet. */ }
     finally { busy = false; if (!closed) timer = setTimeout(() => void poll(), 5000); }
   };
   const app = AppState.addEventListener("change", (value) => { if (value === "active") { if (timer) clearTimeout(timer); void poll(); } });

@@ -1,0 +1,6 @@
+apply plugin: 'com.android.library'
+apply plugin: 'expo-module-gradle-plugin'
+group = 'com.myyaya.documentpreview'
+version = '1.0.0'
+expoModule { canBePublished false }
+android { namespace 'com.myyaya.documentpreview'; defaultConfig { minSdkVersion 24 } }

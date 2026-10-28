@@ -443,56 +443,55 @@ export async function scanLooiRobotCandidates(options: {
   const robotName = options.robotName ?? process.env.EXPO_PUBLIC_LOOI_ROBOT_NAME ?? DEFAULT_ROBOT_NAME;
   const scanTimeoutMs = options.scanTimeoutMs ?? DEFAULT_SCAN_TIMEOUT_MS;
 
-  try {
-    await waitForManagerPoweredOn(manager, DEFAULT_BLE_STATE_TIMEOUT_MS);
-    if (options.signal?.aborted) return [];
+  // ble-plx 3.5 returns its process-wide singleton from every constructor.
+  // Destroying a "scan manager" also destroys the active/reconnecting transport.
+  // Discovery owns only its scan; finish() stops it before resolving.
+  await waitForManagerPoweredOn(manager, DEFAULT_BLE_STATE_TIMEOUT_MS);
+  if (options.signal?.aborted) return [];
 
-    return await new Promise<ScannedLooiRobot[]>((resolve, reject) => {
-      const candidates = new Map<string, ScannedLooiRobot>();
-      let advertisements = 0;
-      let settled = false;
-      const finish = (callback: () => void) => {
-        if (settled) return;
-        settled = true;
-        options.signal?.removeEventListener("abort", cancel);
-        void manager.stopDeviceScan().then(callback, callback);
-      };
-      const cancel = () => { clearTimeout(timeout); finish(() => resolve([])); };
-      const timeout = setTimeout(() => {
-        recordDiagnosticEvent("robot", "ble-discovery-finished", { advertisements, candidates: candidates.size });
-        finish(() => resolve([...candidates.values()].sort(compareScannedRobots)));
-      }, scanTimeoutMs);
-      options.signal?.addEventListener("abort", cancel, { once: true });
-      if (options.signal?.aborted) { cancel(); return; }
+  return await new Promise<ScannedLooiRobot[]>((resolve, reject) => {
+    const candidates = new Map<string, ScannedLooiRobot>();
+    let advertisements = 0;
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      options.signal?.removeEventListener("abort", cancel);
+      void manager.stopDeviceScan().then(callback, callback);
+    };
+    const cancel = () => { clearTimeout(timeout); finish(() => resolve([])); };
+    const timeout = setTimeout(() => {
+      recordDiagnosticEvent("robot", "ble-discovery-finished", { advertisements, candidates: candidates.size });
+      finish(() => resolve([...candidates.values()].sort(compareScannedRobots)));
+    }, scanTimeoutMs);
+    options.signal?.addEventListener("abort", cancel, { once: true });
+    if (options.signal?.aborted) { cancel(); return; }
 
-      manager
-        .startDeviceScan(
-          null,
-          {
-            allowDuplicates: true,
-            scanMode: Platform.OS === "android" ? ScanMode.LowLatency : undefined,
-          },
-          (error, device) => {
-            if (error) {
-              clearTimeout(timeout);
-              finish(() => reject(error));
-              return;
-            }
-            if (settled || !device) return;
-            advertisements++;
-            if (!isLikelyLooiRobot(device, robotName)) return;
-            candidates.set(device.id, toScannedRobot(device));
-            options.onCandidates?.([...candidates.values()].sort(compareScannedRobots));
-          },
-        )
-        .catch((error) => {
-          clearTimeout(timeout);
-          finish(() => reject(error));
-        });
-    });
-  } finally {
-    await manager.destroy().catch(() => {});
-  }
+    manager
+      .startDeviceScan(
+        null,
+        {
+          allowDuplicates: true,
+          scanMode: Platform.OS === "android" ? ScanMode.LowLatency : undefined,
+        },
+        (error, device) => {
+          if (error) {
+            clearTimeout(timeout);
+            finish(() => reject(error));
+            return;
+          }
+          if (settled || !device) return;
+          advertisements++;
+          if (!isLikelyLooiRobot(device, robotName)) return;
+          candidates.set(device.id, toScannedRobot(device));
+          options.onCandidates?.([...candidates.values()].sort(compareScannedRobots));
+        },
+      )
+      .catch((error) => {
+        clearTimeout(timeout);
+        finish(() => reject(error));
+      });
+  });
 }
 
 async function waitForManagerPoweredOn(manager: BleManager, timeoutMs: number): Promise<void> {
