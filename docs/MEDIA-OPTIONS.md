@@ -11,6 +11,8 @@
 
 图片明确指定比例时使用 `size=1K` 与 `ratio`；未指定比例的改图保留此前已验证的具体尺寸请求。视频保持 `size=720P`、默认 5 秒，比例独立传入。不支持的比例在新建任务前拒绝，AI 应说明并询问，不能擅自换比例。
 
+生图与改图均请求 `extra_body.response_format=url`，先持久化小回执，再下载成品；下载重试不重复生成。本轮首个旧 Base64 生图响应在十分钟内只接收 52498 字节，结果保留 unknown，未自动重提；该实测促使生图也采用改图已经验证的地址模式。
+
 模型 ID 和比例在提交任务时保存。更改设置后，新任务使用新 ID；旧任务查询使用保存的 ID。旧任务缺失比例字段时兼容原默认值。未知结果不会因为改模型、重开 App 或查询失败而自动重提。
 
 协议依据：[Agnes Image 2.5 Flash](https://wiki.agnes-ai.com/en/docs/agnes-image-25-flash) 与 [Agnes Video 2.5 Flash](https://wiki.agnes-ai.com/en/docs/agnes-video-25-flash)，2026-10-29 核对。只支持现有系列的接口格式，不自动探测其他供应商协议。实际成品分辨率以生成文件为准。
