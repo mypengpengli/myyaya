@@ -4,6 +4,13 @@ import { createAssistantMessageEventStream, getCurrentTools } from "./pi-mobile-
 import type { NewApiConfig } from "./newapi-config";
 
 type Transport = (url: string, init: RequestInit) => Promise<Response>;
+export type ChatHttpDiagnostic = {
+  clientRequestId: string; startedAt: string; stage: "request" | "headers" | "receiving" | "complete" | "error";
+  elapsedMs: number; requestBytes: number; receivedBytes: number; dataEvents: number; pendingChars: number;
+  completionSeen: boolean; status?: number; requestId?: string; contentType?: string;
+  headersMs?: number; firstByteMs?: number; idleMs?: number; reason?: string;
+};
+let requestSequence = 0;
 const textOf = (content: unknown): string => typeof content === "string" ? content :
   Array.isArray(content) ? content.filter((item) => item.type === "text").map((item) => item.text).join("\n") : "";
 
@@ -29,31 +36,56 @@ export function toNewApiMessages(messages: Message[]): Record<string, unknown>[]
 }
 
 /** Stream protocol adapter only. Tool scheduling and validation belong to Pi. */
-export function createNewApiStream(config: NewApiConfig, transport: Transport): StreamFn {
+export function createNewApiStream(config: NewApiConfig, transport: Transport, report?: (value: ChatHttpDiagnostic) => void): StreamFn {
   return (model, context, options) => {
     const stream = createAssistantMessageEventStream();
     const output: AssistantMessage = { role: "assistant", content: [], api: model.api, provider: model.provider,
       model: model.id, timestamp: Date.now(), stopReason: "pending", usage: { input: 0, output: 0,
         cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
     void (async () => {
+      const started = Date.now(), clientRequestId = `myyaya-chat-${started.toString(36)}-${++requestSequence}`;
+      let status: number | undefined, requestId: string | undefined, contentType: string | undefined;
+      let headersMs: number | undefined, firstByteMs: number | undefined, lastByteAt = started;
+      let receivedBytes = 0, dataEvents = 0, pending = "", finished = false, requestBytes = 0, lastReport = 0;
+      let timeoutReason: "idle-timeout" | "total-timeout" | undefined;
+      const diagnostic = (stage: ChatHttpDiagnostic["stage"], reason?: string) => {
+        try { report?.({ clientRequestId, startedAt: new Date(started).toISOString(), stage, elapsedMs: Date.now() - started,
+          requestBytes, receivedBytes, dataEvents, pendingChars: pending.length, completionSeen: finished,
+          status, requestId, contentType, headersMs, firstByteMs, idleMs: Date.now() - lastByteAt, reason }); } catch { /* Observation cannot break a reply. */ }
+      };
       const controller = new AbortController();
       const abort = () => controller.abort();
       options?.signal?.addEventListener("abort", abort, { once: true });
       if (options?.signal?.aborted) abort();
       // A long but active reply must not be aborted just because its total
       // duration exceeds one minute. Keep both an idle and an overall bound.
-      let timeout = setTimeout(abort, 60_000);
-      const overallTimeout = setTimeout(abort, 180_000);
-      const received = () => { clearTimeout(timeout); timeout = setTimeout(abort, 60_000); };
+      const expireIdle = () => { timeoutReason = "idle-timeout"; abort(); };
+      let timeout = setTimeout(expireIdle, 60_000);
+      const overallTimeout = setTimeout(() => { timeoutReason = "total-timeout"; abort(); }, 180_000);
+      const received = () => { lastByteAt = Date.now(); clearTimeout(timeout); timeout = setTimeout(expireIdle, 60_000); };
+      let rejectAborted: (() => void) | undefined;
+      const aborted = new Promise<never>((_, reject) => {
+        rejectAborted = () => reject(new Error("request-aborted"));
+        controller.signal.addEventListener("abort", rejectAborted, { once: true });
+        if (controller.signal.aborted) rejectAborted();
+      });
       let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
       try {
         const tools = getCurrentTools(context.messages);
-        const response = await transport(config.baseUrl + "/chat/completions", { method: "POST", redirect: "error",
+        const body = JSON.stringify({ model: config.model, messages: toNewApiMessages(context.messages), stream: true,
+          max_tokens: 1200, ...(tools.length ? { tools: tools.map((tool) => ({ type: "function",
+            function: { name: tool.name, description: tool.description, parameters: tool.parameters } })) } : {}) });
+        requestBytes = new TextEncoder().encode(body).byteLength;
+        diagnostic("request");
+        const response = await Promise.race([transport(config.baseUrl + "/chat/completions", { method: "POST", redirect: "error",
           signal: controller.signal, headers: { "Content-Type": "application/json", Accept: "text/event-stream",
-            Authorization: `Bearer ${config.apiKey}`, "User-Agent": "myyaya/2.1.168" },
-          body: JSON.stringify({ model: config.model, messages: toNewApiMessages(context.messages), stream: true,
-            max_tokens: 1200, ...(tools.length ? { tools: tools.map((tool) => ({ type: "function",
-              function: { name: tool.name, description: tool.description, parameters: tool.parameters } })) } : {}) }) });
+            Authorization: `Bearer ${config.apiKey}`, "User-Agent": "myyaya/2.1.169", "X-Client-Request-Id": clientRequestId }, body }), aborted]);
+        status = response.status; headersMs = Date.now() - started;
+        const rawId = response.headers.get("x-request-id") ?? response.headers.get("x-oneapi-request-id") ?? response.headers.get("request-id");
+        requestId = rawId && /^[A-Za-z0-9_.:-]{1,120}$/.test(rawId) ? rawId : undefined;
+        const rawType = response.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+        contentType = rawType === "text/event-stream" ? "sse" : rawType === "application/json" ? "json" : rawType === "text/html" ? "html" : rawType ? "other" : "missing";
+        diagnostic("headers");
         if (!response.ok) throw new Error(`模型请求失败（HTTP ${response.status}）`);
         received();
         if (response.url && new URL(response.url).origin !== new URL(config.baseUrl).origin) throw new Error("模型地址发生跨站跳转");
@@ -61,13 +93,14 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport): 
         stream.push({ type: "start", partial: output });
         reader = response.body.getReader();
         const decoder = new TextDecoder();
-        let pending = "", textIndex = -1, finished = false, streamDone = false;
+        let textIndex = -1, streamDone = false;
         const calls = new Map<number, { index: number; raw: string }>();
         const consume = (line: string) => {
           if (!line.startsWith("data:")) return;
           const raw = line.slice(5).trim();
           if (!raw) return;
           if (raw === "[DONE]") { streamDone = true; return; }
+          dataEvents++;
           const chunk = JSON.parse(raw);
           if (chunk.error) throw new Error("模型服务返回错误，请检查模型和额度");
           if (chunk.usage) {
@@ -110,12 +143,19 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport): 
           }
         };
         for (;;) {
-          const next = await reader.read();
-          if (next.value?.byteLength) received();
+          const next = await Promise.race([reader.read(), aborted]);
+          if (next.value?.byteLength) { firstByteMs ??= Date.now() - started; receivedBytes += next.value.byteLength; received(); }
           pending += decoder.decode(next.value, { stream: !next.done });
           if (pending.length > 1_000_000) throw new Error("模型流式消息过长");
-          const lines = pending.split("\n"); pending = lines.pop()!;
+          const lines = pending.split(/\r\n|\r|\n/); pending = lines.pop()!;
           for (const line of lines) consume(line.trimEnd());
+          // A complete terminal JSON frame is sufficient even when a compatible
+          // relay omits its trailing newline and leaves the connection open.
+          if (!finished && pending.startsWith("data:")) {
+            let tail; try { tail = JSON.parse(pending.slice(5).trim()); } catch { /* Still a fragmented frame. */ }
+            if (tail?.choices?.[0]?.finish_reason) { consume(pending); pending = ""; }
+          }
+          if (Date.now() - lastReport >= 5000) { lastReport = Date.now(); diagnostic("receiving"); }
           // finish_reason is terminal even when a compatible gateway omits [DONE]
           // or keeps the HTTP connection open after sending the final choice.
           if (next.done || streamDone || finished) break;
@@ -135,14 +175,20 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport): 
         if (textIndex >= 0) stream.push({ type: "text_end", contentIndex: textIndex,
           content: (output.content[textIndex] as { text: string }).text, partial: output });
         stream.push({ type: "done", reason: output.stopReason as "stop" | "length" | "toolUse", message: output });
+        diagnostic("complete");
       } catch (error) {
         output.stopReason = options?.signal?.aborted ? "aborted" : "error";
         // Never surface response bodies, headers, or transport error URLs containing credentials.
-        output.errorMessage = output.stopReason === "aborted" ? "已停止" : controller.signal.aborted ? "模型回复等待超时，请稍后重试" : error instanceof Error &&
+        output.errorMessage = output.stopReason === "aborted" ? "已停止" : timeoutReason ? status === undefined ? "手机等待模型响应超时，请稍后重试" : "手机接收模型回复超时，请稍后重试" : error instanceof Error &&
           /^(模型|请填写)/.test(error.message) ? error.message : "模型连接失败或超时，请检查网络及模型设置";
+        diagnostic("error", options?.signal?.aborted ? "user-abort" : timeoutReason ?? (status && status >= 400 ? "http-error" : "incomplete-response"));
         stream.push({ type: "error", reason: output.stopReason, error: output });
       } finally {
         clearTimeout(timeout); clearTimeout(overallTimeout); options?.signal?.removeEventListener("abort", abort);
+        if (rejectAborted) controller.signal.removeEventListener("abort", rejectAborted);
+        // reader.cancel() only changes Expo's streaming state on Android;
+        // abort the actual native request too, including successful open streams.
+        controller.abort();
         // Expo's native cancellation can wait on the network. Closing the Pi
         // event stream must not depend on that acknowledgement.
         void reader?.cancel().catch(() => {}); stream.end(output);

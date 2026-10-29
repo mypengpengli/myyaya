@@ -2,6 +2,7 @@ import { fetch } from "expo/fetch";
 import { CompanionAgent } from "./companion-agent";
 import { readNewApiConfig } from "./newapi-config";
 import { createNewApiStream } from "./newapi-stream";
+import { recordDiagnosticEvent } from "../diagnostics/diagnostic-log";
 import { phoneTools } from "./phone-tools";
 import { mirrorSessionMessage, mirrorSessionTouch } from "../memory/memory-service";
 import { currentHermesTasks } from "../hermes/task-runtime";
@@ -31,7 +32,7 @@ export async function replyToCompanion(text: string, signal: AbortSignal): Promi
     const identity = JSON.stringify(config); // In memory only. Never logged or persisted outside SecureStore.
     if (!agent || binding !== identity) {
       agent?.abort(); binding = identity;
-      agent = new CompanionAgent(config, createNewApiStream(config, fetch), phoneTools, update, observeSkillTool, observeSkillReply);
+      agent = new CompanionAgent(config, createNewApiStream(config, fetch, (value) => recordDiagnosticEvent("llm", "chat-http", { ...value })), phoneTools, update, observeSkillTool, observeSkillReply);
       sessionId = `pi-${Date.now()}`; mirrorSessionTouch(sessionId, "system");
     }
     const tasks = await currentHermesTasks().catch(() => []);

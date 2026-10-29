@@ -88,6 +88,6 @@ export function videoDownloadCandidates(baseUrl: string, remoteId?: string, resu
     resultUrl?.startsWith("https://") ? resultUrl : ""].filter(Boolean))];
 }
 export function mediaDownloadHeaders(baseUrl: string, targetUrl: string, apiKey: string): Record<string, string> {
-  return { "User-Agent": "myyaya/2.1.168",
+  return { "User-Agent": "myyaya/2.1.169",
     ...(new URL(baseUrl).origin === new URL(targetUrl).origin ? { Authorization: `Bearer ${apiKey}` } : {}) };
 }

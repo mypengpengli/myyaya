@@ -110,4 +110,67 @@ advance(50_000); nativeController.enqueue(new TextEncoder().encode(`data: ${JSON
 advance(50_000); assert.equal(requestSignal.aborted, false, "an active reply can last longer than sixty seconds");
 nativeController.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(choice({ content: "回复" }))}\n\ndata: ${JSON.stringify(choice({}, "stop"))}\n\n`));
 assert.equal(await slowReply, "持续回复"); assert.equal(timers.size, 0);
+assert.equal(requestSignal.aborted, true, "a completed open stream releases the actual native request, not only its JS reader");
+
+// CR-only framing is valid SSE. A compatible relay may omit the final newline.
+for (const separator of ["\r", "\r\n", "\n"]) {
+  let nativeSignal, cleanup = false;
+  const diagnostics = [];
+  const framed = new CompanionAgent(config, createNewApiStream(config, async (_url, init) => {
+    nativeSignal = init.signal;
+    assert.match(init.headers["X-Client-Request-Id"], /^myyaya-chat-/);
+    return new Response(new ReadableStream({ start(controller) {
+      const data = `data: ${JSON.stringify(choice({ content: "完整中文回复" }))}${separator}${separator}data: ${JSON.stringify(choice({}, "stop"))}`;
+      const bytes = new TextEncoder().encode(data);
+      for (let i = 0; i < bytes.length; i += 5) controller.enqueue(bytes.slice(i, i + 5));
+      // Keep the native connection open after a complete terminal JSON object.
+    }, cancel() { cleanup = true; return new Promise(() => {}); } }), {
+      headers: { "content-type": "text/event-stream", "x-request-id": "server-request-fixture" },
+    });
+  }, (value) => diagnostics.push(value)), [], () => {});
+  let deadline;
+  try {
+    assert.equal(await Promise.race([framed.reply("private user text", new AbortController().signal), new Promise((_, reject) => {
+      deadline = setTimeout(() => reject(Error("complete terminal JSON must not wait for a missing newline")), 1000);
+    })]), "完整中文回复");
+  } finally { clearTimeout(deadline); }
+  assert.ok(nativeSignal.aborted && cleanup);
+  assert.equal(diagnostics.at(-1).stage, "complete");
+  assert.equal(diagnostics.at(-1).status, 200);
+  assert.equal(diagnostics.at(-1).requestId, "server-request-fixture");
+  assert.equal(diagnostics.at(-1).completionSeen, true);
+  assert.ok(diagnostics.at(-1).receivedBytes > 0);
+  assert.equal(/private user text|完整中文回复|test-only-not-a-real-key/.test(JSON.stringify(diagnostics)), false);
+}
+// A transport that ignores AbortSignal must not strand Pi indefinitely.
+for (const phase of ["request", "body"]) {
+  const diagnostics = [];
+  const idle = new CompanionAgent(config, idleAdapter.createNewApiStream(config, async () => phase === "request"
+    ? new Promise(() => {})
+    : new Response(new ReadableStream({ start() {}, cancel() { return new Promise(() => {}); } }), {
+      headers: { "content-type": "text/event-stream", "x-request-id": "server-idle-fixture" },
+    }), (value) => diagnostics.push(value)), [], () => {});
+  const response = idle.reply("bounded wait", new AbortController().signal);
+  // Register the rejection handler before advancing the virtual deadline.
+  const rejected = assert.rejects(response, phase === "request" ? /等待模型响应超时/ : /接收模型回复超时/);
+  await flush(); advance(60_001); await flush(); await rejected;
+  assert.equal(diagnostics.at(-1).reason, "idle-timeout");
+  assert.equal(diagnostics.at(-1).receivedBytes, 0);
+  assert.equal(diagnostics.at(-1).status, phase === "request" ? undefined : 200);
+  assert.equal(diagnostics.at(-1).requestId, phase === "request" ? undefined : "server-idle-fixture");
+  assert.equal(timers.size, 0);
+}
+// The user must hear a real submission receipt when only the following model
+// reply fails; a new turn may not reuse that receipt or replay generation.
+let submissions = 0, receiptRequests = 0;
+const receiptAgent = new CompanionAgent(config, createNewApiStream(config, async () => {
+  if (++receiptRequests === 1) return sse([choice({ tool_calls: [{ index: 0, id: "media-call", function: { name: "create_media", arguments: "{}" } }] }), choice({}, "tool_calls")]);
+  return new Response("private provider body", { status: 502 });
+}), [{ name: "create_media", description: "fixture", parameters: Type.Object({}), execute: async () => {
+  submissions++; return { content: [{ type: "text", text: JSON.stringify({ id: "persisted-media-job", status: "submitting", resolution: "2K" }) }], details: {} };
+} }], () => {});
+assert.match(await receiptAgent.reply("generate once", new AbortController().signal), /2K.*任务已在手机建立.*回答没有收完整/);
+assert.equal(submissions, 1);
+await assert.rejects(receiptAgent.reply("an unrelated next turn", new AbortController().signal), /HTTP 502/);
+assert.equal(submissions, 1, "a final model failure never replays an accepted media tool");
 console.log("Actual Pi agent + NewAPI: fragmented UTF-8 SSE, tool replay/validation, public progress, truncation, HTTP errors and cancellation: PASS");

@@ -20,10 +20,28 @@ export const COMPANION_PROMPT = `你是小丫，住在手机和 LOOI 底座里�
 
 export type CompanionProgress = { phase: "idle" | "thinking" | "tool" | "error"; label: string };
 
+/** A persisted task receipt survives failure of the model's following reply. */
+function mediaSubmissionNotice(result: unknown): string | undefined {
+  const content = (result as { content?: { type?: string; text?: string }[] })?.content;
+  if (!Array.isArray(content)) return;
+  for (const part of content) {
+    if (part.type !== "text" || typeof part.text !== "string" || part.text.length > 8000) continue;
+    try {
+      const value = JSON.parse(part.text);
+      if (typeof value.id !== "string" || !/^[A-Za-z0-9_-]{1,160}$/.test(value.id)) continue;
+      if (!["submitting", "running", "completed", "unknown"].includes(value.status)) continue;
+      const resolution = ["1K", "2K", "3K", "4K"].includes(value.resolution) ? `${value.resolution} ` : "";
+      return value.status === "completed" ? "作品已经生成并保存。刚才后续回答没有收完整，可以让我打开作品。" :
+        `${resolution}生成任务已在手机建立，结果请以任务进度为准。刚才后续回答没有收完整，不用重复生成。`;
+    } catch { /* An invalid tool result cannot establish that a task exists. */ }
+  }
+}
+
 /** The actual official Pi Agent owns transcript replay, schema validation and the tool loop. */
 export class CompanionAgent {
   private readonly agent: Agent;
   private requests = 0;
+  private submissionNotice: string | undefined;
   constructor(config: NewApiConfig, streamFn: StreamFn, tools: AgentTool[],
     progress: (value: CompanionProgress) => void,
     onToolResult?: (name: string, isError: boolean, result: unknown) => void,
@@ -40,6 +58,7 @@ export class CompanionAgent {
       if (event.type === "tool_execution_start") progress({ phase: "tool",
         label: tools.find((tool) => tool.name === event.toolName)?.label ?? "正在执行" });
       else if (event.type === "tool_execution_end") {
+        if (!event.isError && event.toolName === "create_media") this.submissionNotice = mediaSubmissionNotice(event.result) ?? this.submissionNotice;
         onToolResult?.(event.toolName, event.isError, event.result);
         progress({ phase: "thinking", label: event.isError ? "正在处理工具返回的问题" : "正在整理结果" });
       }
@@ -63,6 +82,7 @@ export class CompanionAgent {
     try {
       await this.agent.waitForIdle();
       if (signal.aborted) throw new Error("已停止");
+      this.submissionNotice = undefined;
       // Trim at user-turn boundaries so tool calls always retain their results.
       const history = this.agent.state.messages;
       const userTurns = history.flatMap((message, index) => message.role === "user" ? [index] : []);
@@ -78,6 +98,9 @@ export class CompanionAgent {
       if (!reply) throw new Error("模型没有返回可朗读的回复");
       this.onReply?.();
       return reply;
+    } catch (error) {
+      if (!signal.aborted && this.submissionNotice) return this.submissionNotice;
+      throw error;
     } finally { signal.removeEventListener("abort", abort); }
   }
 }

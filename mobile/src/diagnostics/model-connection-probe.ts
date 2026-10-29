@@ -1,8 +1,10 @@
 import { fetch } from "expo/fetch";
 import { readNewApiConfig } from "../agent/newapi-config";
+import { getDiagnosticLogEntries } from "./diagnostic-log";
 
 /** ADB-only bounded transport diagnostics; never returns headers, keys or provider bodies. */
 export async function probeModelConnection(mode: string) {
+  if (mode === "chat-http") return { mode, requests: getDiagnosticLogEntries().filter((entry) => entry.event === "chat-http").slice(-24).map(({ timestamp, details }) => ({ timestamp, ...details })) };
   if (!["models", "chat", "stream"].includes(mode)) throw new Error("未知连接检查");
   const config = await readNewApiConfig(); if (!config) throw new Error("尚未配置模型");
   const started = Date.now(), controller = new AbortController();
