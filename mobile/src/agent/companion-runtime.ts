@@ -11,6 +11,7 @@ import { resultPresentation } from "../artifacts/presentation";
 import { getMediaJobs } from "../artifacts/media-jobs";
 import { digestStringAsync, CryptoDigestAlgorithm } from "expo-crypto";
 import { restoredCompanionContext } from "./restored-context";
+import { observeSkillTool, observeSkillReply, prepareSkillContext } from "../skills/skill-runtime";
 
 import { updateCompanionProgress as update } from "./companion-progress";
 let agent: CompanionAgent | undefined;
@@ -30,13 +31,16 @@ export async function replyToCompanion(text: string, signal: AbortSignal): Promi
     const identity = JSON.stringify(config); // In memory only. Never logged or persisted outside SecureStore.
     if (!agent || binding !== identity) {
       agent?.abort(); binding = identity;
-      agent = new CompanionAgent(config, createNewApiStream(config, fetch), phoneTools, update);
+      agent = new CompanionAgent(config, createNewApiStream(config, fetch), phoneTools, update, observeSkillTool, observeSkillReply);
       sessionId = `pi-${Date.now()}`; mirrorSessionTouch(sessionId, "system");
     }
     const tasks = await currentHermesTasks().catch(() => []);
     const mediaBinding = await digestStringAsync(CryptoDigestAlgorithm.SHA256, config.baseUrl + "\n" + config.apiKey);
     const media = getMediaJobs().list().filter((job) => job.binding === mediaBinding);
-    agent.restoreContext(restoredCompanionContext(tasks, listArtifacts(), media, readArtifactFocus(), resultPresentation.getSnapshot().active?.id));
+    let skills: string;
+    try { skills = prepareSkillContext(text, phoneTools.map((tool) => tool.name)); }
+    catch { skills = JSON.stringify({ unavailable: true, notice: "本轮技能库暂时无法读取；不能声称已加载或记得技能步骤，其他手机工具仍可正常使用" }); }
+    agent.restoreContext(restoredCompanionContext(tasks, listArtifacts(), media, readArtifactFocus(), resultPresentation.getSnapshot().active?.id), skills);
     for (const [id, notice] of taskNotices) if (tasks.some((task) => task.id === id) || media.some((job) => `media:${job.id}` === id)) agent.appendBackgroundResult(notice);
     taskNotices.clear();
     mirrorSessionMessage(sessionId, { role: "user", content: text });

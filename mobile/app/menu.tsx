@@ -33,6 +33,7 @@ export default function CompanionMenu() {
     { title: "语音与声音", detail: "唤醒与音色", icon: "♪", path: "/voice-settings" },
     { title: "模型连接", detail: "自己的中转站", icon: "✦", path: "/model-settings" },
     { title: "联网搜索", detail: "Tavily 连接与修改", icon: "⌕", path: "/search-settings" },
+    { title: "小丫的技能", detail: "已学会的做法与步骤", icon: "◇", path: "/skills" },
     { title: "作品与录像", detail: "查看或重新播放", icon: "▧", path: "/artifacts" },
     { title: "设置", detail: "外观、服务与更新", icon: "⚙", path: "/settings" },
     { title: "任务记录", detail: "查看进度与结果", icon: "▤", path: "/tasks" },

@@ -15,10 +15,12 @@ import { photoTool, observeSceneTool } from "./camera-tools";
 import { viewerControlTool } from "./viewer-tools";
 import { resultPresentation } from "../artifacts/presentation";
 import { IMAGE_ASPECT_RATIOS, type MediaAspectRatio } from "../artifacts/agnes-protocol";
+import { createSkillTools } from "../skills/skill-tools";
 
 const text = (value: unknown) => ({ content: [{ type: "text" as const, text: typeof value === "string" ? value : JSON.stringify(value) }], details: {} });
 // Pi validates unknown arguments against each TypeBox schema before execute.
 export const phoneTools: AgentTool[] = [
+  ...createSkillTools(() => phoneTools.map((tool) => tool.name)),
   webSearchTool, connectRobotTool, robotActionTool, viewerControlTool,
   { name: "phone_status", label: "正在检查手机和底座", description: "查询手机前台状态、LOOI 是否连接，不执行动作。",
     parameters: Type.Object({}), execute: async () => {
