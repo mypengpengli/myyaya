@@ -14,7 +14,7 @@ export class MediaJobService {
   private listeners = new Set<() => void>();
   private busy = new Set<string>();
   constructor(private readonly repository: MediaJobRepository, private readonly uuid: () => string) {
-    this.jobs = repository.list();
+    this.jobs = repository.list().sort((a, b) => b.createdAt - a.createdAt);
     for (const job of this.jobs) if (job.status === "submitting") this.save({ ...job, status: "unknown", notice: "上次生成请求的结果未确认，不会自动重复提交" });
   }
   list = () => this.jobs;

@@ -5,6 +5,10 @@ const require = createRequire(import.meta.url), ts = require("typescript");
 const code = ts.transpileModule(readFileSync("src/artifacts/media-job-service.ts", "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} }; new Function("module", "exports", code)(module, module.exports);
 const { MediaJobService, MediaRequestUnconfirmed } = module.exports;
+const restoredOrder = new MediaJobService({ list: () => [
+  { id: "old", createdAt: 1, status: "completed" }, { id: "new", createdAt: 2, status: "running" },
+], save() {} }, () => "unused");
+assert.deepEqual(restoredOrder.list().map((job) => job.id), ["new", "old"], "restart preserves newest-first task selection before any poll/save");
 const rows = new Map(); let ids = 0;
 const repository = { list: () => [...rows.values()], save: (job) => rows.set(job.id, { ...job }) };
 const jobs = new MediaJobService(repository, () => `job-${++ids}`);
