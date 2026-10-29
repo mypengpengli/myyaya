@@ -24,6 +24,21 @@ assert.equal(api.agnesEditSize(1920, 1080), "1024x576");
 assert.equal(api.agnesEditSize(NaN, 0), "1024x1024");
 assert.equal("response_format" in edit, false);
 assert.equal(api.buildAgnesImageRequest("draw a cat").return_base64, true);
+for (const ratio of api.IMAGE_ASPECT_RATIOS) {
+  const options = { model: "owner-image-alias", aspectRatio: ratio };
+  const generated = api.buildAgnesImageRequest("draw a cat", undefined, undefined, options);
+  const edited = api.buildAgnesImageRequest("extend the background", image, { width: 3000, height: 4000 }, options);
+  assert.equal(generated.model, "owner-image-alias"); assert.equal(edited.model, "owner-image-alias");
+  assert.equal(generated.ratio, ratio); assert.equal(edited.ratio, ratio);
+  assert.equal(edited.size, "1K", "an explicit ratio overrides reference dimensions using documented tier + ratio");
+  assert.deepEqual(edited.extra_body.image, [image], "changing aspect does not lose the source image");
+}
+for (const ratio of api.VIDEO_ASPECT_RATIOS) {
+  assert.equal(api.buildAgnesVideoRequest("owner-video-alias", "move", undefined, ratio).aspect_ratio, ratio);
+  assert.equal(api.buildAgnesVideoRequest("owner-video-alias", "move", image, ratio).aspect_ratio, ratio);
+}
+assert.throws(() => api.buildAgnesVideoRequest("video", "move", image, "2:3"), /视频不支持/);
+assert.throws(() => api.buildAgnesImageRequest("draw", undefined, undefined, { aspectRatio: "7:5" }), /图片不支持/);
 assert.deepEqual(api.parseAgnesVideoSubmission({ id: "relay_task", task_id: "provider_task", video_id: "video_id" }), { remoteId: "relay_task", videoId: "video_id" });
 assert.deepEqual(api.parseAgnesVideoSubmission({ video_id: "only_video" }), { videoId: "only_video" });
 assert.throws(() => api.parseAgnesVideoSubmission({ status: "queued" }), /任务编号/);

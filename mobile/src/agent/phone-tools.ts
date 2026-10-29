@@ -14,6 +14,7 @@ import { connectRobotTool, robotActionTool } from "./robot-tools";
 import { photoTool, observeSceneTool } from "./camera-tools";
 import { viewerControlTool } from "./viewer-tools";
 import { resultPresentation } from "../artifacts/presentation";
+import { IMAGE_ASPECT_RATIOS, type MediaAspectRatio } from "../artifacts/agnes-protocol";
 
 const text = (value: unknown) => ({ content: [{ type: "text" as const, text: typeof value === "string" ? value : JSON.stringify(value) }], details: {} });
 // Pi validates unknown arguments against each TypeBox schema before execute.
@@ -51,21 +52,22 @@ export const phoneTools: AgentTool[] = [
     parameters: Type.Object({}), execute: async () => text(listArtifacts().slice(0, 30).map(({ id, title, kind, createdAt, parentId }) => ({ id, title, kind, createdAt, parentId }))) },
   { name: "artifact_versions", label: "正在查找图片版本", description: "查询当前选中图片或指定作品的原图、修改版本及生成视频关系。返回稳定编号，可用 show_artifact 打开原图或中间版本。",
     parameters: Type.Object({ id: Type.Optional(Type.String()) }), execute: async (_id, params) => text({ selected: readArtifactFocus(), versions: listArtifactVersions((params as { id?: string }).id).map(({ id, title, kind, createdAt, parentId }) => ({ id, title, kind, createdAt, parentId })) }) },
-  { name: "create_media", label: "正在安排生成任务", description: "生成图片、编辑图片或生成视频。编辑默认使用当前展示或明确选中的图片版本，存在歧义时先选图。图生视频指定 source=image，parentId 可指定准确版本；文生视频指定 source=text。立即返回任务编号，在后台继续生成，不代表已完成。",
+  { name: "create_media", label: "正在安排生成任务", description: "生成图片、编辑图片或生成视频。用户指定比例、横屏或竖屏时必须传 aspectRatio：横屏默认16:9，竖屏默认9:16，正方形1:1。图片支持1:1、3:4、4:3、16:9、9:16、2:3、3:2、21:9；视频不支持2:3和3:2，不能静默替换。编辑默认使用当前展示或明确选中的图片版本，存在歧义时先选图。未指定比例时改图保留原图比例，文生图用默认比例，视频默认16:9。图生视频指定 source=image，parentId 可指定准确版本；文生视频指定 source=text。立即返回任务编号，在后台继续生成，不代表已完成。",
     parameters: Type.Object({ kind: Type.Union([Type.Literal("image"), Type.Literal("edit"), Type.Literal("video")]),
-      prompt: Type.String({ minLength: 1, maxLength: 2000 }), parentId: Type.Optional(Type.String()), source: Type.Optional(Type.Union([Type.Literal("text"), Type.Literal("image")])) }),
+      prompt: Type.String({ minLength: 1, maxLength: 2000 }), parentId: Type.Optional(Type.String()), source: Type.Optional(Type.Union([Type.Literal("text"), Type.Literal("image")])),
+      aspectRatio: Type.Optional(Type.Union(IMAGE_ASPECT_RATIOS.map((ratio) => Type.Literal(ratio)))) }),
     execute: async (_id, params, signal) => {
       if (signal?.aborted) throw new Error("已取消提交");
-      const args = params as { kind: "image" | "edit" | "video"; prompt: string; parentId?: string; source?: "text" | "image" };
+      const args = params as { kind: "image" | "edit" | "video"; prompt: string; parentId?: string; source?: "text" | "image"; aspectRatio?: MediaAspectRatio };
       if (args.source === "text" && args.parentId) throw new Error("文生请求不能同时指定输入图片");
       const parentId = args.kind === "edit" || args.source === "image" || args.parentId ? selectedImage(args.parentId).id : undefined;
       if (args.kind === "image" && parentId) throw new Error("修改已有图片请使用 edit");
-      const job = await submitMediaJob({ kind: args.kind, prompt: args.prompt, ...(parentId ? { parentId } : {}) }, signal);
-      return text({ id: job.id, parentId: job.parentId, status: job.status, notice: job.notice }); } },
+      const job = await submitMediaJob({ kind: args.kind, prompt: args.prompt, ...(parentId ? { parentId } : {}), ...(args.aspectRatio ? { aspectRatio: args.aspectRatio } : {}) }, signal);
+      return text({ id: job.id, parentId: job.parentId, model: job.model, aspectRatio: job.aspectRatio, status: job.status, notice: job.notice }); } },
   { name: "media_status", label: "正在查看生成进度", description: "查询生成图片、改图或视频任务的真实状态和结果作品编号。",
     parameters: Type.Object({ id: Type.Optional(Type.String()) }), execute: async (_id, params) => {
       const { id } = params as { id?: string }; return text(getMediaJobs().list().filter((job) => !id || job.id === id).slice(0, 10)
-        .map(({ id, kind, prompt, status, artifactId, parentId, createdAt, notice }) => ({ id, kind, prompt, status, artifactId, parentId, createdAt, notice }))); } },
+        .map(({ id, kind, prompt, model, aspectRatio, status, artifactId, parentId, createdAt, notice }) => ({ id, kind, prompt, model, aspectRatio, status, artifactId, parentId, createdAt, notice }))); } },
   { name: "remember", label: "正在记住这件事", description: "用户明确要求记住某事实或偏好时保存到手机长期记忆。不要存储密码、密钥或猜测。",
     parameters: Type.Object({ fact: Type.String({ minLength: 1, maxLength: 1000 }) }),
     execute: async (_id, params) => { const args = params as { fact: string }; await memoryService.remember([{ role: "user", content: args.fact }],

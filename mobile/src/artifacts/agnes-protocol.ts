@@ -1,8 +1,18 @@
 /** Agnes 2.5 protocol, checked against the owner's ImageForge frontend and
- * wiki.agnes-ai.com/en/docs/agnes-video-25.md (2026-10-27).
+ * wiki.agnes-ai.com/en/docs/agnes-image-25-flash and agnes-video-25-flash
+ * (ratio/model options checked 2026-10-29).
  */
-export function buildAgnesVideoRequest(model: string, prompt: string, firstFrame?: string) {
-  return { model, prompt, mode: firstFrame ? "keyframe" : "text", seconds: "5", size: "720P", aspect_ratio: "16:9", n: 1,
+export const IMAGE_ASPECT_RATIOS = ["1:1", "3:4", "4:3", "16:9", "9:16", "2:3", "3:2", "21:9"] as const;
+export type MediaAspectRatio = typeof IMAGE_ASPECT_RATIOS[number];
+export const VIDEO_ASPECT_RATIOS: readonly MediaAspectRatio[] = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"];
+export function validateMediaAspectRatio(kind: "image" | "edit" | "video", ratio?: MediaAspectRatio): void {
+  if (ratio === undefined) return;
+  const supported = kind === "video" ? VIDEO_ASPECT_RATIOS : IMAGE_ASPECT_RATIOS;
+  if (!(supported as readonly string[]).includes(ratio)) throw new Error(`${kind === "video" ? "视频" : "图片"}不支持这个比例，可选：${supported.join("、")}`);
+}
+export function buildAgnesVideoRequest(model: string, prompt: string, firstFrame?: string, aspectRatio?: MediaAspectRatio) {
+  validateMediaAspectRatio("video", aspectRatio);
+  return { model, prompt, mode: firstFrame ? "keyframe" : "text", seconds: "5", size: "720P", aspect_ratio: aspectRatio || "16:9", n: 1,
     ...(firstFrame ? { first_frame: firstFrame } : {}) };
 }
 export function agnesEditSize(width = 1024, height = 1024): string {
@@ -13,14 +23,17 @@ export function agnesEditSize(width = 1024, height = 1024): string {
   for (const [value, size] of common) if (Math.abs(ratio - value) < 0.001) return size;
   return ratio > 1 ? `1024x${Math.max(64, Math.round(1024 / ratio))}` : `${Math.max(64, Math.round(1024 * ratio))}x1024`;
 }
-export function buildAgnesImageRequest(prompt: string, image?: string, dimensions?: { width: number; height: number }) {
-  if (!image) return { model: "agnes-image-2.5-flash", prompt, size: "1K", n: 1, return_base64: true };
+export function buildAgnesImageRequest(prompt: string, image?: string, dimensions?: { width: number; height: number }, options: { model?: string; aspectRatio?: MediaAspectRatio } = {}) {
+  validateMediaAspectRatio(image ? "edit" : "image", options.aspectRatio);
+  const model = options.model || "agnes-image-2.5-flash";
+  const ratio = options.aspectRatio ? { ratio: options.aspectRatio } : {};
+  if (!image) return { model, prompt, size: "1K", ...ratio, n: 1, return_base64: true };
   // Keep ImageForge's dimensions/reference shape. Prefer Agnes' URL response:
   // persist the small receipt before downloading, so an interrupted image transfer
   // can be retried without repeating the generation POST.
-  return { model: "agnes-image-2.5-flash",
+  return { model,
     prompt: `Use the provided reference image as the visual source for this image-to-image edit. Follow this edit instruction: ${prompt}.`,
-    size: agnesEditSize(dimensions?.width, dimensions?.height), image, images: [image],
+    size: options.aspectRatio ? "1K" : agnesEditSize(dimensions?.width, dimensions?.height), ...ratio, image, images: [image],
     extra_body: { image: [image], response_format: "url" } };
 }
 export function parseAgnesVideoSubmission(data: Record<string, unknown>) {
@@ -60,6 +73,6 @@ export function videoDownloadCandidates(baseUrl: string, remoteId?: string, resu
     resultUrl?.startsWith("https://") ? resultUrl : ""].filter(Boolean))];
 }
 export function mediaDownloadHeaders(baseUrl: string, targetUrl: string, apiKey: string): Record<string, string> {
-  return { "User-Agent": "myyaya/2.1.165",
+  return { "User-Agent": "myyaya/2.1.166",
     ...(new URL(baseUrl).origin === new URL(targetUrl).origin ? { Authorization: `Bearer ${apiKey}` } : {}) };
 }

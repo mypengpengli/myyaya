@@ -1,4 +1,5 @@
-export type MediaJob = { id: string; kind: "image" | "edit" | "video"; prompt: string; parentId?: string;
+import type { MediaAspectRatio } from "./agnes-protocol";
+export type MediaJob = { id: string; kind: "image" | "edit" | "video"; prompt: string; parentId?: string; aspectRatio?: MediaAspectRatio;
   binding: string; createdAt: number; status: "submitting" | "running" | "completed" | "failed" | "unknown";
   remoteId?: string; videoId?: string; model?: string; artifactId?: string; imageResultPath?: string; notified?: boolean; notice: string };
 export class MediaRequestRejected extends Error {}
@@ -21,7 +22,7 @@ export class MediaJobService {
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   markNotified(id: string) { const job = this.jobs.find((entry) => entry.id === id); if (job) this.save({ ...job, notified: true }); }
   private save(job: MediaJob) { this.repository.save(job); this.jobs = [job, ...this.jobs.filter((item) => item.id !== job.id)].sort((a, b) => b.createdAt - a.createdAt); this.listeners.forEach((fn) => fn()); }
-  create(input: Pick<MediaJob, "kind" | "prompt" | "parentId" | "model">, binding: string): MediaJob {
+  create(input: Pick<MediaJob, "kind" | "prompt" | "parentId" | "model" | "aspectRatio">, binding: string): MediaJob {
     if (!input.prompt.trim() || input.prompt.length > 2000) throw new Error("请描述要生成或修改的内容，最多 2000 字");
     if (this.jobs.filter((job) => ["submitting", "running"].includes(job.status)).length >= 2) throw new Error("已有两个媒体任务在处理，请稍等");
     const job: MediaJob = { ...input, prompt: input.prompt.trim(), binding, id: this.uuid(), createdAt: Date.now(), status: "submitting", notified: false, notice: "生成请求已建立，尚未完成" };

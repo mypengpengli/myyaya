@@ -50,7 +50,7 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport): 
         const tools = getCurrentTools(context.messages);
         const response = await transport(config.baseUrl + "/chat/completions", { method: "POST", redirect: "error",
           signal: controller.signal, headers: { "Content-Type": "application/json", Accept: "text/event-stream",
-            Authorization: `Bearer ${config.apiKey}`, "User-Agent": "myyaya/2.1.165" },
+            Authorization: `Bearer ${config.apiKey}`, "User-Agent": "myyaya/2.1.166" },
           body: JSON.stringify({ model: config.model, messages: toNewApiMessages(context.messages), stream: true,
             max_tokens: 1200, ...(tools.length ? { tools: tools.map((tool) => ({ type: "function",
               function: { name: tool.name, description: tool.description, parameters: tool.parameters } })) } : {}) }) });

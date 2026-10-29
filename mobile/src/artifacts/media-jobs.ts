@@ -4,12 +4,12 @@ import { File } from "expo-file-system";
 import * as FileSystem from "expo-file-system/legacy";
 import { fetch } from "expo/fetch";
 import { AppState, Image } from "react-native";
-import { DEFAULT_VIDEO_MODEL, readNewApiConfig, type NewApiConfig } from "../agent/newapi-config";
+import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, readNewApiConfig, type NewApiConfig } from "../agent/newapi-config";
 import { findArtifact, savePhotoArtifact, saveVideoArtifact } from "./artifact-store";
 import { resultPresentation } from "./presentation";
 import { MediaJobService, MediaRequestRejected, MediaRequestUnconfirmed, type MediaJob, type MediaJobTransport } from "./media-job-service";
 import { agnesVideoPollPaths, buildAgnesImageRequest, buildAgnesVideoRequest, extractAgnesVideoUrl,
-  mediaRejectionNotice, parseAgnesVideoSubmission, videoDownloadCandidates, mediaDownloadHeaders } from "./agnes-protocol";
+  mediaRejectionNotice, parseAgnesVideoSubmission, videoDownloadCandidates, mediaDownloadHeaders, validateMediaAspectRatio } from "./agnes-protocol";
 import { readMediaJson, MediaJsonReadError, type MediaHttpDiagnostic } from "./media-json";
 import { getDiagnosticLogEntries, recordDiagnosticEvent } from "../diagnostics/diagnostic-log";
 
@@ -42,7 +42,7 @@ async function request(config: NewApiConfig, path: string, body?: string, fromOr
   const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch((fromOrigin ? new URL(config.baseUrl).origin : config.baseUrl) + path, { method: body ? "POST" : "GET", signal: controller.signal, redirect: "error",
-      headers: { Authorization: `Bearer ${config.apiKey}`, Accept: "application/json", "User-Agent": "myyaya/2.1.165", ...(typeof body === "string" ? { "Content-Type": "application/json" } : {}) }, body });
+      headers: { Authorization: `Bearer ${config.apiKey}`, Accept: "application/json", "User-Agent": "myyaya/2.1.166", ...(typeof body === "string" ? { "Content-Type": "application/json" } : {}) }, body });
     let data;
     try { data = await readMediaJson(response, { signal: controller.signal, startedAt, report }); }
     catch (error) {
@@ -108,7 +108,7 @@ function transport(config: NewApiConfig): MediaJobTransport {
       if (job.kind === "video") {
         const input = job.parentId ? await imageInput(job.parentId) : undefined;
         const firstFrame = input ? `data:${input.parent.mimeType};base64,${await input.file.base64()}` : undefined;
-        const data = await request(config, "/videos", JSON.stringify(buildAgnesVideoRequest(job.model || DEFAULT_VIDEO_MODEL, job.prompt, firstFrame)), false, 180_000, job.id);
+        const data = await request(config, "/videos", JSON.stringify(buildAgnesVideoRequest(job.model || DEFAULT_VIDEO_MODEL, job.prompt, firstFrame, job.aspectRatio)), false, 180_000, job.id);
         return parseAgnesVideoSubmission(data);
       }
       let data;
@@ -116,8 +116,8 @@ function transport(config: NewApiConfig): MediaJobTransport {
         const { file } = await imageInput(job.parentId);
         const parent = findArtifact(job.parentId)!;
         const dimensions = await Image.getSize(parent.uri);
-        data = await request(config, "/images/generations", JSON.stringify(buildAgnesImageRequest(job.prompt, `data:${parent.mimeType};base64,${await file.base64()}`, dimensions)), false, 10 * 60_000, job.id);
-      } else data = await request(config, "/images/generations", JSON.stringify(buildAgnesImageRequest(job.prompt)), false, 10 * 60_000, job.id);
+        data = await request(config, "/images/generations", JSON.stringify(buildAgnesImageRequest(job.prompt, `data:${parent.mimeType};base64,${await file.base64()}`, dimensions, { model: job.model, aspectRatio: job.aspectRatio })), false, 10 * 60_000, job.id);
+      } else data = await request(config, "/images/generations", JSON.stringify(buildAgnesImageRequest(job.prompt, undefined, undefined, { model: job.model, aspectRatio: job.aspectRatio })), false, 10 * 60_000, job.id);
       const result = data.data?.[0];
       if (!result || typeof result.b64_json !== "string" && typeof result.url !== "string" || (result.b64_json?.length ?? 0) > 30_000_000 || (result.url?.length ?? 0) > 4096) throw new Error("媒体接口没有返回有效图片");
       const directory = FileSystem.documentDirectory + "myyaya-media-receipts/";
@@ -153,11 +153,12 @@ function transport(config: NewApiConfig): MediaJobTransport {
     },
   };
 }
-export async function submitMediaJob(input: Pick<MediaJob, "kind" | "prompt" | "parentId">, signal?: AbortSignal): Promise<MediaJob> {
+export async function submitMediaJob(input: Pick<MediaJob, "kind" | "prompt" | "parentId" | "aspectRatio">, signal?: AbortSignal): Promise<MediaJob> {
+  validateMediaAspectRatio(input.kind, input.aspectRatio);
   if (input.parentId) await imageInput(input.parentId);
   const { config, binding } = await connection();
   if (signal?.aborted) throw new Error("已取消提交");
-  const jobs = getMediaJobs(), job = jobs.create({ ...input, ...(input.kind === "video" ? { model: config.videoModel || DEFAULT_VIDEO_MODEL } : {}) }, binding);
+  const jobs = getMediaJobs(), job = jobs.create({ ...input, model: input.kind === "video" ? config.videoModel || DEFAULT_VIDEO_MODEL : config.imageModel || DEFAULT_IMAGE_MODEL }, binding);
   // Persist first, return immediately, then let generation continue while chatting.
   void jobs.submit(job.id, binding, transport(config)).catch(() => {}); return job;
 }
