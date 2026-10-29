@@ -18,7 +18,7 @@ export function ModelConnectionForm({ onSaved }: { onSaved?: () => void }) {
     try {
       const config = validateNewApiConfig({ version: 1, baseUrl: url, model, imageModel, videoModel, apiKey: key || savedKey });
       const response = await fetch(config.baseUrl + "/chat/completions", { method: "POST", redirect: "error", signal: controller.signal,
-        headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json", "User-Agent": "myyaya/2.1.167" },
+        headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json", "User-Agent": "myyaya/2.1.168" },
         body: JSON.stringify({ model: config.model, messages: [{ role: "user", content: "只回复：连接成功" }], max_tokens: 20 }) });
       if (!response.ok) throw new Error(`连接失败（HTTP ${response.status}）`);
       const data = await response.json();

@@ -49,14 +49,17 @@ async function submit(input) {
   assert.equal(rows.get(job.id).status, "failed");
   return rows.get(job.id);
 }
-const image = await submit({ kind: "image", prompt: "A portrait cat", aspectRatio: "9:16" });
+const image = await submit({ kind: "image", prompt: "A portrait cat", aspectRatio: "9:16", resolution: "2K" });
 assert.equal(posts.at(-1).body.ratio, "9:16"); assert.equal(posts.at(-1).body.model, "owner-image-alias");
+assert.equal(posts.at(-1).body.size, "2K");
 assert.deepEqual(posts.at(-1).body.extra_body, { response_format: "url" });
-const edit = await submit({ kind: "edit", prompt: "Extend to a landscape", parentId: "parent", aspectRatio: "16:9" });
-assert.equal(posts.at(-1).body.ratio, "16:9"); assert.equal(posts.at(-1).body.size, "1K");
+const edit = await submit({ kind: "edit", prompt: "Extend to a landscape", parentId: "parent", aspectRatio: "16:9", resolution: "4K" });
+assert.equal(posts.at(-1).body.ratio, "16:9"); assert.equal(posts.at(-1).body.size, "4K");
 assert.equal(posts.at(-1).body.model, "owner-image-alias"); assert.match(posts.at(-1).body.image, /^data:image\/jpeg/);
 await submit({ kind: "edit", prompt: "Keep framing", parentId: "parent" });
 assert.equal(posts.at(-1).body.size, "768x1024"); assert.equal(posts.at(-1).body.ratio, undefined);
+await submit({ kind: "edit", prompt: "Increase resolution only", parentId: "parent", resolution: "2K" });
+assert.equal(posts.at(-1).body.size, "2K"); assert.equal(posts.at(-1).body.ratio, "3:4");
 const video = await submit({ kind: "video", prompt: "Walk upright", aspectRatio: "9:16" });
 assert.equal(posts.at(-1).body.aspect_ratio, "9:16"); assert.equal(posts.at(-1).body.mode, "text");
 assert.equal(posts.at(-1).body.model, "owner-video-alias");
@@ -66,6 +69,9 @@ assert.match(posts.at(-1).body.first_frame, /^data:image\/jpeg/);
 const before = rows.size;
 await assert.rejects(media.submitMediaJob({ kind: "video", prompt: "unsupported", aspectRatio: "2:3" }), /视频不支持/);
 assert.equal(rows.size, before, "unsupported ratios are rejected before creating/persisting/posting any task");
+await assert.rejects(media.submitMediaJob({ kind: "video", prompt: "wrong tier", resolution: "2K" }), /720P/);
+await assert.rejects(media.submitMediaJob({ kind: "image", prompt: "wrong tier", resolution: "8K" }), /1K.*4K/);
+assert.equal(rows.size, before, "invalid resolutions cannot create, persist or post a task");
 await configApi.saveNewApiConfig({ ...oldConfig, imageModel: "next-image-alias", videoModel: "next-video-alias" });
 await submit({ kind: "image", prompt: "Next image", aspectRatio: "1:1" });
 assert.equal(posts.at(-1).body.model, "next-image-alias");
@@ -73,8 +79,10 @@ const { MediaJobService } = load("src/artifacts/media-job-service.ts");
 const restored = new MediaJobService({ list: () => [...rows.values()], save() {} }, () => "unused");
 assert.equal(restored.list().find((job) => job.id === image.id).model, "owner-image-alias");
 assert.equal(restored.list().find((job) => job.id === edit.id).aspectRatio, "16:9");
+assert.equal(restored.list().find((job) => job.id === image.id).resolution, "2K");
+assert.equal(restored.list().find((job) => job.id === edit.id).resolution, "4K");
 assert.equal(restored.list().find((job) => job.id === video.id).model, "owner-video-alias");
-assert.equal(posts.length, 6, "settings changes/restart never resubmit previous tasks");
+assert.equal(posts.length, 7, "settings changes/restart never resubmit previous tasks");
 // Exercise the actual voice-agent tool boundary as well as the HTTP transport.
 for (const name of ["expo-router", "../device-tools/looi-robot", "../memory/memory-service", "../hermes/task-runtime",
   "../artifacts/artifact-focus", "../artifacts/phone-recording", "../search/web-search-tool", "./robot-tools", "./camera-tools", "./viewer-tools", "../artifacts/presentation"]) mocks[name] = {};
@@ -85,14 +93,16 @@ mocks["../artifacts/media-jobs"] = { submitMediaJob: async (input) => { calls.pu
 const { phoneTools } = load("src/agent/phone-tools.ts");
 const createTool = phoneTools.find((tool) => tool?.name === "create_media");
 assert.ok(createTool.parameters.properties.aspectRatio.anyOf.some((value) => value.const === "9:16"));
+assert.deepEqual(createTool.parameters.properties.resolution.anyOf.map((value) => value.const), ["1K", "2K", "3K", "4K"]);
 for (const args of [
-  { kind: "image", source: "text", prompt: "portrait", aspectRatio: "9:16" },
-  { kind: "edit", prompt: "wide", parentId: "specific-reference", aspectRatio: "16:9" },
+  { kind: "image", source: "text", prompt: "portrait", aspectRatio: "9:16", resolution: "2K" },
+  { kind: "edit", prompt: "wide", parentId: "specific-reference", aspectRatio: "16:9", resolution: "4K" },
   { kind: "video", source: "text", prompt: "square", aspectRatio: "1:1" },
   { kind: "video", source: "image", prompt: "portrait motion", aspectRatio: "9:16" },
 ]) {
   await createTool.execute("voice-fixture", args);
   assert.equal(calls.at(-1).aspectRatio, args.aspectRatio);
+  assert.equal(calls.at(-1).resolution, args.resolution);
 }
 assert.equal(calls[1].parentId, "specific-reference"); assert.equal(calls[3].parentId, "selected-reference");
 console.log("Media options: secure config migration, model edits, all four generation paths, explicit/source ratios, task snapshots and rejection before POST: PASS");

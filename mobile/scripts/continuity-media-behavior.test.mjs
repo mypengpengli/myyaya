@@ -49,9 +49,11 @@ const payload = JSON.parse(next.payload); assert.equal(payload.session_id, "actu
 const { MediaJobService } = load("src/artifacts/media-job-service.ts");
 const mediaRows = new Map(), mediaRepository = { list: () => [...mediaRows.values()], save: (job) => mediaRows.set(job.id, job) };
 let media = new MediaJobService(mediaRepository, () => "image-task"), posts = 0, polls = 0;
-const job = media.create({ kind: "edit", parentId: "edit1", prompt: "change the background" }, "binding");
+const job = media.create({ kind: "edit", parentId: "edit1", prompt: "change the background", resolution: "2K" }, "binding");
 await media.submit(job.id, "binding", { submit: async () => { posts++; return { imageResultPath: "private/receipt.json" }; } });
 media = new MediaJobService(mediaRepository, () => "unused");
+const recovered = JSON.parse(restoredCompanionContext([], pictures, media.list(), { imageId: "edit1" }));
+assert.equal(recovered.media[0].resolution, "2K", "the first Pi turn after restart can see the submitted resolution without generating again");
 await media.poll("binding", { poll: async (value) => { polls++; assert.equal(value.parentId, "edit1"); throw Error("download offline"); } });
 assert.equal(media.list()[0].status, "running");
 await media.poll("binding", { poll: async () => { polls++; return { status: "completed", artifactId: "result" }; } });

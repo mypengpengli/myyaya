@@ -14,6 +14,6 @@ export function restoredCompanionContext(tasks: HermesTask[], artifacts: Artifac
       input: item.input.slice(0, 600), status: item.status, result: item.output.slice(0, 1800), files: item.delivery?.artifactIds ?? [], fileStatus: item.delivery?.files,
     })),
     artifacts: artifacts.slice(0, 24).map(({ id, title, kind, parentId, sourceTaskId }) => ({ id, title, kind, parentId, sourceTaskId })),
-    media: media.slice(0, 6).map(({ id, kind, model, aspectRatio, status, parentId, artifactId, notice }) => ({ id, kind, model, aspectRatio, status, parentId, artifactId, notice })),
+    media: media.slice(0, 6).map(({ id, kind, model, aspectRatio, resolution, status, parentId, artifactId, notice }) => ({ id, kind, model, aspectRatio, resolution, status, parentId, artifactId, notice })),
   });
 }

@@ -4,6 +4,19 @@
  */
 export const IMAGE_ASPECT_RATIOS = ["1:1", "3:4", "4:3", "16:9", "9:16", "2:3", "3:2", "21:9"] as const;
 export type MediaAspectRatio = typeof IMAGE_ASPECT_RATIOS[number];
+export const IMAGE_RESOLUTIONS = ["1K", "2K", "3K", "4K"] as const;
+export type ImageResolution = typeof IMAGE_RESOLUTIONS[number];
+export function validateImageResolution(kind: "image" | "edit" | "video", resolution?: ImageResolution): void {
+  if (resolution === undefined) return;
+  if (kind === "video") throw new Error("图片分辨率参数不能用于视频；当前视频仍使用 720P");
+  if (!(IMAGE_RESOLUTIONS as readonly string[]).includes(resolution)) throw new Error("图片分辨率可选：1K、2K、3K、4K");
+}
+/** Agnes tiers need a supported ratio, otherwise an edit silently becomes square. */
+export function closestImageAspectRatio(width = 1024, height = 1024): MediaAspectRatio {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return "1:1";
+  const distance = (ratio: MediaAspectRatio) => { const [w, h] = ratio.split(":").map(Number); return Math.abs(Math.log(width / height) - Math.log(w / h)); };
+  return IMAGE_ASPECT_RATIOS.reduce((best, ratio) => distance(ratio) < distance(best) ? ratio : best);
+}
 export const VIDEO_ASPECT_RATIOS: readonly MediaAspectRatio[] = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"];
 export function validateMediaAspectRatio(kind: "image" | "edit" | "video", ratio?: MediaAspectRatio): void {
   if (ratio === undefined) return;
@@ -23,17 +36,19 @@ export function agnesEditSize(width = 1024, height = 1024): string {
   for (const [value, size] of common) if (Math.abs(ratio - value) < 0.001) return size;
   return ratio > 1 ? `1024x${Math.max(64, Math.round(1024 / ratio))}` : `${Math.max(64, Math.round(1024 * ratio))}x1024`;
 }
-export function buildAgnesImageRequest(prompt: string, image?: string, dimensions?: { width: number; height: number }, options: { model?: string; aspectRatio?: MediaAspectRatio } = {}) {
+export function buildAgnesImageRequest(prompt: string, image?: string, dimensions?: { width: number; height: number }, options: { model?: string; aspectRatio?: MediaAspectRatio; resolution?: ImageResolution } = {}) {
   validateMediaAspectRatio(image ? "edit" : "image", options.aspectRatio);
+  validateImageResolution(image ? "edit" : "image", options.resolution);
   const model = options.model || "agnes-image-2.5-flash";
-  const ratio = options.aspectRatio ? { ratio: options.aspectRatio } : {};
-  if (!image) return { model, prompt, size: "1K", ...ratio, n: 1, extra_body: { response_format: "url" } };
+  const aspectRatio = options.aspectRatio ?? (image && options.resolution ? closestImageAspectRatio(dimensions?.width, dimensions?.height) : undefined);
+  const ratio = aspectRatio ? { ratio: aspectRatio } : {};
+  if (!image) return { model, prompt, size: options.resolution || "1K", ...ratio, n: 1, extra_body: { response_format: "url" } };
   // Keep ImageForge's dimensions/reference shape. Prefer Agnes' URL response:
   // persist the small receipt before downloading, so an interrupted image transfer
   // can be retried without repeating the generation POST.
   return { model,
     prompt: `Use the provided reference image as the visual source for this image-to-image edit. Follow this edit instruction: ${prompt}.`,
-    size: options.aspectRatio ? "1K" : agnesEditSize(dimensions?.width, dimensions?.height), ...ratio, image, images: [image],
+    size: options.resolution || (options.aspectRatio ? "1K" : agnesEditSize(dimensions?.width, dimensions?.height)), ...ratio, image, images: [image],
     extra_body: { image: [image], response_format: "url" } };
 }
 export function parseAgnesVideoSubmission(data: Record<string, unknown>) {
@@ -73,6 +88,6 @@ export function videoDownloadCandidates(baseUrl: string, remoteId?: string, resu
     resultUrl?.startsWith("https://") ? resultUrl : ""].filter(Boolean))];
 }
 export function mediaDownloadHeaders(baseUrl: string, targetUrl: string, apiKey: string): Record<string, string> {
-  return { "User-Agent": "myyaya/2.1.167",
+  return { "User-Agent": "myyaya/2.1.168",
     ...(new URL(baseUrl).origin === new URL(targetUrl).origin ? { Authorization: `Bearer ${apiKey}` } : {}) };
 }

@@ -38,6 +38,24 @@ for (const ratio of api.VIDEO_ASPECT_RATIOS) {
   assert.equal(api.buildAgnesVideoRequest("owner-video-alias", "move", undefined, ratio).aspect_ratio, ratio);
   assert.equal(api.buildAgnesVideoRequest("owner-video-alias", "move", image, ratio).aspect_ratio, ratio);
 }
+for (const resolution of api.IMAGE_RESOLUTIONS) {
+  for (const ratio of api.IMAGE_ASPECT_RATIOS) {
+    for (const source of [undefined, image]) {
+      const request = api.buildAgnesImageRequest("high resolution", source, { width: 736, height: 1312 }, { resolution, aspectRatio: ratio });
+      assert.equal(request.size, resolution); assert.equal(request.ratio, ratio);
+      assert.equal(request.extra_body.response_format, "url");
+      if (source) assert.equal(request.image, source);
+    }
+  }
+}
+for (const [width, height, ratio] of [[736, 1312, "9:16"], [2624, 1472, "16:9"], [864, 1152, "3:4"], [1568, 672, "21:9"], [1024, 1024, "1:1"]]) {
+  const request = api.buildAgnesImageRequest("sharpen only", image, { width, height }, { resolution: "2K" });
+  assert.equal(request.size, "2K"); assert.equal(request.ratio, ratio, "resolution-only editing preserves the source's supported aspect despite pixel rounding");
+}
+assert.equal(api.closestImageAspectRatio(NaN, 0), "1:1");
+assert.throws(() => api.buildAgnesImageRequest("draw", undefined, undefined, { resolution: "8K" }), /1K.*4K/);
+assert.throws(() => api.validateImageResolution("video", "2K"), /720P/);
+assert.equal(api.buildAgnesImageRequest("default").size, "1K");
 assert.throws(() => api.buildAgnesVideoRequest("video", "move", image, "2:3"), /视频不支持/);
 assert.throws(() => api.buildAgnesImageRequest("draw", undefined, undefined, { aspectRatio: "7:5" }), /图片不支持/);
 assert.deepEqual(api.parseAgnesVideoSubmission({ id: "relay_task", task_id: "provider_task", video_id: "video_id" }), { remoteId: "relay_task", videoId: "video_id" });
