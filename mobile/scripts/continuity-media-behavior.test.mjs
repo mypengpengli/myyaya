@@ -54,6 +54,7 @@ await media.submit(job.id, "binding", { submit: async () => { posts++; return { 
 media = new MediaJobService(mediaRepository, () => "unused");
 const recovered = JSON.parse(restoredCompanionContext([], pictures, media.list(), { imageId: "edit1" }));
 assert.equal(recovered.media[0].resolution, "2K", "the first Pi turn after restart can see the submitted resolution without generating again");
+assert.equal(recovered.media[0].prompt, "change the background", "durable image descriptions distinguish an older requested subject from a newer completion");
 await media.poll("binding", { poll: async (value) => { polls++; assert.equal(value.parentId, "edit1"); throw Error("download offline"); } });
 assert.equal(media.list()[0].status, "running");
 await media.poll("binding", { poll: async () => { polls++; return { status: "completed", artifactId: "result" }; } });
