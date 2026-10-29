@@ -11,7 +11,7 @@ export const viewerControlTool: AgentTool = {
   parameters: Type.Object({ action: Type.Union([Type.Literal("status"), Type.Literal("pin"), Type.Literal("unpin"), Type.Literal("close"), Type.Literal("play"), Type.Literal("pause"), Type.Literal("replay"), Type.Literal("seek"), Type.Literal("next_page"), Type.Literal("previous_page"), Type.Literal("go_page"), Type.Literal("next_result")]),
     seconds: Type.Optional(Type.Number({ minimum: 0 })),
     page: Type.Optional(Type.Integer({ minimum: 1 })),
-    id: Type.Optional(Type.String({ minLength: 1 })) }),
+    id: Type.Optional(Type.String({ minLength: 1 })), pinned: Type.Optional(Type.Boolean({ description: "next_result 打开后同时固定" })) }),
   execute: async (_id, params, signal) => {
     if (signal?.aborted) throw new Error("已取消展示操作");
     if (AppState.currentState !== "active") throw new Error("请保持 App 在前台操作展示");
@@ -19,7 +19,7 @@ export const viewerControlTool: AgentTool = {
     if (!["status", "pin", "unpin", "close", "play", "pause", "replay", "seek", "next_page", "previous_page", "go_page", "next_result"].includes(action)) throw new Error("不支持的展示操作");
     const before = presentation.getSnapshot();
     if (id && action !== "next_result" && before.active?.id !== id) throw new Error("该作品当前未展示，请先查询当前展示或重新打开指定作品");
-    if (action === "next_result") presentation.next(id);
+    if (action === "next_result") { presentation.next(id); if ((params as { pinned?: boolean }).pinned) presentation.pin(true); }
     let document;
     if (["next_page", "previous_page", "go_page"].includes(action)) {
       if (before.active?.kind !== "document") throw new Error("当前没有展示文档");

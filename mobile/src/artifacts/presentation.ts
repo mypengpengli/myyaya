@@ -6,11 +6,12 @@ export type PresentationState = { active: PresentationItem | null; queue: Presen
 export class ResultPresentation {
   private state: PresentationState = { active: null, queue: [], pinned: false, ready: false, ended: false, suspended: false, deadline: null };
   private listeners = new Set<() => void>();
+  private countdownHolds = new Set<symbol>();
   constructor(private readonly now: () => number = Date.now) {}
   getSnapshot = () => this.state;
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   private update(patch: Partial<PresentationState>) { this.state = { ...this.state, ...patch }; this.listeners.forEach((fn) => fn()); }
-  private deadline() { return !this.state.pinned && !this.state.suspended && this.state.ready &&
+  private deadline() { return !this.state.pinned && !this.state.suspended && this.countdownHolds.size === 0 && this.state.ready &&
     (this.state.active?.kind !== "video" || this.state.ended) ? this.now() + 10_000 : null; }
   offer(item: PresentationItem) {
     if (!this.state.active) this.open(item);
@@ -43,6 +44,12 @@ export class ResultPresentation {
   }
   interact() { this.update({ deadline: this.deadline() }); }
   suspend(value: boolean) { this.update({ suspended: value }); this.update({ deadline: this.deadline() }); }
+  /** Keep a result available while a user command is being understood/executed.
+   * Separate leases avoid releasing another turn or the background suspension. */
+  holdCountdown(): () => void {
+    const owner = Symbol(); this.countdownHolds.add(owner); this.update({ deadline: null });
+    return () => { if (this.countdownHolds.delete(owner)) this.update({ deadline: this.deadline() }); };
+  }
   tick() { if (this.state.deadline !== null && this.now() >= this.state.deadline) this.close(); }
 }
 export const resultPresentation = new ResultPresentation();

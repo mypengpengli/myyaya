@@ -22,6 +22,7 @@ export function queueCompanionTaskResult(id: string, text: string) {
   if (taskNotices.size > 16) taskNotices.delete(taskNotices.keys().next().value!);
 }
 export async function replyToCompanion(text: string, signal: AbortSignal): Promise<string> {
+  const releaseCountdown = resultPresentation.holdCountdown();
   update({ phase: "thinking", label: "正在想怎么回答" });
   try {
     const config = await readNewApiConfig();
@@ -45,5 +46,5 @@ export async function replyToCompanion(text: string, signal: AbortSignal): Promi
   } catch (error) {
     update({ phase: signal.aborted ? "idle" : "error", label: signal.aborted ? "" : error instanceof Error ? error.message : "对话暂时不可用" });
     throw error;
-  }
+  } finally { releaseCountdown(); }
 }

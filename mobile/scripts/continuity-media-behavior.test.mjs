@@ -8,6 +8,16 @@ function load(path, mocks = {}) {
   new Function("require", "module", "exports", code)((name) => mocks[name] ?? require(name), module, module.exports); return module.exports;
 }
 const { resolveImageReference, artifactVersions } = load("src/artifacts/artifact-versions.ts");
+const { ResultPresentation } = load("src/artifacts/presentation.ts");
+let now = 0;
+const timed = new ResultPresentation(() => now);
+const releaseTurn = timed.holdCountdown();
+timed.open({ id: "picture", kind: "image", title: "picture", uri: "file:///fixture.png" }); timed.loaded("picture");
+now += 60_000; timed.tick(); assert.equal(timed.getSnapshot().active.id, "picture", "model/tool latency must not dismiss a result before pinning");
+const otherTurn = timed.holdCountdown(); releaseTurn(); assert.equal(timed.getSnapshot().deadline, null);
+timed.suspend(true); otherTurn(); assert.equal(timed.getSnapshot().deadline, null, "a finished command cannot release the background suspension");
+timed.suspend(false); now += 9_999; timed.tick(); assert.ok(timed.getSnapshot().active);
+now++; timed.tick(); assert.equal(timed.getSnapshot().active, null, "normal ten-second countdown resumes when the command and background holds end");
 const pictures = [{ id: "original", kind: "image", createdAt: 1 }, { id: "edit1", kind: "image", parentId: "original", createdAt: 2 }, { id: "edit2", kind: "image", parentId: "edit1", createdAt: 3 }, { id: "video", kind: "video", parentId: "edit2", createdAt: 4 }, { id: "other", kind: "image", createdAt: 5 }];
 assert.equal(resolveImageReference(pictures, undefined, undefined, "edit1").id, "edit1", "a later completion cannot silently replace the selected input");
 assert.equal(resolveImageReference(pictures, "original", "edit2", "edit1").id, "original");
