@@ -7,7 +7,7 @@ import { AppState } from "react-native";
 import { DEFAULT_VIDEO_MODEL, readNewApiConfig, type NewApiConfig } from "../agent/newapi-config";
 import { findArtifact, savePhotoArtifact, saveVideoArtifact } from "./artifact-store";
 import { resultPresentation } from "./presentation";
-import { MediaJobService, MediaRequestRejected, type MediaJob, type MediaJobTransport } from "./media-job-service";
+import { MediaJobService, MediaRequestRejected, MediaRequestUnconfirmed, type MediaJob, type MediaJobTransport } from "./media-job-service";
 import { agnesVideoPollPaths, buildAgnesImageRequest, buildAgnesVideoRequest, extractAgnesVideoUrl,
   mediaRejectionNotice, parseAgnesVideoSubmission, videoDownloadCandidates, mediaDownloadHeaders } from "./agnes-protocol";
 
@@ -36,9 +36,14 @@ async function request(config: NewApiConfig, path: string, body?: string, fromOr
     if (!response.ok || data?.error || !data) {
       const rejected = mediaRejectionNotice(response.status, data);
       if (rejected) throw new MediaRequestRejected(rejected);
-      throw new Error(`媒体接口 HTTP ${response.status}`);
+      throw new MediaRequestUnconfirmed(`媒体接口返回 HTTP ${response.status}，未取得有效结果；请核对服务记录，不会自动重复提交`);
     }
     return data;
+  } catch (error) {
+    if (error instanceof MediaRequestRejected || error instanceof MediaRequestUnconfirmed) throw error;
+    throw new MediaRequestUnconfirmed(controller.signal.aborted
+      ? "媒体请求超时，结果尚未确认；请核对服务记录，不会自动重复提交"
+      : "媒体连接中断，结果尚未确认；请核对服务记录，不会自动重复提交");
   } finally { clearTimeout(timeout); }
 }
 async function imageInput(parentId?: string) {

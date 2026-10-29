@@ -7,7 +7,9 @@ export function buildAgnesVideoRequest(model: string, prompt: string, firstFrame
 }
 export function buildAgnesImageRequest(prompt: string, image?: string) {
   return { model: "agnes-image-2.5-flash", prompt, size: "1K", n: 1,
-    ...(image ? { extra_body: { image: [image], response_format: "b64_json" } } : { return_base64: true }) };
+    // Match the owner's working ImageForge adapter: compatible gateways can
+    // consume flattened references while Agnes also accepts extra_body.image.
+    ...(image ? { image, images: [image], extra_body: { image: [image], response_format: "b64_json" } } : { return_base64: true }) };
 }
 export function parseAgnesVideoSubmission(data: Record<string, unknown>) {
   const remoteId = data.id || data.task_id;
@@ -16,8 +18,8 @@ export function parseAgnesVideoSubmission(data: Record<string, unknown>) {
   return { ...(typeof remoteId === "string" ? { remoteId } : {}), ...(typeof videoId === "string" ? { videoId } : {}) };
 }
 export function agnesVideoPollPaths(job: { remoteId?: string; videoId?: string; model?: string }): string[] {
-  return [job.remoteId ? `/v1/videos/${encodeURIComponent(job.remoteId)}` : "",
-    job.videoId ? `/agnesapi?${new URLSearchParams({ video_id: job.videoId, model_name: job.model || "agnes-video-2.5" })}` : ""].filter(Boolean);
+  return [job.videoId ? `/agnesapi?${new URLSearchParams({ video_id: job.videoId, model_name: job.model || "agnes-video-2.5" })}` : "",
+    job.remoteId ? `/v1/videos/${encodeURIComponent(job.remoteId)}` : ""].filter(Boolean);
 }
 export function extractAgnesVideoUrl(value: unknown, depth = 0): string | undefined {
   if (!value || typeof value !== "object" || depth > 4) return;

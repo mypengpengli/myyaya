@@ -46,7 +46,7 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport): 
         const tools = getCurrentTools(context.messages);
         const response = await transport(config.baseUrl + "/chat/completions", { method: "POST", redirect: "error",
           signal: controller.signal, headers: { "Content-Type": "application/json", Accept: "text/event-stream",
-            Authorization: `Bearer ${config.apiKey}`, "User-Agent": "myyaya/2.1.153" },
+            Authorization: `Bearer ${config.apiKey}`, "User-Agent": "myyaya/2.1.163" },
           body: JSON.stringify({ model: config.model, messages: toNewApiMessages(context.messages), stream: true,
             max_tokens: 1200, ...(tools.length ? { tools: tools.map((tool) => ({ type: "function",
               function: { name: tool.name, description: tool.description, parameters: tool.parameters } })) } : {}) }) });
@@ -110,7 +110,9 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport): 
           if (pending.length > 1_000_000) throw new Error("模型流式消息过长");
           const lines = pending.split("\n"); pending = lines.pop()!;
           for (const line of lines) consume(line.trimEnd());
-          if (next.done || streamDone) break;
+          // finish_reason is terminal even when a compatible gateway omits [DONE]
+          // or keeps the HTTP connection open after sending the final choice.
+          if (next.done || streamDone || finished) break;
         }
         if (pending.trim()) consume(pending.trimEnd());
         if (!finished) throw new Error("模型连接中断，请重试");
@@ -135,7 +137,9 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport): 
         stream.push({ type: "error", reason: output.stopReason, error: output });
       } finally {
         clearTimeout(timeout); options?.signal?.removeEventListener("abort", abort);
-        await reader?.cancel().catch(() => {}); stream.end(output);
+        // Expo's native cancellation can wait on the network. Closing the Pi
+        // event stream must not depend on that acknowledgement.
+        void reader?.cancel().catch(() => {}); stream.end(output);
       }
     })();
     return stream;

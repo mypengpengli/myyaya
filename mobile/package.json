@@ -1,7 +1,7 @@
 {
   "name": "my-looi",
   "main": "expo-router/entry",
-  "version": "2.1.162",
+  "version": "2.1.163",
   "packageManager": "pnpm@10.34.5",
   "dependencies": {
     "@earendil-works/pi-agent-core": "1.4.0",

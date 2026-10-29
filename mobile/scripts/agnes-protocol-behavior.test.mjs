@@ -14,13 +14,15 @@ assert.equal(keyframe.mode, "keyframe"); assert.equal(keyframe.first_frame, imag
 assert.equal("image" in keyframe, false, "2.5 does not use the old image/duration protocol");
 const edit = api.buildAgnesImageRequest("make it blue", image);
 assert.deepEqual(edit.extra_body, { image: [image], response_format: "b64_json" });
+assert.equal(edit.image, image, "owner gateway compatibility includes the flattened image reference");
+assert.deepEqual(edit.images, [image]);
 assert.equal("response_format" in edit, false);
 assert.equal(api.buildAgnesImageRequest("draw a cat").return_base64, true);
 assert.deepEqual(api.parseAgnesVideoSubmission({ id: "relay_task", task_id: "provider_task", video_id: "video_id" }), { remoteId: "relay_task", videoId: "video_id" });
 assert.deepEqual(api.parseAgnesVideoSubmission({ video_id: "only_video" }), { videoId: "only_video" });
 assert.throws(() => api.parseAgnesVideoSubmission({ status: "queued" }), /任务编号/);
 assert.deepEqual(api.agnesVideoPollPaths({ remoteId: "relay_task", videoId: "video_id", model: "agnes-video-2.5-flash" }),
-  ["/v1/videos/relay_task", "/agnesapi?video_id=video_id&model_name=agnes-video-2.5-flash"]);
+  ["/agnesapi?video_id=video_id&model_name=agnes-video-2.5-flash", "/v1/videos/relay_task"]);
 assert.equal(api.extractAgnesVideoUrl({ metadata: { url: "https://example.test/video.mp4" } }), "https://example.test/video.mp4");
 assert.equal(api.extractAgnesVideoUrl({ output: { url: "file:///private" } }), undefined);
 const nested404 = { code: "fail_to_fetch_task", message: JSON.stringify({ error: { code: "model_not_found", message: "Model not available in current group" } }) };

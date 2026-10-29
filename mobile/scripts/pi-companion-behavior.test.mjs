@@ -79,4 +79,15 @@ const openStream = new CompanionAgent(config, createNewApiStream(config, async (
 }))), [], () => {});
 assert.equal(await openStream.reply("完成了吗", new AbortController().signal), "已经完成");
 assert.equal(cancelledOpenStream, true);
+// Some compatible gateways omit [DONE]; native cancellation may never settle.
+const finishWithoutDone = new CompanionAgent(config, createNewApiStream(config, async () => new Response(new ReadableStream({
+  start(controller) { controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(choice({ content: "完整回复" }))}\n\ndata: ${JSON.stringify(choice({}, "stop"))}\n\n`)); },
+  cancel() { return new Promise(() => {}); },
+}))), [], () => {});
+let finishTimer;
+try {
+  assert.equal(await Promise.race([finishWithoutDone.reply("完成了吗", new AbortController().signal), new Promise((_, reject) => {
+    finishTimer = setTimeout(() => reject(Error("terminal SSE frame must finish without network EOF/cancel acknowledgement")), 1000);
+  })]), "完整回复");
+} finally { clearTimeout(finishTimer); }
 console.log("Actual Pi agent + NewAPI: fragmented UTF-8 SSE, tool replay/validation, public progress, truncation, HTTP errors and cancellation: PASS");

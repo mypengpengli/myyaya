@@ -2,6 +2,7 @@ export type MediaJob = { id: string; kind: "image" | "edit" | "video"; prompt: s
   binding: string; createdAt: number; status: "submitting" | "running" | "completed" | "failed" | "unknown";
   remoteId?: string; videoId?: string; model?: string; artifactId?: string; imageResultPath?: string; notified?: boolean; notice: string };
 export class MediaRequestRejected extends Error {}
+export class MediaRequestUnconfirmed extends Error {}
 export interface MediaJobRepository { list(): MediaJob[]; save(job: MediaJob): void }
 export interface MediaJobTransport {
   submit(job: MediaJob): Promise<{ remoteId?: string; videoId?: string; artifactId?: string; imageResultPath?: string }>;
@@ -36,7 +37,7 @@ export class MediaJobService {
       else if (result.remoteId || result.videoId || result.imageResultPath) this.save({ ...job, ...result, status: "running", notice: result.imageResultPath ? "图片已生成，正在保存到手机" : "服务器正在生成" });
       else this.save({ ...job, status: "unknown", notice: "服务器没有返回作品或任务编号，请先核对请求记录" });
     } catch (error) { this.save({ ...job, status: error instanceof MediaRequestRejected ? "failed" : "unknown",
-      notice: error instanceof MediaRequestRejected ? error.message : "生成结果暂未确认；请先核对服务记录，不会自动重复扣费提交" }); }
+      notice: error instanceof MediaRequestRejected || error instanceof MediaRequestUnconfirmed ? error.message : "生成结果暂未确认；请先核对服务记录，不会自动重复扣费提交" }); }
     finally { this.busy.delete(id); }
   }
   async poll(binding: string, transport: MediaJobTransport): Promise<void> {
