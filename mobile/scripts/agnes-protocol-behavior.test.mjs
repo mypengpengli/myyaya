@@ -13,7 +13,7 @@ const keyframe = api.buildAgnesVideoRequest("agnes-video-2.5", "make it dance", 
 assert.equal(keyframe.mode, "keyframe"); assert.equal(keyframe.first_frame, image);
 assert.equal("image" in keyframe, false, "2.5 does not use the old image/duration protocol");
 const edit = api.buildAgnesImageRequest("make it blue", image);
-assert.deepEqual(edit.extra_body, { image: [image], response_format: "b64_json" });
+assert.deepEqual(edit.extra_body, { image: [image], response_format: "url" }, "persist a compact image receipt before downloading the binary");
 assert.equal(edit.image, image, "owner gateway compatibility includes the flattened image reference");
 assert.deepEqual(edit.images, [image]);
 assert.equal(edit.size, "1024x1024", "edit requests use the working site's concrete dimensions");

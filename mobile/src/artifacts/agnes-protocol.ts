@@ -15,12 +15,13 @@ export function agnesEditSize(width = 1024, height = 1024): string {
 }
 export function buildAgnesImageRequest(prompt: string, image?: string, dimensions?: { width: number; height: number }) {
   if (!image) return { model: "agnes-image-2.5-flash", prompt, size: "1K", n: 1, return_base64: true };
-  // Match the working ImageForge edit request, including concrete dimensions
-  // and its reference instruction. Some relays handle the "1K" shorthand differently.
+  // Keep ImageForge's dimensions/reference shape. Prefer Agnes' URL response:
+  // persist the small receipt before downloading, so an interrupted image transfer
+  // can be retried without repeating the generation POST.
   return { model: "agnes-image-2.5-flash",
     prompt: `Use the provided reference image as the visual source for this image-to-image edit. Follow this edit instruction: ${prompt}.`,
     size: agnesEditSize(dimensions?.width, dimensions?.height), image, images: [image],
-    extra_body: { image: [image], response_format: "b64_json" } };
+    extra_body: { image: [image], response_format: "url" } };
 }
 export function parseAgnesVideoSubmission(data: Record<string, unknown>) {
   const remoteId = data.id || data.task_id;
