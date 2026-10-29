@@ -4,6 +4,8 @@
 
 167 已按原签名覆盖安装，已有配置、作品、任务和测试中保存的技能保留。最终源码 `e6f7406343612b9690457c6e78a2cf27fdc7002e`，[完整 Linux CI](https://github.com/mypengpengli/myyaya/actions/runs/40832391938) 全部通过；APK 173882284 字节，SHA256 `9991a6a4401fe5d2f09867294761dc1a6d4972d644187fbab6131cb086d325f4`。原签名、16 KB 对齐、ARM64、内置中文模型内容及凭据排除检查通过。
 
+[167 Release](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.167) 已公开并设为最新版本，四个附件远端大小和 SHA256 均与本地一致；这不代替手机 OTA 下载与安装验收。
+
 真实手机 Pi 的学习闭环：
 
 1. 自然指令要求先列出作品，再打开最近图片并固定，真实工具执行成功。
