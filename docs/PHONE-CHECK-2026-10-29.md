@@ -4,6 +4,8 @@
 
 当前构建源码 `303c151e3ae6dded467b47882ef0d8aed4feefaf`；[完整源码 CI](https://github.com/mypengpengli/myyaya/actions/runs/40805231114) 通过。原签名 APK 已覆盖安装，设置、任务和作品保留。SHA256 `d24dbba3e710996c437ebbce661422a6a8b1c997444b8a3b6f32922aa5361b8d`，173853084 字节。TypeScript、相关行为检查、签名、16 KB ZIP 对齐、ARM64、内置中文模型与凭据排除检查通过。
 
+[164 Release](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.164) 已公开，四个附件摘要与本地一致。电脑端实际更新客户端匿名检查通过：163 发现 164、同版不提示重装、校验文件 GET 200、APK HEAD 200，大小与 SHA256 一致；未代替手机 OTA 安装验收。
+
 | 项目 | 实机证据 |
 | --- | --- |
 | 第二轮改图 | 任务 7fc79f73-3622-4477-a60b-141edd8653c7 completed。以红杯图为父图，加出头顶绿叶；截图核对红杯、黄机器人、橙球保留 |
