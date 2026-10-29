@@ -6,6 +6,8 @@
 
 构建源码 `acd470a4b317fc5acfdccde4937b9c184e7e1717`，[完整源码 CI](https://github.com/mypengpengli/myyaya/actions/runs/40814170752) 通过。原签名 APK 已覆盖安装，173854464 字节，SHA256 `62646dc09e8f245a2480e850f6eb7e9dee2d9898c939a36ddb9b2775651bff2b`；TypeScript、相关队列/倒计时行为检查、签名、ARM64、16 KB 对齐、中文模型及凭据排除检查通过。
 
+[165 Release](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.165) 已公开发布并设为最新版本；APK、校验文件、构建信息及源码清单四个附件均已上传，远端摘要与本地一致。本轮电脑端完整更新客户端检查因 GitHub 附件访问超时未通过，不据此宣称下载链路或手机 OTA 安装通过；手机已通过 ADB 覆盖安装，OTA 仍按用户安排待代理配置后验证。
+
 实机使用四张现有生成图和一段现有视频，没有新增生成任务：
 
 - 顺序观察到 1/5、2/5、3/5、4/5、5/5；第三项截图为“第 3/5 项 · 9 秒后展示下一项”。
