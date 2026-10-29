@@ -83,6 +83,14 @@ assert.equal(restored.list().find((job) => job.id === image.id).resolution, "2K"
 assert.equal(restored.list().find((job) => job.id === edit.id).resolution, "4K");
 assert.equal(restored.list().find((job) => job.id === video.id).model, "owner-video-alias");
 assert.equal(posts.length, 7, "settings changes/restart never resubmit previous tasks");
+// The diagnostic must inspect local pixels, not echo the requested tier as proof.
+const completed = media.getMediaJobs().create({ kind: "image", prompt: "local fixture", resolution: "2K" }, "same-account");
+await media.getMediaJobs().submit(completed.id, "same-account", { submit: async () => ({ artifactId: "saved-image" }) });
+const probe = await media.probeMediaJobs();
+assert.deepEqual(probe.images[0], { id: completed.id, artifactId: "saved-image", width: 3000, height: 4000 });
+assert.equal(posts.length, 7, "inspecting local pixels cannot submit media");
+mocks["react-native"].Image.getSize = async () => { throw Error("file unavailable"); };
+assert.equal((await media.probeMediaJobs()).images[0].unavailable, true);
 // Exercise the actual voice-agent tool boundary as well as the HTTP transport.
 for (const name of ["expo-router", "../device-tools/looi-robot", "../memory/memory-service", "../hermes/task-runtime",
   "../artifacts/artifact-focus", "../artifacts/phone-recording", "../search/web-search-tool", "./robot-tools", "./camera-tools", "./viewer-tools", "../artifacts/presentation"]) mocks[name] = {};

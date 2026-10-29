@@ -177,9 +177,14 @@ export async function probeMediaJobs() {
         hasVideoUrl: !!extractAgnesVideoUrl(data) };
     } catch { return { route, status: "query-error" }; }
   })) : [];
+  const images = await Promise.all(jobs.filter((job) => job.kind !== "video" && job.status === "completed" && job.artifactId).slice(0, 4).map(async (job) => {
+    const item = findArtifact(job.artifactId);
+    try { return { id: job.id, artifactId: job.artifactId, ...(item ? await Image.getSize(item.uri) : {}) }; }
+    catch { return { id: job.id, artifactId: job.artifactId, unavailable: true }; }
+  }));
   return {
     jobs: jobs.map(({ id, kind, status, parentId, remoteId, videoId, model, aspectRatio, resolution, createdAt, notice }) => ({ id, kind, status, parentId, remoteId, videoId, model, aspectRatio, resolution, createdAt, notice })),
-    reads, active: [...httpDiagnostics.values()],
+    reads, images, active: [...httpDiagnostics.values()],
     recent: getDiagnosticLogEntries().filter((entry) => entry.event === "media-http-response").slice(-12).map(({ timestamp, details }) => ({ timestamp, ...details })),
   };
 }
