@@ -56,7 +56,7 @@ export const phoneTools: AgentTool[] = [
   { name: "media_status", label: "正在查看生成进度", description: "查询生成图片、改图或视频任务的真实状态和结果作品编号。",
     parameters: Type.Object({ id: Type.Optional(Type.String()) }), execute: async (_id, params) => {
       const { id } = params as { id?: string }; return text(getMediaJobs().list().filter((job) => !id || job.id === id).slice(0, 10)
-        .map(({ id, kind, prompt, status, artifactId, notice }) => ({ id, kind, prompt, status, artifactId, notice }))); } },
+        .map(({ id, kind, prompt, status, artifactId, parentId, createdAt, notice }) => ({ id, kind, prompt, status, artifactId, parentId, createdAt, notice }))); } },
   { name: "remember", label: "正在记住这件事", description: "用户明确要求记住某事实或偏好时保存到手机长期记忆。不要存储密码、密钥或猜测。",
     parameters: Type.Object({ fact: Type.String({ minLength: 1, maxLength: 1000 }) }),
     execute: async (_id, params) => { const args = params as { fact: string }; await memoryService.remember([{ role: "user", content: args.fact }],

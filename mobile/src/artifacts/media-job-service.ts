@@ -48,7 +48,12 @@ export class MediaJobService {
         const result = await transport.poll(job);
         if (result.status === "completed" && !result.artifactId) continue;
         this.save({ ...job, ...result, notice: result.status === "completed" ? "已生成并保存到手机" : result.status === "failed" ? "服务器生成失败" : "服务器正在生成" });
-      } catch { /* A failed query never repeats the original POST or claims failure/completion. */ }
+      } catch (error) {
+        // Keep the task resumable, but do not disguise a failed query as progress.
+        const notice = error instanceof MediaRequestUnconfirmed || error instanceof MediaRequestRejected
+          ? `查询暂未成功：${error.message}` : "暂时未取到任务结果，正在继续查询，不会重新提交生成";
+        if (job.notice !== notice) this.save({ ...job, notice });
+      }
       finally { this.busy.delete(job.id); }
     }
   }

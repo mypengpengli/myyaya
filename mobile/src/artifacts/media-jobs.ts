@@ -10,6 +10,8 @@ import { resultPresentation } from "./presentation";
 import { MediaJobService, MediaRequestRejected, MediaRequestUnconfirmed, type MediaJob, type MediaJobTransport } from "./media-job-service";
 import { agnesVideoPollPaths, buildAgnesImageRequest, buildAgnesVideoRequest, extractAgnesVideoUrl,
   mediaRejectionNotice, parseAgnesVideoSubmission, videoDownloadCandidates, mediaDownloadHeaders } from "./agnes-protocol";
+import { readMediaJson, MediaJsonReadError, type MediaHttpDiagnostic } from "./media-json";
+import { getDiagnosticLogEntries, recordDiagnosticEvent } from "../diagnostics/diagnostic-log";
 
 let database: SQLite.SQLiteDatabase | undefined, service: MediaJobService | undefined;
 function db() {
@@ -27,15 +29,30 @@ async function connection() {
   const binding = await digestStringAsync(CryptoDigestAlgorithm.SHA256, config.baseUrl + "\n" + config.apiKey);
   return { config, binding };
 }
-async function request(config: NewApiConfig, path: string, body?: string, fromOrigin = false, timeoutMs = body ? 180_000 : 30_000) {
+const httpDiagnostics = new Map<string, MediaHttpDiagnostic & { jobId: string; route: string }>();
+async function request(config: NewApiConfig, path: string, body?: string, fromOrigin = false, timeoutMs = body ? 180_000 : 30_000, jobId = "unassigned") {
+  const startedAt = Date.now();
+  const route = body ? path === "/images/generations" ? "image-submit" : "video-submit" : path.startsWith("/agnesapi") ? "agnes-status" : "gateway-status";
+  const report = (value: MediaHttpDiagnostic) => {
+    const key = `${jobId}:${route}`, entry = { ...value, jobId, route };
+    httpDiagnostics.delete(key); httpDiagnostics.set(key, entry);
+    if (httpDiagnostics.size > 32) httpDiagnostics.delete(httpDiagnostics.keys().next().value!);
+    if (value.stage !== "receiving") recordDiagnosticEvent("vision", "media-http-response", entry);
+  };
   const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch((fromOrigin ? new URL(config.baseUrl).origin : config.baseUrl) + path, { method: body ? "POST" : "GET", signal: controller.signal, redirect: "error",
-      headers: { Authorization: `Bearer ${config.apiKey}`, Accept: "application/json", "User-Agent": "myyaya/2.1.163", ...(typeof body === "string" ? { "Content-Type": "application/json" } : {}) }, body });
+      headers: { Authorization: `Bearer ${config.apiKey}`, Accept: "application/json", "User-Agent": "myyaya/2.1.164", ...(typeof body === "string" ? { "Content-Type": "application/json" } : {}) }, body });
     let data;
-    try { data = await response.json(); }
-    catch {
+    try { data = await readMediaJson(response, { signal: controller.signal, startedAt, report }); }
+    catch (error) {
       if (controller.signal.aborted) throw new MediaRequestUnconfirmed("读取媒体生成结果超时，结果尚未确认；请核对服务记录，不会自动重复提交");
+      if (error instanceof MediaJsonReadError) {
+        const detail = error.diagnostic;
+        const reason = detail.reason === "read-failed" ? "读取媒体响应时连接中断" : detail.reason === "too-large" ? "媒体响应超过大小限制" :
+          detail.contentType === "html" ? "媒体服务返回了网页内容" : detail.reason === "empty" ? "媒体服务返回了空内容" : "媒体服务返回的内容不完整或不是有效 JSON";
+        throw new MediaRequestUnconfirmed(`${reason}（HTTP ${response.status}，已接收 ${detail.receivedBytes} 字节）；结果待核对，不会自动重复提交`);
+      }
       throw new MediaRequestUnconfirmed(`媒体接口返回 HTTP ${response.status}，响应内容不完整或格式无效；不会自动重复提交`);
     }
     if (!response.ok || data?.error || !data) {
@@ -91,7 +108,7 @@ function transport(config: NewApiConfig): MediaJobTransport {
       if (job.kind === "video") {
         const input = job.parentId ? await imageInput(job.parentId) : undefined;
         const firstFrame = input ? `data:${input.parent.mimeType};base64,${await input.file.base64()}` : undefined;
-        const data = await request(config, "/videos", JSON.stringify(buildAgnesVideoRequest(job.model || DEFAULT_VIDEO_MODEL, job.prompt, firstFrame)));
+        const data = await request(config, "/videos", JSON.stringify(buildAgnesVideoRequest(job.model || DEFAULT_VIDEO_MODEL, job.prompt, firstFrame)), false, 180_000, job.id);
         return parseAgnesVideoSubmission(data);
       }
       let data;
@@ -99,8 +116,8 @@ function transport(config: NewApiConfig): MediaJobTransport {
         const { file } = await imageInput(job.parentId);
         const parent = findArtifact(job.parentId)!;
         const dimensions = await Image.getSize(parent.uri);
-        data = await request(config, "/images/generations", JSON.stringify(buildAgnesImageRequest(job.prompt, `data:${parent.mimeType};base64,${await file.base64()}`, dimensions)), false, 10 * 60_000);
-      } else data = await request(config, "/images/generations", JSON.stringify(buildAgnesImageRequest(job.prompt)), false, 10 * 60_000);
+        data = await request(config, "/images/generations", JSON.stringify(buildAgnesImageRequest(job.prompt, `data:${parent.mimeType};base64,${await file.base64()}`, dimensions)), false, 10 * 60_000, job.id);
+      } else data = await request(config, "/images/generations", JSON.stringify(buildAgnesImageRequest(job.prompt)), false, 10 * 60_000, job.id);
       const result = data.data?.[0];
       if (!result || typeof result.b64_json !== "string" && typeof result.url !== "string" || (result.b64_json?.length ?? 0) > 30_000_000 || (result.url?.length ?? 0) > 4096) throw new Error("媒体接口没有返回有效图片");
       const directory = FileSystem.documentDirectory + "myyaya-media-receipts/";
@@ -119,11 +136,12 @@ function transport(config: NewApiConfig): MediaJobTransport {
         await FileSystem.deleteAsync(job.imageResultPath, { idempotent: true }).catch(() => {});
         return { status: "completed", artifactId };
       }
-      let data;
+      let data, queryError;
       for (const path of agnesVideoPollPaths(job)) {
-        try { data = await request(config, path, undefined, true); break; } catch { /* Read-only fallback to Agnes video_id + model_name. */ }
+        try { data = await request(config, path, undefined, true, 30_000, job.id); break; }
+        catch (error) { queryError = error; /* Read-only fallback; never repeat the generation POST. */ }
       }
-      if (!data) throw new Error("暂时无法查询视频任务");
+      if (!data) throw queryError instanceof MediaRequestUnconfirmed || queryError instanceof MediaRequestRejected ? queryError : new Error("暂时无法查询视频任务");
       if (data.status === "failed") return { status: "failed" };
       const videoId = typeof data.video_id === "string" && data.video_id ? data.video_id : job.videoId;
       if (data.status !== "completed") return { status: "running", ...(videoId ? { videoId } : {}) };
@@ -142,6 +160,26 @@ export async function submitMediaJob(input: Pick<MediaJob, "kind" | "prompt" | "
   const jobs = getMediaJobs(), job = jobs.create({ ...input, ...(input.kind === "video" ? { model: config.videoModel || DEFAULT_VIDEO_MODEL } : {}) }, binding);
   // Persist first, return immediately, then let generation continue while chatting.
   void jobs.submit(job.id, binding, transport(config)).catch(() => {}); return job;
+}
+/** Permission-protected ADB diagnostics. Existing tasks are queried, never submitted. */
+export async function probeMediaJobs() {
+  const { config, binding } = await connection();
+  const jobs = getMediaJobs().list().filter((job) => job.binding === binding).slice(0, 8);
+  const video = jobs.find((job) => job.kind === "video" && job.status === "running");
+  const reads = video ? await Promise.all(agnesVideoPollPaths(video).map(async (path) => {
+    const route = path.startsWith("/agnesapi") ? "agnes-status" : "gateway-status";
+    try {
+      const data = await request(config, path, undefined, true, 15_000, video.id);
+      const status = typeof data.status === "string" && /^[A-Za-z_-]{1,40}$/.test(data.status) ? data.status : "missing";
+      return { route, status, keys: Object.keys(data).filter((key) => /^[A-Za-z_]{1,40}$/.test(key)).slice(0, 15),
+        hasVideoUrl: !!extractAgnesVideoUrl(data) };
+    } catch { return { route, status: "query-error" }; }
+  })) : [];
+  return {
+    jobs: jobs.map(({ id, kind, status, parentId, remoteId, videoId, model, createdAt, notice }) => ({ id, kind, status, parentId, remoteId, videoId, model, createdAt, notice })),
+    reads, active: [...httpDiagnostics.values()],
+    recent: getDiagnosticLogEntries().filter((entry) => entry.event === "media-http-response").slice(-12).map(({ timestamp, details }) => ({ timestamp, ...details })),
+  };
 }
 export function startMediaJobMonitor(): () => void {
   let closed = false, timer: ReturnType<typeof setTimeout> | undefined, busy = false;
