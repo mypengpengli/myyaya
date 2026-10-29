@@ -102,6 +102,8 @@ const { phoneTools } = load("src/agent/phone-tools.ts");
 const createTool = phoneTools.find((tool) => tool?.name === "create_media");
 assert.ok(createTool.parameters.properties.aspectRatio.anyOf.some((value) => value.const === "9:16"));
 assert.deepEqual(createTool.parameters.properties.resolution.anyOf.map((value) => value.const), ["1K", "2K", "3K", "4K"]);
+await assert.rejects(createTool.execute("voice-fixture", { kind: "edit", prompt: "old subject", resolution: "2K" }), /parentId/);
+assert.equal(calls.length, 0, "an edit cannot silently fall back to an unrelated latest image");
 for (const args of [
   { kind: "image", source: "text", prompt: "portrait", aspectRatio: "9:16", resolution: "2K" },
   { kind: "edit", prompt: "wide", parentId: "specific-reference", aspectRatio: "16:9", resolution: "4K" },

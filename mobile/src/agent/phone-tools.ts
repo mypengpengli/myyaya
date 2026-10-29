@@ -63,6 +63,7 @@ export const phoneTools: AgentTool[] = [
       if (signal?.aborted) throw new Error("已取消提交");
       const args = params as { kind: "image" | "edit" | "video"; prompt: string; parentId?: string; source?: "text" | "image"; aspectRatio?: MediaAspectRatio; resolution?: ImageResolution };
       if (args.source === "text" && args.parentId) throw new Error("文生请求不能同时指定输入图片");
+      if (args.kind === "edit" && !args.parentId) throw new Error("改图必须明确传入 parentId。请先核对当前展示或选中图片；用户要以前某个主题的图片时，用 media_status 的 prompt 与 artifactId 找到对应成品，不能默认用最近图片。确认后再调用，不要重复提交已有任务。");
       const parentId = args.kind === "edit" || args.source === "image" || args.parentId ? selectedImage(args.parentId).id : undefined;
       if (args.kind === "image" && parentId) throw new Error("修改已有图片请使用 edit");
       const job = await submitMediaJob({ kind: args.kind, prompt: args.prompt, ...(parentId ? { parentId } : {}), ...(args.aspectRatio ? { aspectRatio: args.aspectRatio } : {}), ...(args.resolution ? { resolution: args.resolution } : {}) }, signal);
