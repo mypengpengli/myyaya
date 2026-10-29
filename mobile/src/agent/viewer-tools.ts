@@ -39,7 +39,7 @@ export const viewerControlTool: AgentTool = {
     }
     const state = presentation.getSnapshot();
     const value = { action, active: state.active ? { id: state.active.id, title: state.active.title, kind: state.active.kind } : null,
-      pinned: state.pinned, queued: state.queue.length,
+      pinned: state.pinned, queued: state.queue.length, position: state.position, total: state.total,
       queue: state.queue.map(({ id, title, kind }) => ({ id, title, kind })),
       document: state.active?.kind === "document" ? document ?? documentControl.status() : null,
       video: state.active?.kind === "video" ? videoControl.status() : null,

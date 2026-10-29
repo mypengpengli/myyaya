@@ -42,7 +42,7 @@ async function request(config: NewApiConfig, path: string, body?: string, fromOr
   const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch((fromOrigin ? new URL(config.baseUrl).origin : config.baseUrl) + path, { method: body ? "POST" : "GET", signal: controller.signal, redirect: "error",
-      headers: { Authorization: `Bearer ${config.apiKey}`, Accept: "application/json", "User-Agent": "myyaya/2.1.164", ...(typeof body === "string" ? { "Content-Type": "application/json" } : {}) }, body });
+      headers: { Authorization: `Bearer ${config.apiKey}`, Accept: "application/json", "User-Agent": "myyaya/2.1.165", ...(typeof body === "string" ? { "Content-Type": "application/json" } : {}) }, body });
     let data;
     try { data = await readMediaJson(response, { signal: controller.signal, startedAt, report }); }
     catch (error) {

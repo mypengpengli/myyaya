@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { AppState, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { VideoView, useVideoPlayer } from "expo-video";
-import { resultPresentation as presentation, type PresentationItem } from "./presentation";
+import { resultPresentation as presentation, presentationHint, type PresentationItem } from "./presentation";
 import { videoControl } from "./video-control";
 import { DocumentResult } from "./DocumentResult";
 import { findArtifact, selectArtifact } from "./artifact-store";
@@ -46,11 +46,11 @@ export function ResultOverlay() {
       <Text numberOfLines={1} style={styles.title}>{item.title}</Text>
       <Pressable accessibilityRole="button" accessibilityLabel="关闭结果" onPress={() => presentation.close(false)} style={styles.button}><Text style={styles.text}>×</Text></Pressable>
     </View>
-    <Text style={styles.countdown}>{state.deadline !== null ? `${Math.max(0, Math.ceil((state.deadline - now) / 1000))} 秒` : state.pinned ? "已固定" : ""}{state.queue.length ? ` · 另有 ${state.queue.length} 个结果` : ""}</Text>
+    <Text style={styles.countdown}>{presentationHint(state, now)}</Text>
   </View>;
 }
 const styles = StyleSheet.create({ overlay: { position: "absolute", top: "8%", bottom: "10%", left: "5%", right: "18%", backgroundColor: "#0b111b", borderRadius: 20, overflow: "hidden" },
   content: { width: "100%", height: "100%" }, document: { flex: 1, marginTop: 60, padding: 24 }, text: { color: "#edf4ff", fontSize: 17, lineHeight: 26 },
   top: { position: "absolute", left: 8, right: 8, top: 8, flexDirection: "row", alignItems: "center", gap: 10 },
   button: { backgroundColor: "#172334ee", paddingHorizontal: 14, paddingVertical: 6, borderRadius: 12 }, title: { color: "#b1bdcf", flex: 1, fontSize: 12 },
-  countdown: { position: "absolute", bottom: 10, right: 10, color: "#edf4ff", fontSize: 11, backgroundColor: "#172334dd", borderRadius: 8, padding: 5 } });
+  countdown: { position: "absolute", bottom: 10, right: 10, color: "#edf4ff", fontSize: 12, backgroundColor: "#172334dd", borderRadius: 8, padding: 7 } });

@@ -5,7 +5,7 @@ import { router } from "expo-router";
 import { getLooiRobotRuntimeState } from "../device-tools/looi-robot";
 import { memoryService } from "../memory/memory-service";
 import { getHermesTaskService, submitNewHermesTask, stopHermesTask, currentHermesTasks, serverHermesHistory, continueHermesTask } from "../hermes/task-runtime";
-import { presentArtifact, listArtifacts, selectedImage, listArtifactVersions } from "../artifacts/artifact-store";
+import { presentArtifact, findArtifact, listArtifacts, selectedImage, listArtifactVersions } from "../artifacts/artifact-store";
 import { readArtifactFocus, updateArtifactFocus } from "../artifacts/artifact-focus";
 import { getPhoneRecording, startPhoneRecording, stopPhoneRecording } from "../artifacts/phone-recording";
 import { getMediaJobs, submitMediaJob } from "../artifacts/media-jobs";
@@ -36,11 +36,17 @@ export const phoneTools: AgentTool[] = [
       return text({ status: recording.phase, notice: recording.notice }); } },
   { name: "stop_recording", label: "正在保存录像", description: "停止当前录像并保存到手机。只有返回作品编号才表示已经保存。",
     parameters: Type.Object({}), execute: async () => { const artifact = await stopPhoneRecording(); return text(artifact ? { saved: true, id: artifact.id } : { saved: false, status: getPhoneRecording().phase, notice: getPhoneRecording().notice }); } },
-  { name: "show_artifact", label: "正在打开作品", description: "重新显示之前保存的照片、录像或文档。空编号表示最近作品。用户要求打开并固定时，在本次调用传 pinned=true，一次完成。",
-    parameters: Type.Object({ id: Type.Optional(Type.String()), pinned: Type.Optional(Type.Boolean()) }), execute: async (_id, params) => {
-      const args = params as { id?: string; pinned?: boolean };
-      const item = presentArtifact(args.id); if (args.pinned) resultPresentation.pin(true);
-      router.navigate("/"); return text({ id: item.id, title: item.title, kind: item.kind, pinned: resultPresentation.getSnapshot().pinned }); } },
+  { name: "show_artifact", label: "正在打开作品", description: "重新显示之前保存的照片、录像或文档。空编号表示最近作品。打开并固定用 pinned=true；依次展示多个已有作品时可传 enqueue=true 加入待展示队列，当前作品不被抢占。入队后打开时才能固定。",
+    parameters: Type.Object({ id: Type.Optional(Type.String()), pinned: Type.Optional(Type.Boolean()), enqueue: Type.Optional(Type.Boolean()) }), execute: async (_id, params) => {
+      const args = params as { id?: string; pinned?: boolean; enqueue?: boolean };
+      if (args.enqueue && args.pinned) throw new Error("请在作品打开时固定，不要同时要求入队与固定");
+      const item = args.enqueue ? findArtifact(args.id) : presentArtifact(args.id);
+      if (!item) throw new Error("没有找到要展示的作品");
+      if (args.enqueue) resultPresentation.offer(item);
+      if (args.pinned) resultPresentation.pin(true);
+      const state = resultPresentation.getSnapshot();
+      router.navigate("/"); return text({ id: item.id, title: item.title, kind: item.kind, queued: state.active?.id !== item.id,
+        pinned: state.active?.id === item.id && state.pinned, position: state.position, total: state.total }); } },
   { name: "list_artifacts", label: "正在查找作品", description: "列出最近保存的照片、录像和文档的稳定编号，供用户重新播放或继续修改。",
     parameters: Type.Object({}), execute: async () => text(listArtifacts().slice(0, 30).map(({ id, title, kind, createdAt, parentId }) => ({ id, title, kind, createdAt, parentId }))) },
   { name: "artifact_versions", label: "正在查找图片版本", description: "查询当前选中图片或指定作品的原图、修改版本及生成视频关系。返回稳定编号，可用 show_artifact 打开原图或中间版本。",
