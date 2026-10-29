@@ -3,7 +3,7 @@ import { randomUUID, digestStringAsync, CryptoDigestAlgorithm } from "expo-crypt
 import { File } from "expo-file-system";
 import * as FileSystem from "expo-file-system/legacy";
 import { fetch } from "expo/fetch";
-import { AppState } from "react-native";
+import { AppState, Image } from "react-native";
 import { DEFAULT_VIDEO_MODEL, readNewApiConfig, type NewApiConfig } from "../agent/newapi-config";
 import { findArtifact, savePhotoArtifact, saveVideoArtifact } from "./artifact-store";
 import { resultPresentation } from "./presentation";
@@ -31,7 +31,7 @@ async function request(config: NewApiConfig, path: string, body?: string, fromOr
   const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch((fromOrigin ? new URL(config.baseUrl).origin : config.baseUrl) + path, { method: body ? "POST" : "GET", signal: controller.signal, redirect: "error",
-      headers: { Authorization: `Bearer ${config.apiKey}`, "User-Agent": "myyaya-planning-probe/1", ...(typeof body === "string" ? { "Content-Type": "application/json" } : {}) }, body });
+      headers: { Authorization: `Bearer ${config.apiKey}`, Accept: "application/json", "User-Agent": "myyaya/2.1.163", ...(typeof body === "string" ? { "Content-Type": "application/json" } : {}) }, body });
     let data;
     try { data = await response.json(); }
     catch {
@@ -98,7 +98,8 @@ function transport(config: NewApiConfig): MediaJobTransport {
       if (job.kind === "edit") {
         const { file } = await imageInput(job.parentId);
         const parent = findArtifact(job.parentId)!;
-        data = await request(config, "/images/generations", JSON.stringify(buildAgnesImageRequest(job.prompt, `data:${parent.mimeType};base64,${await file.base64()}`)), false, 10 * 60_000);
+        const dimensions = await Image.getSize(parent.uri);
+        data = await request(config, "/images/generations", JSON.stringify(buildAgnesImageRequest(job.prompt, `data:${parent.mimeType};base64,${await file.base64()}`, dimensions)), false, 10 * 60_000);
       } else data = await request(config, "/images/generations", JSON.stringify(buildAgnesImageRequest(job.prompt)), false, 10 * 60_000);
       const result = data.data?.[0];
       if (!result || typeof result.b64_json !== "string" && typeof result.url !== "string" || (result.b64_json?.length ?? 0) > 30_000_000 || (result.url?.length ?? 0) > 4096) throw new Error("媒体接口没有返回有效图片");

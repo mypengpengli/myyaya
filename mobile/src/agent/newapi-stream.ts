@@ -40,7 +40,11 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport): 
       const abort = () => controller.abort();
       options?.signal?.addEventListener("abort", abort, { once: true });
       if (options?.signal?.aborted) abort();
-      const timeout = setTimeout(abort, 60_000);
+      // A long but active reply must not be aborted just because its total
+      // duration exceeds one minute. Keep both an idle and an overall bound.
+      let timeout = setTimeout(abort, 60_000);
+      const overallTimeout = setTimeout(abort, 180_000);
+      const received = () => { clearTimeout(timeout); timeout = setTimeout(abort, 60_000); };
       let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
       try {
         const tools = getCurrentTools(context.messages);
@@ -51,6 +55,7 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport): 
             max_tokens: 1200, ...(tools.length ? { tools: tools.map((tool) => ({ type: "function",
               function: { name: tool.name, description: tool.description, parameters: tool.parameters } })) } : {}) }) });
         if (!response.ok) throw new Error(`模型请求失败（HTTP ${response.status}）`);
+        received();
         if (response.url && new URL(response.url).origin !== new URL(config.baseUrl).origin) throw new Error("模型地址发生跨站跳转");
         if (!response.body) throw new Error("模型未返回流式响应");
         stream.push({ type: "start", partial: output });
@@ -106,6 +111,7 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport): 
         };
         for (;;) {
           const next = await reader.read();
+          if (next.value?.byteLength) received();
           pending += decoder.decode(next.value, { stream: !next.done });
           if (pending.length > 1_000_000) throw new Error("模型流式消息过长");
           const lines = pending.split("\n"); pending = lines.pop()!;
@@ -132,11 +138,11 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport): 
       } catch (error) {
         output.stopReason = options?.signal?.aborted ? "aborted" : "error";
         // Never surface response bodies, headers, or transport error URLs containing credentials.
-        output.errorMessage = output.stopReason === "aborted" ? "已停止" : error instanceof Error &&
+        output.errorMessage = output.stopReason === "aborted" ? "已停止" : controller.signal.aborted ? "模型回复等待超时，请稍后重试" : error instanceof Error &&
           /^(模型|请填写)/.test(error.message) ? error.message : "模型连接失败或超时，请检查网络及模型设置";
         stream.push({ type: "error", reason: output.stopReason, error: output });
       } finally {
-        clearTimeout(timeout); options?.signal?.removeEventListener("abort", abort);
+        clearTimeout(timeout); clearTimeout(overallTimeout); options?.signal?.removeEventListener("abort", abort);
         // Expo's native cancellation can wait on the network. Closing the Pi
         // event stream must not depend on that acknowledgement.
         void reader?.cancel().catch(() => {}); stream.end(output);

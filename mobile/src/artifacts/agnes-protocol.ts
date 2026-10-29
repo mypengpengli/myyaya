@@ -5,11 +5,22 @@ export function buildAgnesVideoRequest(model: string, prompt: string, firstFrame
   return { model, prompt, mode: firstFrame ? "keyframe" : "text", seconds: "5", size: "720P", aspect_ratio: "16:9", n: 1,
     ...(firstFrame ? { first_frame: firstFrame } : {}) };
 }
-export function buildAgnesImageRequest(prompt: string, image?: string) {
-  return { model: "agnes-image-2.5-flash", prompt, size: "1K", n: 1,
-    // Match the owner's working ImageForge adapter: compatible gateways can
-    // consume flattened references while Agnes also accepts extra_body.image.
-    ...(image ? { image, images: [image], extra_body: { image: [image], response_format: "b64_json" } } : { return_base64: true }) };
+export function agnesEditSize(width = 1024, height = 1024): string {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return "1024x1024";
+  const ratio = width / height;
+  const common = [[1, "1024x1024"], [4 / 3, "1024x768"], [3 / 2, "1536x1024"], [16 / 9, "1024x576"],
+    [3 / 4, "768x1024"], [2 / 3, "1024x1536"], [9 / 16, "576x1024"]] as const;
+  for (const [value, size] of common) if (Math.abs(ratio - value) < 0.001) return size;
+  return ratio > 1 ? `1024x${Math.max(64, Math.round(1024 / ratio))}` : `${Math.max(64, Math.round(1024 * ratio))}x1024`;
+}
+export function buildAgnesImageRequest(prompt: string, image?: string, dimensions?: { width: number; height: number }) {
+  if (!image) return { model: "agnes-image-2.5-flash", prompt, size: "1K", n: 1, return_base64: true };
+  // Match the working ImageForge edit request, including concrete dimensions
+  // and its reference instruction. Some relays handle the "1K" shorthand differently.
+  return { model: "agnes-image-2.5-flash",
+    prompt: `Use the provided reference image as the visual source for this image-to-image edit. Follow this edit instruction: ${prompt}.`,
+    size: agnesEditSize(dimensions?.width, dimensions?.height), image, images: [image],
+    extra_body: { image: [image], response_format: "b64_json" } };
 }
 export function parseAgnesVideoSubmission(data: Record<string, unknown>) {
   const remoteId = data.id || data.task_id;
@@ -48,6 +59,6 @@ export function videoDownloadCandidates(baseUrl: string, remoteId?: string, resu
     resultUrl?.startsWith("https://") ? resultUrl : ""].filter(Boolean))];
 }
 export function mediaDownloadHeaders(baseUrl: string, targetUrl: string, apiKey: string): Record<string, string> {
-  return { "User-Agent": "myyaya-planning-probe/1",
+  return { "User-Agent": "myyaya/2.1.163",
     ...(new URL(baseUrl).origin === new URL(targetUrl).origin ? { Authorization: `Bearer ${apiKey}` } : {}) };
 }

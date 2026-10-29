@@ -6,10 +6,10 @@ const core = await import("@earendil-works/pi-agent-core");
 const compat = Object.assign({}, ...await Promise.all(["transcript", "event-stream", "identity", "json-parse", "validation"]
   .map((name) => import(`@earendil-works/pi-ai/utils/${name}`))));
 const { Type } = await import("typebox");
-function load(path, mocks) {
+function load(path, mocks, clock = { setTimeout, clearTimeout }) {
   const code = ts.transpileModule(readFileSync(path, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const module = { exports: {} };
-  new Function("require", "module", "exports", code)((name) => Object.hasOwn(mocks, name) ? mocks[name] : require(name), module, module.exports);
+  new Function("require", "module", "exports", "setTimeout", "clearTimeout", code)((name) => Object.hasOwn(mocks, name) ? mocks[name] : require(name), module, module.exports, clock.setTimeout, clock.clearTimeout);
   return module.exports;
 }
 const { createNewApiStream, toNewApiMessages } = load("src/agent/newapi-stream.ts", { "./pi-mobile-compat": compat });
@@ -90,4 +90,24 @@ try {
     finishTimer = setTimeout(() => reject(Error("terminal SSE frame must finish without network EOF/cancel acknowledgement")), 1000);
   })]), "完整回复");
 } finally { clearTimeout(finishTimer); }
+// Advance a local clock, without a real 100-second wait. Incoming chunks rearm
+// the idle deadline; the absolute bound still prevents endless heartbeat streams.
+let virtualTime = 0, timerId = 0, nativeController, requestSignal;
+const timers = new Map();
+const virtualClock = {
+  setTimeout(fn, delay) { const id = ++timerId; timers.set(id, { fn, at: virtualTime + delay }); return id; },
+  clearTimeout(id) { timers.delete(id); },
+};
+const advance = (ms) => { virtualTime += ms; for (const [id, value] of [...timers]) if (value.at <= virtualTime) { timers.delete(id); value.fn(); } };
+const flush = async () => { for (let i = 0; i < 50; i++) await Promise.resolve(); };
+const idleAdapter = load("src/agent/newapi-stream.ts", { "./pi-mobile-compat": compat }, virtualClock);
+const gradual = new CompanionAgent(config, idleAdapter.createNewApiStream(config, async (_url, init) => {
+  requestSignal = init.signal;
+  return new Response(new ReadableStream({ start(controller) { nativeController = controller; } }));
+}), [], () => {});
+const slowReply = gradual.reply("慢慢回复", new AbortController().signal); await flush();
+advance(50_000); nativeController.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(choice({ content: "持续" }))}\n\n`)); await flush();
+advance(50_000); assert.equal(requestSignal.aborted, false, "an active reply can last longer than sixty seconds");
+nativeController.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(choice({ content: "回复" }))}\n\ndata: ${JSON.stringify(choice({}, "stop"))}\n\n`));
+assert.equal(await slowReply, "持续回复"); assert.equal(timers.size, 0);
 console.log("Actual Pi agent + NewAPI: fragmented UTF-8 SSE, tool replay/validation, public progress, truncation, HTTP errors and cancellation: PASS");
