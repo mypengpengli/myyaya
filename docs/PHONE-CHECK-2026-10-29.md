@@ -4,6 +4,8 @@
 
 166 已完成原签名 APK 构建并经 ADB 覆盖安装，配置和已有作品保留。最终源码 `475d53dad8628fdfa6bf83d9bd1112712bdb6884`，[完整 Linux CI](https://github.com/mypengpengli/myyaya/actions/runs/40827010589) 通过。APK 为 173856896 字节，SHA256 `942083950120af958d11a5dd5bb68c96f1861f78b68d50c9461d517f4adb21e3`；签名、16 KB 对齐、ARM64、内置中文模型内容及私有凭据排除检查通过。
 
+[166 Release](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.166) 已公开并设为最新版本，APK、校验文件、构建信息、源码清单四个附件的远端大小和 SHA256 均与本地一致。此项核对不代替手机 OTA 安装验收。
+
 - 模型连接页新增“图片模型（生图 / 改图）”。手机实际修改为测试 ID、保存、重新打开核对成功，之后恢复并再次保存原 `agnes-image-2.5-flash`；没有重填 Key，保存时没有提交媒体生成。
 - 真实手机 Pi 接收“二比三视频，只接受这个比例，不支持就不要提交”，如实说明不支持，媒体任务列表没有增加。
 - 真实手机 Pi 接收“扩展成十六比九横版”，任务 `9f5bac52-d240-444c-82e7-8aeb28430861` 保存 `aspectRatio=16:9`、指定父图和图片模型 ID，实际 completed；截图核对横版成品保留机器人、蓝杯与橙球。
