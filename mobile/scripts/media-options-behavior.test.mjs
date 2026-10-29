@@ -51,6 +51,7 @@ async function submit(input) {
 }
 const image = await submit({ kind: "image", prompt: "A portrait cat", aspectRatio: "9:16" });
 assert.equal(posts.at(-1).body.ratio, "9:16"); assert.equal(posts.at(-1).body.model, "owner-image-alias");
+assert.deepEqual(posts.at(-1).body.extra_body, { response_format: "url" });
 const edit = await submit({ kind: "edit", prompt: "Extend to a landscape", parentId: "parent", aspectRatio: "16:9" });
 assert.equal(posts.at(-1).body.ratio, "16:9"); assert.equal(posts.at(-1).body.size, "1K");
 assert.equal(posts.at(-1).body.model, "owner-image-alias"); assert.match(posts.at(-1).body.image, /^data:image\/jpeg/);

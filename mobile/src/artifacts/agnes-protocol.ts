@@ -27,7 +27,7 @@ export function buildAgnesImageRequest(prompt: string, image?: string, dimension
   validateMediaAspectRatio(image ? "edit" : "image", options.aspectRatio);
   const model = options.model || "agnes-image-2.5-flash";
   const ratio = options.aspectRatio ? { ratio: options.aspectRatio } : {};
-  if (!image) return { model, prompt, size: "1K", ...ratio, n: 1, return_base64: true };
+  if (!image) return { model, prompt, size: "1K", ...ratio, n: 1, extra_body: { response_format: "url" } };
   // Keep ImageForge's dimensions/reference shape. Prefer Agnes' URL response:
   // persist the small receipt before downloading, so an interrupted image transfer
   // can be retried without repeating the generation POST.

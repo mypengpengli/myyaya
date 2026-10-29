@@ -23,7 +23,8 @@ assert.equal(api.buildAgnesImageRequest("preserve portrait", image, { width: 300
 assert.equal(api.agnesEditSize(1920, 1080), "1024x576");
 assert.equal(api.agnesEditSize(NaN, 0), "1024x1024");
 assert.equal("response_format" in edit, false);
-assert.equal(api.buildAgnesImageRequest("draw a cat").return_base64, true);
+assert.deepEqual(api.buildAgnesImageRequest("draw a cat").extra_body, { response_format: "url" }, "text generation also persists a compact receipt instead of streaming a large base64 body");
+assert.equal("return_base64" in api.buildAgnesImageRequest("draw a cat"), false);
 for (const ratio of api.IMAGE_ASPECT_RATIOS) {
   const options = { model: "owner-image-alias", aspectRatio: ratio };
   const generated = api.buildAgnesImageRequest("draw a cat", undefined, undefined, options);
