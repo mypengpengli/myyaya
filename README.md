@@ -8,7 +8,7 @@
 
 **[下载最新 APK](https://github.com/mypengpengli/myyaya/releases/latest)**
 
-支持 Android 7.0 及以上 ARM64 手机，横屏使用。本轮在小米 12 Pro / HyperOS 3 和 LOOI 上验证；具体版本、安装包与校验文件以 Release 页面为准。当前版本为 **2.1.166**，验证边界见[手机验收](docs/PHONE-CHECK-2026-10-29.md)与[功能完成度](docs/FEATURE-COMPLETION-2026-10-28.md)。
+支持 Android 7.0 及以上 ARM64 手机，横屏使用。本轮在小米 12 Pro / HyperOS 3 和 LOOI 上验证；具体版本、安装包与校验文件以 Release 页面为准。当前版本为 **2.1.167**，验证边界见[手机验收](docs/PHONE-CHECK-2026-10-29.md)与[功能完成度](docs/FEATURE-COMPLETION-2026-10-28.md)。
 
 ## 开始使用
 
@@ -24,6 +24,7 @@
 | 功能 | 使用方式 |
 | --- | --- |
 | 中文陪伴对话 | 本地唤醒后，由手机内的 Pi Agent 调用模型与手机工具，表情显示当前状态 |
+| 技能学习 | “把刚才成功的做法总结成技能”，保存后按需自动复用，重开 App 保留；菜单可查看、启停和恢复版本 |
 | 底座动作 | 前后移动、左右转、抬头、低头、回正、点头、灯光等；短动作自动停止，“停止”无需唤醒 |
 | 拍照与观察 | “拍张照片”显示确认、重拍和取消；“看看眼前是什么”后台实拍并分析，默认不弹图 |
 | 录像与作品 | 录像手动停止并保存；图片、视频和文档可重开、固定、关闭，视频支持暂停、重播与跳转 |
@@ -36,6 +37,8 @@
 图片默认显示 10 秒，可固定；视频正常播放结束后再倒计时 10 秒。多个结果依次展示，右下角显示“第 3/5 项 · 10 秒后展示下一项”，全部放完才回主表情；固定时暂停切换，右侧小表情保留。关闭或放完不会删除作品，之后仍能主动调出。App 内 Office 预览以内容为主，完整排版和编辑交给 WPS 等应用，编辑后可另存并重新导入。
 
 生成时明确说比例，AI 会传给生成接口；不指定时改图保留原图比例，视频默认 16:9。不支持的比例会先说明并询问。模型 ID 的修改用于后续新任务，已提交任务保留原 ID。比例范围与设置说明见[媒体参数](docs/MEDIA-OPTIONS.md)。
+
+可以让小丫学会重复流程，例如先完成“找最近照片并固定”，再说“总结成照片回顾技能，以后这样做”。技能按 Pi 的目录与按需读取机制复用已有工具，左滑菜单 → **小丫的技能** 可查看和管理。它不会凭一份技能说明新增硬件能力；通用 MCP 邮箱等工具接入仍属于后续扩展，详见[技能说明](docs/SKILLS.md)。
 
 前后移动与左右转、抬头、回正已有用户现场确认；WPS Word 编辑另存、两页 PPT 显示、拍照重拍确认、后台视觉问答及录像播放已完成首轮真机验证。手机生图、三轮连续改图、修改版图生视频、播放结束后倒计时和重开后查询旧任务已通过；手机 AI 连续搜索并派单，取回 DOCX/PPTX 原文件也已通过。164 修复了 AI 打开图片后尚未固定就被倒计时关闭的问题，并让改图先保存结果地址再独立下载。模型和网络仍可能间歇失败，旧的未知请求不会自动重新提交。GitHub 附件下载需要可用网络，用户将配置手机代理后再验证应用内下载与安装。
 
@@ -57,6 +60,7 @@
 - [功能完成度](docs/FEATURE-COMPLETION-2026-10-28.md) · [本轮计划](docs/NEXT-DEVELOPMENT-2026-10-28.md)
 - [最新续测](docs/PHONE-CHECK-2026-10-29.md) · [手机验收](docs/PHONE-CHECK-2026-10-28.md) · [当前进度](docs/STATUS.md)
 - [产品需求](docs/PRODUCT-REQUIREMENTS.md) · [架构](docs/ARCHITECTURE.md)
+- [技能学习与 MCP 边界](docs/SKILLS.md) · [生成比例与模型设置](docs/MEDIA-OPTIONS.md)
 - [社区能力](docs/COMMUNITY-CAPABILITIES.md) · [代码来源](docs/UPSTREAM.md) · [更新说明](docs/UPDATES.md)
 
 感谢 [razor79/my-looi](https://github.com/razor79/my-looi) 与 [GrinZero/super-looi](https://github.com/GrinZero/super-looi) 的开源工作。MIT 许可保留于 [mobile/LICENSE](mobile/LICENSE)，模型与依赖见[第三方声明](mobile/THIRD_PARTY_NOTICES.md)。
