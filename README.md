@@ -8,7 +8,7 @@
 
 **[下载最新 APK](https://github.com/mypengpengli/myyaya/releases/latest)**
 
-支持 Android 7.0 及以上 ARM64 手机，横屏使用。本轮在小米 12 Pro / HyperOS 3 和 LOOI 上验证；具体版本、安装包与校验文件以 Release 页面为准。当前版本为 **2.1.168**，验证边界见[手机验收](docs/PHONE-CHECK-2026-10-29.md)与[功能完成度](docs/FEATURE-COMPLETION-2026-10-28.md)。
+支持 Android 7.0 及以上 ARM64 手机，横屏使用。本轮在小米 12 Pro / HyperOS 3 和 LOOI 上验证；具体版本、安装包与校验文件以 Release 页面为准。当前版本为 **2.1.169**，验证边界见[手机验收](docs/PHONE-CHECK-2026-10-29.md)与[功能完成度](docs/FEATURE-COMPLETION-2026-10-28.md)。
 
 ## 开始使用
 
@@ -66,3 +66,5 @@
 感谢 [razor79/my-looi](https://github.com/razor79/my-looi) 与 [GrinZero/super-looi](https://github.com/GrinZero/super-looi) 的开源工作。MIT 许可保留于 [mobile/LICENSE](mobile/LICENSE)，模型与依赖见[第三方声明](mobile/THIRD_PARTY_NOTICES.md)。
 
 MCP 目前接入服务器 Hermes：可在服务器终端用 `hermes mcp` 配置，或让服务器 Hermes 按具体 MCP 项目说明部署并完成账号授权。手机原生 MCP 连接入口尚未开发；见 [MCP 安装说明](docs/MCP-SETUP.md)。
+
+连接异常时可导出诊断日志，核对同一次请求的时间和请求号；手机等待超时不等于中转服务器已报错。169 补齐请求诊断与回复收尾，并保留已建立生成任务的回执，详见[连接排查](docs/MODEL-CONNECTION-DIAGNOSTICS.md)。
