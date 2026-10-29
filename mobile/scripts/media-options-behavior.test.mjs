@@ -28,10 +28,16 @@ assert.equal((await configApi.readNewApiConfig()).model, "new-chat");
 assert.throws(() => configApi.validateNewApiConfig({ ...oldConfig, imageModel: "bad\nname" }), /图片模型/);
 
 const rows = new Map(), posts = [];
-let counter = 0, dimensions = { width: 3000, height: 4000 };
+let counter = 0, dimensions = { width: 3000, height: 4000 }, headerUnavailable = false;
 mocks["expo-sqlite"] = { openDatabaseSync: () => ({ execSync() {}, getAllSync: () => [...rows.values()].map((job) => ({ data: JSON.stringify(job) })), runSync: (_sql, id, data) => rows.set(id, JSON.parse(data)) }) };
 mocks["expo-crypto"] = { randomUUID: () => `job-${++counter}`, digestStringAsync: async () => "same-account", CryptoDigestAlgorithm: { SHA256: "sha256" } };
-mocks["expo-file-system"] = { File: class { exists = true; size = 50; async base64() { return "fixture-image"; } } };
+mocks["expo-file-system"] = { File: class { exists = true; size = 50; async base64() { return "fixture-image"; }
+  open() { if (headerUnavailable) throw Error("file unavailable"); return { close() {}, readBytes(n) {
+    assert.equal(n, 24); const bytes = new Uint8Array(24);
+    bytes.set([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82]);
+    const view = new DataView(bytes.buffer); view.setUint32(16, 3000); view.setUint32(20, 4000); return bytes;
+  } }; }
+} };
 mocks["expo-file-system/legacy"] = { documentDirectory: "file:///documents/", makeDirectoryAsync: async () => {}, writeAsStringAsync: async () => {} };
 mocks["react-native"] = { AppState: { currentState: "active", addEventListener: () => ({ remove() {} }) }, Image: { getSize: async () => dimensions } };
 mocks["./artifact-store"] = { findArtifact: () => ({ id: "parent", kind: "image", uri: "file:///photo.jpg", mimeType: "image/jpeg" }) };
@@ -86,10 +92,11 @@ assert.equal(posts.length, 7, "settings changes/restart never resubmit previous 
 // The diagnostic must inspect local pixels, not echo the requested tier as proof.
 const completed = media.getMediaJobs().create({ kind: "image", prompt: "local fixture", resolution: "2K" }, "same-account");
 await media.getMediaJobs().submit(completed.id, "same-account", { submit: async () => ({ artifactId: "saved-image" }) });
+mocks["react-native"].Image.getSize = async () => ({ width: 1500, height: 2000 });
 const probe = await media.probeMediaJobs();
-assert.deepEqual(probe.images[0], { id: completed.id, artifactId: "saved-image", width: 3000, height: 4000 });
+assert.deepEqual(probe.images[0], { id: completed.id, artifactId: "saved-image", width: 3000, height: 4000, dimensionSource: "png-header" });
 assert.equal(posts.length, 7, "inspecting local pixels cannot submit media");
-mocks["react-native"].Image.getSize = async () => { throw Error("file unavailable"); };
+headerUnavailable = true;
 assert.equal((await media.probeMediaJobs()).images[0].unavailable, true);
 // Exercise the actual voice-agent tool boundary as well as the HTTP transport.
 for (const name of ["expo-router", "../device-tools/looi-robot", "../memory/memory-service", "../hermes/task-runtime",

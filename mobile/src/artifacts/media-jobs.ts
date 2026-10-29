@@ -179,7 +179,20 @@ export async function probeMediaJobs() {
   })) : [];
   const images = await Promise.all(jobs.filter((job) => job.kind !== "video" && job.status === "completed" && job.artifactId).slice(0, 4).map(async (job) => {
     const item = findArtifact(job.artifactId);
-    try { return { id: job.id, artifactId: job.artifactId, ...(item ? await Image.getSize(item.uri) : {}) }; }
+    // Android's decoded Image.getSize can be downsampled. Read PNG IHDR bytes
+    // from the saved original instead; never mistake display pixels for output.
+    try {
+      if (!item) throw new Error("missing image");
+      const handle = new File(item.uri).open();
+      try {
+        const bytes = handle.readBytes(24);
+        if (bytes.length !== 24 || [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82].some((value, index) => bytes[index] !== value)) throw new Error("PNG dimensions unavailable");
+        const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        const width = data.getUint32(16), height = data.getUint32(20);
+        if (!width || !height) throw new Error("invalid dimensions");
+        return { id: job.id, artifactId: job.artifactId, width, height, dimensionSource: "png-header" };
+      } finally { handle.close(); }
+    }
     catch { return { id: job.id, artifactId: job.artifactId, unavailable: true }; }
   }));
   return {
