@@ -8,7 +8,7 @@
 
 **[下载最新 APK](https://github.com/mypengpengli/myyaya/releases/latest)**
 
-支持 Android 7.0 及以上 ARM64 手机，横屏使用。本轮在小米 12 Pro / HyperOS 3 和 LOOI 上验证；具体版本、安装包与校验文件以 Release 页面为准。当前开发版本为 **2.1.162**，验证边界见[手机验收](docs/PHONE-CHECK-2026-10-28.md)与[功能完成度](docs/FEATURE-COMPLETION-2026-10-28.md)。
+支持 Android 7.0 及以上 ARM64 手机，横屏使用。本轮在小米 12 Pro / HyperOS 3 和 LOOI 上验证；具体版本、安装包与校验文件以 Release 页面为准。当前版本为 **2.1.163**，验证边界见[手机验收](docs/PHONE-CHECK-2026-10-28.md)与[功能完成度](docs/FEATURE-COMPLETION-2026-10-28.md)。
 
 ## 开始使用
 
@@ -35,7 +35,7 @@
 
 图片默认显示 10 秒，可固定；视频正常播放结束后再倒计时 10 秒。关闭展示不会删除作品。App 内 Office 预览以内容为主，完整排版和编辑交给 WPS 等应用，编辑后可另存并重新导入。
 
-前后移动与左右转、抬头、回正已有用户现场确认；WPS Word 编辑另存、两页 PPT 显示、拍照重拍确认、后台视觉问答及录像播放已完成首轮真机验证。多轮媒体生成、模型接口超时和完整升级流程仍按验收记录核对。
+前后移动与左右转、抬头、回正已有用户现场确认；WPS Word 编辑另存、两页 PPT 显示、拍照重拍确认、后台视觉问答及录像播放已完成首轮真机验证。手机生图、图生视频、播放结束后倒计时和重开后查询旧任务已通过；多轮改图继续验收。GitHub 附件下载需要可用网络，用户将配置手机代理后再验证应用内下载与安装。
 
 ## 连接 Hermes
 
@@ -53,7 +53,7 @@
 
 - [继续开发与交接](docs/CONTINUE-DEVELOPMENT.md) · [构建方法](mobile/BUILDING.md)
 - [功能完成度](docs/FEATURE-COMPLETION-2026-10-28.md) · [本轮计划](docs/NEXT-DEVELOPMENT-2026-10-28.md)
-- [手机验收](docs/PHONE-CHECK-2026-10-28.md) · [当前进度](docs/STATUS.md)
+- [最新续测](docs/PHONE-CHECK-2026-10-29.md) · [手机验收](docs/PHONE-CHECK-2026-10-28.md) · [当前进度](docs/STATUS.md)
 - [产品需求](docs/PRODUCT-REQUIREMENTS.md) · [架构](docs/ARCHITECTURE.md)
 - [社区能力](docs/COMMUNITY-CAPABILITIES.md) · [代码来源](docs/UPSTREAM.md) · [更新说明](docs/UPDATES.md)
 

@@ -27,12 +27,17 @@ async function connection() {
   const binding = await digestStringAsync(CryptoDigestAlgorithm.SHA256, config.baseUrl + "\n" + config.apiKey);
   return { config, binding };
 }
-async function request(config: NewApiConfig, path: string, body?: string, fromOrigin = false) {
-  const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 180_000);
+async function request(config: NewApiConfig, path: string, body?: string, fromOrigin = false, timeoutMs = body ? 180_000 : 30_000) {
+  const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch((fromOrigin ? new URL(config.baseUrl).origin : config.baseUrl) + path, { method: body ? "POST" : "GET", signal: controller.signal, redirect: "error",
       headers: { Authorization: `Bearer ${config.apiKey}`, "User-Agent": "myyaya-planning-probe/1", ...(typeof body === "string" ? { "Content-Type": "application/json" } : {}) }, body });
-    const data = await response.json().catch(() => null);
+    let data;
+    try { data = await response.json(); }
+    catch {
+      if (controller.signal.aborted) throw new MediaRequestUnconfirmed("读取媒体生成结果超时，结果尚未确认；请核对服务记录，不会自动重复提交");
+      throw new MediaRequestUnconfirmed(`媒体接口返回 HTTP ${response.status}，响应内容不完整或格式无效；不会自动重复提交`);
+    }
     if (!response.ok || data?.error || !data) {
       const rejected = mediaRejectionNotice(response.status, data);
       if (rejected) throw new MediaRequestRejected(rejected);
@@ -93,8 +98,8 @@ function transport(config: NewApiConfig): MediaJobTransport {
       if (job.kind === "edit") {
         const { file } = await imageInput(job.parentId);
         const parent = findArtifact(job.parentId)!;
-        data = await request(config, "/images/generations", JSON.stringify(buildAgnesImageRequest(job.prompt, `data:${parent.mimeType};base64,${await file.base64()}`)));
-      } else data = await request(config, "/images/generations", JSON.stringify(buildAgnesImageRequest(job.prompt)));
+        data = await request(config, "/images/generations", JSON.stringify(buildAgnesImageRequest(job.prompt, `data:${parent.mimeType};base64,${await file.base64()}`)), false, 10 * 60_000);
+      } else data = await request(config, "/images/generations", JSON.stringify(buildAgnesImageRequest(job.prompt)), false, 10 * 60_000);
       const result = data.data?.[0];
       if (!result || typeof result.b64_json !== "string" && typeof result.url !== "string" || (result.b64_json?.length ?? 0) > 30_000_000 || (result.url?.length ?? 0) > 4096) throw new Error("媒体接口没有返回有效图片");
       const directory = FileSystem.documentDirectory + "myyaya-media-receipts/";
