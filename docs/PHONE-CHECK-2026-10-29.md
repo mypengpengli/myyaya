@@ -4,6 +4,8 @@
 
 2.1.163 / versionCode 163 已通过 USB 覆盖安装；原包名与原签名，保留模型/搜索/Hermes 配置、任务和作品。当前构建源码 `266420ca3e79bca1c4c388f0b9bfc15194ae0a3f`，完整 [Linux CI](https://github.com/mypengpengli/myyaya/actions/runs/40797705553) 通过。本机 TypeScript、源码/行为检查、签名、16 KB ZIP 对齐、ARM64、内置中文模型内容与凭据排除检查通过。
 
+[163 Release](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.163) 已公开发布，APK 为 173842524 字节，SHA256 `f4dc8166183364f2c224672a2582b0d54eac84c4517707c23e74c804b6334647`。四个附件的 GitHub 摘要均与本地一致。电脑端以实际更新客户端代码匿名检查：162 能发现 163、同版不提示重装、校验文件 GET 200、APK HEAD 200，大小与 SHA256 一致；这些检查不代替手机 OTA 安装验收。
+
 ## 已实际验证
 
 | 项目 | 结果与边界 |
