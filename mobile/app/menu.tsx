@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Alert, PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, PanResponder, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { looiTheme as theme } from "@/src/ui/looi-theme";
@@ -11,6 +11,7 @@ import { subscribeMainScreenFocused } from "@/src/core/main-screen-presence";
 export default function CompanionMenu() {
   const router = useRouter();
   const appMode = useAppMode();
+  const compact = useWindowDimensions().height < 500;
   const { t } = useUiText();
   const choosePhotos = () => {
     // The photo service restores a face conversation after the system picker.
@@ -43,10 +44,10 @@ export default function CompanionMenu() {
       <Pressable accessibilityRole="button" accessibilityLabel="关闭菜单，返回表情" onPress={close}><Text style={styles.close}>×</Text></Pressable>
     </View>
     <View style={styles.grid}>{items.map((item) => <Pressable key={item.path} accessibilityRole="button"
-      onPress={() => router.push(item.path as never)} style={styles.tile}>
+      onPress={() => router.push(item.path as never)} style={[styles.tile, compact && styles.compactTile]}>
       <Text style={styles.icon}>{item.icon}</Text><Text style={styles.label}>{item.title}</Text><Text style={styles.detail}>{item.detail}</Text>
     </Pressable>)}
-      {appMode === "legacy_realtime" ? <Pressable accessibilityRole="button" accessibilityLabel={t("home.choosePhotosA11y")} onPress={choosePhotos} style={styles.tile}>
+      {appMode === "legacy_realtime" ? <Pressable accessibilityRole="button" accessibilityLabel={t("home.choosePhotosA11y")} onPress={choosePhotos} style={[styles.tile, compact && styles.compactTile]}>
         <Text style={styles.icon}>▧</Text><Text style={styles.label}>选择照片</Text>
       </Pressable> : null}
     </View>
@@ -57,5 +58,6 @@ const styles = StyleSheet.create({
   title: { color: theme.text, fontSize: 24, fontWeight: "600" }, close: { color: theme.muted, fontSize: 34, paddingHorizontal: 14 },
   grid: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 18, padding: 20, flexWrap: "wrap" },
   tile: { width: "21%", minWidth: 120, paddingVertical: 22, alignItems: "center", gap: 10, borderRadius: 28, backgroundColor: theme.rail },
+  compactTile: { paddingVertical: 14, gap: 8 },
   icon: { fontSize: 32, color: theme.cyan }, label: { color: theme.text, fontSize: 17 }, detail: { color: theme.muted, fontSize: 11 },
 });
