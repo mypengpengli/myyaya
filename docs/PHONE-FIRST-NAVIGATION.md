@@ -16,12 +16,12 @@
 | --- | --- | --- |
 | 官方机型名单 | Xiaomi 12 Pro 标注 Supports Depth API | 值得先用现有手机试；不等于这台系统已运行成功 |
 | USB 手机 | ADB 可见连接设备 | 可继续做独立原型与能力探测 |
-| AR 服务安装 | `pm list packages com.google.ar.core`、`pm path com.google.ar.core` 均未返回包/安装路径 | 当前用户未查到 AR 服务；尚未创建 ARCore Session |
+| AR 服务安装 | 研究开始时包查询未返回安装路径；后续开发已安装 Google 官方服务 1.57.262640093 | 已成功创建 Session，取得真实 VIO 与原始深度；详见 [实机记录](PHONE-CHECK-2026-10-30.md) |
 | Google 基础服务 | 包查询返回 `com.google.android.gms` | 与 AR 服务是两个包，不能互相替代 |
 | LOOI 身体 | 既往用户确认前后移动、左右转向、抬头和回正 | 证明基础动作可用，尚不提供连续定位或精确速度闭环 |
 | 地图与导航 | 本仓库没有交付这套能力 | 此文不能改成“自主导航已支持” |
 
-本次仅作只读包查询与源码研究，没有启动 AR 采集、安装第三方应用或移动底座。官方给出中国区通过包括小米应用商店在内的渠道提供 Google Play Services for AR 的说明；后续先检查官方商店在本机的实际可用版本，再通过 SDK 的安装/兼容性检查处理，不从不明 APK 站补包。[机型与中国区说明](https://developers.google.com/ar/devices/)、[安装与运行时检查](https://developers.google.com/ar/develop/java/enable-arcore)
+研究阶段仅作只读包查询与源码核查；后续开发已安装 Google 官方 AR 服务并启动真实采集，没有发送底座运动。官方说明中国区可通过包括小米应用商店在内的渠道提供 Google Play Services for AR；本机旧商店详情页不可用，因此开发联调从 Google 官方 GitHub Release 获取并核验服务 APK，不从不明 APK 站补包。[机型与中国区说明](https://developers.google.com/ar/devices/)、[安装与运行时检查](https://developers.google.com/ar/develop/java/enable-arcore)
 
 基础对话应用应使用 AR Optional：没有 AR 服务时禁用导航入口并说明原因，不让聊天、媒体和已有底座控制无法启动。
 

@@ -8,6 +8,8 @@
 
 原签名 APK 已覆盖安装，源码 `154f5856334d35a62d02f12d1522f778a1155bcf` 的 [完整 CI](https://github.com/mypengpengli/myyaya/actions/runs/40986367077) 通过，原生深度读取 8 项测试通过。APK 174294118 字节，SHA256 `5ac8c803129331f477cf38d25aac5c1e6e34e2c1c84361e43db59cf1eab06eb9`；签名、16 KB 对齐、ARM64、中文模型与凭据排除检查通过。[170 Release](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.170)，细节见[本轮验收](PHONE-CHECK-2026-10-30.md)和[探针说明](NAVIGATION-PROBE.md)。手机 OTA 仍待用户配置代理后验证。
 
+170 Release 已公开并设为最新，四个远端附件的大小和 SHA256 均与本地一致。
+
 ## 169 阶段记录（历史）
 
 169 修补对话流结束与原生请求清理，并补全客户端编号、服务端请求号、响应头 / 首字节时间、接收字节数及结束帧记录。生成工具已返回有效任务回执后，最后一句模型回复失败也会如实说明任务已建立，不自动重发生成。
