@@ -10,6 +10,8 @@
 
 本轮未驱动底座。后续先做不同视角的重新定位、参照坐标下补采与地面观测/距离标定，再开发通行判断与规划闭环。不要凭表面点图让底座直接寻路。个人券面图片保存在忽略的 `.tools` 和设备，不进源码/APK/Release。
 
+[174 Release](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.174) 已发布为最新，四个附件远端大小及 SHA256 已验证。手机仍是原签名覆盖安装的174，地图已暂停，用户本轮无需再移动。文档提交不改变构建源码；以后构建继续保持版本/签名与来源清单一致。
+
 ## 173 阶段记录（历史）
 
 173 已原签名覆盖安装，27 项原生测试、TypeScript 和[源码 CI](https://github.com/mypengpengli/myyaya/actions/runs/41012546507) 通过。左滑菜单新增房间地图，支持 `myyaya://room-map` 打开独立入口页，不用反复滚动设置；点击“打开房间地图”仍走原有相机/runtime lease。

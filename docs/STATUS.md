@@ -8,6 +8,8 @@
 
 源码 `2dbeae7a796e704df23f53f55ceb71f3491e533f`，APK 174328890 字节，SHA256 `261508c5ea4bb164e93ca19d708c576c35fe0f5fc0d7ae12dfba72c453a36992`；签名、16 KB 对齐、ARM64、中文模型与凭据排除检查通过。本轮未驱动底座；可通行地图、规划控制与自主行驶仍未完成。
 
+[174 Release](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.174) 已公开并设为最新版，四个远端附件大小和 SHA256 与本地一致；构建信息包含三次冷启动、左移起点与地图导出验收边界。
+
 ## 173 阶段记录（历史）
 
 173 新增左滑菜单“房间地图”快捷页，修补低频查询单帧变化可能漏读图像状态的风险：改用本次 Session 全部已知图像，并区分保存的参照关系与当前实际对齐；诊断新增已知图像数量。27 项原生测试、TypeScript 与[完整 CI](https://github.com/mypengpengli/myyaya/actions/runs/41012546507) 通过。
