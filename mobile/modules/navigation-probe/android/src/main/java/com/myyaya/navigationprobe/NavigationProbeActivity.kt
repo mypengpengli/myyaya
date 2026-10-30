@@ -501,8 +501,11 @@ class NavigationProbeActivity : Activity() {
                   .put("depthWidth", depth.width).put("depthHeight", depth.height).put("depthSamples", newDepthSamples)
                   .put("confidenceThreshold", if (raw) 77 else JSONObject.NULL)
                 bitmap = depthBitmap(sample)
-                depthText = String.format(Locale.US, "%s：有效 %.0f%% · %s · 数据龄 %.0fms\n红近蓝远，黑色未知；深度图为传感器原始方向。",
-                  if (raw) "原始深度" else "平滑深度", sample.validRatio * 100, if (fresh) "新采样" else "重投影", age)
+                val distances = if (sample.medianMm == null) "尚无有效距离" else String.format(Locale.US,
+                  "距离统计 P05 %.2fm / 中位 %.2fm（未校准）", (sample.nearP05Mm ?: 0) / 1000.0, sample.medianMm / 1000.0)
+                depthText = String.format(Locale.US, "%s：%s %.0f%% · %s · 数据龄 %.0fms\n%s\n红近蓝远，黑色未知；深度图为传感器原始方向。",
+                  if (raw) "原始深度" else "平滑深度", if (raw) "置信度通过" else "非零像素（含插值）",
+                  sample.validRatio * 100, if (fresh) "新采样" else "重投影", age, distances)
               } finally { confidence?.close() }
             }
           } catch (_: NotYetAvailableException) {
