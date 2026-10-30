@@ -8,10 +8,12 @@ internal object DepthSamples {
   data class Plane(val bytes: ByteBuffer, val rowStride: Int, val pixelStride: Int)
   data class Result(
     val width: Int, val height: Int, val millimeters: IntArray,
-    val validRatio: Double, val nearP05Mm: Int?, val medianMm: Int?
+    val validRatio: Double, val nearP05Mm: Int?, val medianMm: Int?,
+    val sourceWidth: Int = width, val sourceHeight: Int = height, val step: Int = 1
   )
 
-  fun read(width: Int, height: Int, depth: Plane, confidence: Plane? = null): Result {
+  fun read(width: Int, height: Int, depth: Plane, confidence: Plane? = null, threshold: Int = 77): Result {
+    require(threshold in 0..255)
     require(width > 0 && height > 0 && depth.pixelStride >= 2)
     require(depth.rowStride >= (width - 1) * depth.pixelStride + 2)
     if (confidence != null) require(confidence.rowStride >= (width - 1) * confidence.pixelStride + 1 && confidence.pixelStride >= 1)
@@ -32,7 +34,7 @@ internal object DepthSamples {
         val c = confidenceBase + sy * confidence.rowStride + sx * confidence.pixelStride
         require(c < confidence.bytes.limit()) { "Confidence plane is truncated" }
         // Preview/diagnostic threshold only; never a motion authorization.
-        (confidence.bytes.get(c).toInt() and 255) >= 77
+        (confidence.bytes.get(c).toInt() and 255) >= threshold
       }
       if (mm > 0 && confident) {
         values[y * outWidth + x] = mm
@@ -42,6 +44,6 @@ internal object DepthSamples {
     valid.sort()
     return Result(outWidth, outHeight, values, valid.size.toDouble() / values.size,
       valid.takeIf { it.isNotEmpty() }?.get(((valid.size - 1) * 0.05).toInt()),
-      valid.takeIf { it.isNotEmpty() }?.get(valid.size / 2))
+      valid.takeIf { it.isNotEmpty() }?.get(valid.size / 2), width, height, step)
   }
 }

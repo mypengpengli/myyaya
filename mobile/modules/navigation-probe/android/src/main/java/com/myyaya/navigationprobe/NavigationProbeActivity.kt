@@ -50,7 +50,7 @@ import org.json.JSONObject
 import kotlin.math.max
 import kotlin.math.min
 
-/** Standalone sensor probe. Deliberately has no BLE/motor dependency or navigation tools. */
+/** Sensor probe and persistent room mapping. Deliberately has no BLE/motor dependency. */
 class NavigationProbeActivity : Activity() {
   private lateinit var surface: GLSurfaceView
   private lateinit var status: TextView
@@ -84,6 +84,9 @@ class NavigationProbeActivity : Activity() {
   private var installRequested = false
   private var configuredDepthMode: Config.DepthMode? = null
   private var closingForModeChange = false
+  private var mapping = false
+  private var roomMap: RoomMapPanel? = null
+  private var lastMapAutosave = 0L
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -100,6 +103,8 @@ class NavigationProbeActivity : Activity() {
       .put("coordinateFrame", "arcore-session-camera-not-base")
       .put("autonomousMotionEnabled", false).put("mapPersisted", false)
       .put("depthPollIntervalMs", 500).put("position", JSONObject.NULL).put("running", false)
+    mapping = intent.getBooleanExtra("mapping", false)
+    if (mapping) roomMap = RoomMapPanel(this) { resetMapSession() }
     buildUi()
     record(JSONObject().put("event", "opened").put("trackingState", "NOT_STARTED"))
   }
@@ -126,7 +131,7 @@ class NavigationProbeActivity : Activity() {
       }
       insets
     }
-    root.addView(label("房间视觉探针 · 本次仅观察，不控制底座", 19f))
+    root.addView(label(if (mapping) "房间地图 · 人工带领扫描 / 保存 / 地点标记" else "房间视觉探针 · 本次仅观察，不控制底座", 19f))
     val body = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
     root.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
     val camera = FrameLayout(this)
@@ -158,6 +163,12 @@ class NavigationProbeActivity : Activity() {
     column.addView(depthPreview, LinearLayout.LayoutParams(-1, dp(115)))
     column.addView(label("相机平面轨迹 · 非可通行地图", 13f))
     column.addView(trajectory, LinearLayout.LayoutParams(-1, dp(115)))
+    if (mapping) {
+      column.removeAllViews()
+      column.addView(roomMap!!.buildColumn())
+      column.addView(status)
+      column.addView(label("本页使用 Google ARCore。服务条款：https://policies.google.com/terms；隐私政策：https://policies.google.com/privacy", 11f))
+    }
     val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
     startButton = button("开始采集") {
       if (running || userWantsRunning) { userWantsRunning = false; pauseCapture("user-paused") }
@@ -166,10 +177,12 @@ class NavigationProbeActivity : Activity() {
     modeButton = button("模式：原始深度") {
       if (!running) { rawPreferred = !rawPreferred; modeButton.text = if (rawPreferred) "模式：原始深度" else "模式：平滑深度" }
     }
+    if (mapping) startButton.text = "开始扫描"
     actions.addView(startButton, LinearLayout.LayoutParams(0, -2, 1f))
-    actions.addView(modeButton, LinearLayout.LayoutParams(0, -2, 1f))
-    actions.addView(button("安装 AR 服务") { installService() }, LinearLayout.LayoutParams(0, -2, 1f))
-    actions.addView(button("保存记录") { saveReport() }, LinearLayout.LayoutParams(0, -2, 1f))
+    if (!mapping) actions.addView(modeButton, LinearLayout.LayoutParams(0, -2, 1f))
+    if (mapping) roomMap?.addActions(actions)
+    else actions.addView(button("安装 AR 服务") { installService() }, LinearLayout.LayoutParams(0, -2, 1f))
+    if (!mapping) actions.addView(button("保存记录") { saveReport() }, LinearLayout.LayoutParams(0, -2, 1f))
     actions.addView(button("返回") { finish() }, LinearLayout.LayoutParams(0, -2, 1f))
     root.addView(actions)
     setContentView(root)
@@ -219,6 +232,11 @@ class NavigationProbeActivity : Activity() {
 
   private fun startCapture() {
     if (!resumed || running || closingForModeChange) return
+    if (mapping && roomMap?.canStart() != true) {
+      userWantsRunning = false
+      status.text = "请先新建或打开房间地图；若正在保存，请稍后再开始扫描。"
+      return
+    }
     if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
       if (!permissionPending) {
         permissionPending = true
@@ -244,7 +262,8 @@ class NavigationProbeActivity : Activity() {
       activeMode = if (rawPreferred && supportedRaw) Config.DepthMode.RAW_DEPTH_ONLY
         else if (supportedAuto) Config.DepthMode.AUTOMATIC else Config.DepthMode.DISABLED
       // On this phone, changing RAW_DEPTH_ONLY -> AUTOMATIC on an existing
-      // Session produced implausible dense distances; a clean Session did not.
+      // Session produced implausible dense distances; fresh sessions also had
+      // outliers. Isolation is diagnostic, not an accuracy correction.
       // Compare modes in isolated sessions, never reusing their coordinates.
       if (configuredDepthMode != null && configuredDepthMode != activeMode) {
         closingForModeChange = true
@@ -272,10 +291,12 @@ class NavigationProbeActivity : Activity() {
         }
         return
       }
+      if (mapping) check(supportedRaw) { "此设备不支持带置信度的原始深度建图" }
       current.configure(Config(current).apply {
         depthMode = activeMode
         focusMode = Config.FocusMode.AUTO
         planeFindingMode = Config.PlaneFindingMode.DISABLED
+        if (mapping) roomMap?.configure(current, requireNotNull(sessionId), this)
       })
       configuredDepthMode = activeMode
       current.resume()
@@ -283,7 +304,7 @@ class NavigationProbeActivity : Activity() {
       running = true
       surface.onResume()
       glResumed = true
-      startButton.text = "暂停采集"
+      startButton.text = if (mapping) "暂停扫描" else "暂停采集"
       modeButton.isEnabled = false
       status.text = "正在采集后摄。缓慢移动手机，等待跟踪和深度；底座不会自动移动。"
       val imageSize = current.cameraConfig.imageSize
@@ -294,7 +315,9 @@ class NavigationProbeActivity : Activity() {
     } catch (error: Exception) {
       userWantsRunning = false
       pauseCapture("start-failed")
-      status.text = "无法启动采集：${error.javaClass.simpleName}。${error.message ?: "请检查 AR 服务、相机权限或系统兼容性。"}"
+      status.text = if (error is com.google.ar.core.exceptions.ImageInsufficientQualityException)
+        "参照图特征不足，请重新选择清晰、有丰富纹理的照片原图。" else
+        "无法启动采集：${error.javaClass.simpleName}。${error.message ?: "请检查 AR 服务、相机权限或系统兼容性。"}"
       recordError("start", error)
     }
   }
@@ -305,12 +328,13 @@ class NavigationProbeActivity : Activity() {
     // GL must stop accessing Session before pause/close or camera handover.
     if (glResumed) { surface.onPause(); glResumed = false }
     runCatching { session?.pause() }
-    startButton.text = "开始采集"
+    startButton.text = if (mapping) "开始扫描" else "开始采集"
     modeButton.isEnabled = true
     depthPreview.setImageDrawable(null)
     depthLabel.text = "深度：已暂停，旧画面不作为当前观测"
     metrics.text = "采集已暂停。恢复后先等待定位；轨迹不连接中断区间。"
     status.text = "已暂停采集。"
+    roomMap?.pause()
     record(JSONObject().put("event", reason).put("running", false)
       .put("trackingState", "PAUSED").put("position", JSONObject.NULL)
       .put("quaternion", JSONObject.NULL).put("depthFresh", false).put("depthAgeMs", JSONObject.NULL)
@@ -321,6 +345,7 @@ class NavigationProbeActivity : Activity() {
   override fun onPause() {
     resumed = false
     pauseCapture("activity-paused")
+    roomMap?.save(true)
     super.onPause()
   }
 
@@ -378,6 +403,7 @@ class NavigationProbeActivity : Activity() {
 
   override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
     super.onActivityResult(requestCode, resultCode, data)
+    if (roomMap?.activityResult(requestCode, resultCode, data) == true) return
     val uri = data?.data
     if (requestCode != SAVE_REPORT || resultCode != RESULT_OK || uri == null) return
     val file = exportFile ?: return
@@ -394,6 +420,7 @@ class NavigationProbeActivity : Activity() {
   override fun finish() {
     userWantsRunning = false
     pauseCapture("closed")
+    roomMap?.save(true)
     setResult(RESULT_OK, Intent().putExtra("report", synchronized(reportLock) { lastReport.toString() }))
     super.finish()
   }
@@ -403,7 +430,29 @@ class NavigationProbeActivity : Activity() {
     session = null
     io.execute { runCatching { old?.close() } }
     io.shutdown()
+    roomMap?.close()
     super.onDestroy()
+  }
+
+  private fun resetMapSession() {
+    userWantsRunning = false
+    pauseCapture("map-session-ended")
+    val old = session
+    session = null
+    configuredDepthMode = null
+    // GL is paused before closing. A new session starts only on user action.
+    closingForModeChange = true
+    startButton.isEnabled = false
+    io.execute {
+      val closed = runCatching { old?.close() }
+      runOnUiThread {
+        closingForModeChange = false
+        if (!isDestroyed) {
+          startButton.isEnabled = closed.isSuccess
+          if (closed.isFailure) status.text = "相机会话未能结束，请返回后重试。"
+        }
+      }
+    }
   }
 
   private inner class ProbeRenderer : GLSurfaceView.Renderer {
@@ -525,6 +574,8 @@ class NavigationProbeActivity : Activity() {
         val thermal = if (Build.VERSION.SDK_INT >= 29) getSystemService(PowerManager::class.java).currentThermalStatus else -1
         row.put("thermalStatus", thermal)
         var bitmap: Bitmap? = null
+        var mapSample: DepthSamples.Result? = null
+        var mapDepthNs = 0L
         var depthText = if (activeMode == Config.DepthMode.DISABLED) "当前配置不支持深度，仅采集位姿" else "暂未取得深度，请缓慢移动；未知区域不是可通行区域"
         if (tracking && activeMode != Config.DepthMode.DISABLED) {
           try {
@@ -536,7 +587,8 @@ class NavigationProbeActivity : Activity() {
                 val d = depth.planes[0]; val c = confidence?.planes?.get(0)
                 val sample = DepthSamples.read(depth.width, depth.height,
                   DepthSamples.Plane(d.buffer, d.rowStride, d.pixelStride),
-                  c?.let { DepthSamples.Plane(it.buffer, it.rowStride, it.pixelStride) })
+                  c?.let { DepthSamples.Plane(it.buffer, it.rowStride, it.pixelStride) }, if (mapping) 153 else 77)
+                if (mapping && raw) { mapSample = sample; mapDepthNs = depth.timestamp }
                 val fresh = depth.timestamp != lastDepthNs
                 if (fresh) newDepthSamples++
                 lastDepthNs = depth.timestamp
@@ -545,7 +597,7 @@ class NavigationProbeActivity : Activity() {
                   .put("depthValidRatio", sample.validRatio).put("depthMedianMm", sample.medianMm ?: JSONObject.NULL)
                   .put("depthNearP05Mm", sample.nearP05Mm ?: JSONObject.NULL)
                   .put("depthWidth", depth.width).put("depthHeight", depth.height).put("depthSamples", newDepthSamples)
-                  .put("confidenceThreshold", if (raw) 77 else JSONObject.NULL)
+                  .put("confidenceThreshold", if (raw) if (mapping) 153 else 77 else JSONObject.NULL)
                 bitmap = depthBitmap(sample)
                 val distances = if (sample.medianMm == null) "尚无有效距离" else String.format(Locale.US,
                   "距离统计 P05 %.2fm / 中位 %.2fm（未校准）", (sample.nearP05Mm ?: 0) / 1000.0, sample.medianMm / 1000.0)
@@ -556,6 +608,14 @@ class NavigationProbeActivity : Activity() {
             }
           } catch (_: NotYetAvailableException) {
             row.put("depthUnavailable", "NOT_YET_AVAILABLE")
+          }
+        }
+        if (mapping) {
+          roomMap?.frame(frame, mapSample, mapDepthNs)
+          row.put("roomMap", roomMap?.report()?.let { JSONObject(it) } ?: JSONObject.NULL)
+          if (now - lastMapAutosave > 15_000) {
+            lastMapAutosave = now
+            runOnUiThread { if (running && !isDestroyed) roomMap?.save(true) }
           }
         }
         record(row)

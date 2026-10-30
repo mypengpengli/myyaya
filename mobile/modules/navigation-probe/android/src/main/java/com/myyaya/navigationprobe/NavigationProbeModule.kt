@@ -48,6 +48,19 @@ class NavigationProbeModule : Module() {
       }
     }
 
+    AsyncFunction("openMap") { promise: Promise ->
+      val activity = appContext.currentActivity
+      if (activity == null) promise.reject("ERR_NAVIGATION_ACTIVITY", "需要在应用前台打开房间地图", null)
+      else activity.runOnUiThread {
+        if (pending != null) promise.reject("ERR_NAVIGATION_BUSY", "房间地图或视觉探针已经打开", null)
+        else {
+          pending = promise
+          try { activity.startActivityForResult(Intent(activity, NavigationProbeActivity::class.java).putExtra("mapping", true), REQUEST) }
+          catch (error: Exception) { pending = null; promise.reject("ERR_NAVIGATION_OPEN", error.message, error) }
+        }
+      }
+    }
+
     OnActivityResult { _, payload ->
       if (payload.requestCode == REQUEST) {
         val promise = pending

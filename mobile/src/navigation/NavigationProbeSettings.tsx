@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert, AppState, Pressable, StyleSheet, Text, View } from "react-native";
 import {
-  getNavigationProbeStatus, openNativeNavigationProbe,
+  getNavigationProbeStatus, openNativeNavigationProbe, openNativeRoomMap,
   type NavigationProbeStatus,
 } from "../../modules/navigation-probe";
 import { withExternalActivityLease } from "../core/background-process-exit";
@@ -22,7 +22,7 @@ export function NavigationProbeSettings() {
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
 
-  const open = async () => {
+  const open = async (mapping = false) => {
     if (probeOpening) return;
     probeOpening = true;
     setBusy(true);
@@ -36,8 +36,8 @@ export function NavigationProbeSettings() {
           await stopLooiMotion("navigation-probe");
           await pauseAppRuntime();
           recordDiagnosticEvent("navigation", "visual-probe-opened", { motorControl: false });
-          const report = await openNativeNavigationProbe();
-          setMessage(report ? "本次采集已结束，可再次打开或在探针中导出记录。" : "已退出视觉探针。");
+          const report = await (mapping ? openNativeRoomMap() : openNativeNavigationProbe());
+          setMessage(mapping ? "已退出房间地图。已保存的地图和地点可再次打开。" : report ? "本次采集已结束，可再次打开或在探针中导出记录。" : "已退出视觉探针。");
           recordDiagnosticEvent("navigation", "visual-probe-closed", { hasReport: Boolean(report) });
         } finally {
           releaseCamera();
@@ -54,10 +54,13 @@ export function NavigationProbeSettings() {
   };
 
   return <View style={styles.card}>
-    <Text style={styles.title}>房间地图 · 视觉探针</Text>
-    <Text style={styles.text}>先验证手机的定位、轨迹和后摄深度。本阶段不会自动移动，也不会保存可导航的房间地图。</Text>
+    <Text style={styles.title}>房间地图</Text>
+    <Text style={styles.text}>人工带领扫描房间，保存表面地图和命名地点，之后重新打开查看。设置固定参照图后可辅助恢复旧地图位置；当前不会自动行驶。</Text>
     <Text style={styles.text}>{status ? (status.serviceInstalled ? `AR 服务：${status.serviceVersion || "已安装"}` : "AR 服务：尚未安装，打开探针可查看安装指引") : "正在检查 AR 服务…"}</Text>
     <Text style={styles.text}>后续采用后摄朝向行驶的倒车方案，到点停车后再转向面对用户；该行驶策略仍待标定。</Text>
+    <Pressable accessibilityRole="button" accessibilityLabel="打开房间地图" disabled={busy} onPress={() => void open(true)} style={styles.button}>
+      <Text style={styles.label}>{busy ? "地图或探针运行中…" : "打开房间地图"}</Text>
+    </Pressable>
     <Pressable accessibilityRole="button" accessibilityLabel="打开房间视觉探针" disabled={busy} onPress={() => void open()} style={styles.button}>
       <Text style={styles.label}>{busy ? "视觉探针运行中…" : "打开视觉探针"}</Text>
     </Pressable>

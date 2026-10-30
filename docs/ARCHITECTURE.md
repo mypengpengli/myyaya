@@ -16,7 +16,7 @@
 | Ubuntu 办公执行 | 复用现有 Hermes，使用其真实 API/适配器 | 不另造浏览器/办公智能体，不把 SSH/root 凭据放手机 |
 | 后续导航算法 | 先独立 Kotlin/ARCore demo；必要时复用 C++/局域网 ROS 2 原型 | 不把整个导航栈作为聊天 APK 的首版依赖，不先重写成熟算法 |
 
-2026-10-30 导航选型补充：先验证小米 12 Pro 的 ARCore VIO/深度，主候选为 RTAB-Map 持久建图与重定位，再接本地规划和 LOOI 控制；不先购买雷达。具体边界与逐步验收见 [手机优先导航方案](PHONE-FIRST-NAVIGATION.md)，当前仍为待开发原型。
+2026-10-30 导航更新：170 已验证小米 12 Pro 的 ARCore VIO/原始深度；171 用 Kotlin 接入表面体素地图、地图文件/地点和固定参照图辅助定位，不逐帧经过 JS。RTAB-Map 仍为后续无标记回环候选，当前未集成；没有自主规划和行驶。见 [房间地图](ROOM-MAPS.md)与[手机优先导航方案](PHONE-FIRST-NAVIGATION.md)。
 
 首版是 **一个手机应用 + 一个模块化 Pi 服务 + 现有 Hermes**。不为模型调用另写 Go/Rust 服务，不新增 Python 网关；未来算法已有 C++/Python 组件时通过边界复用。
 

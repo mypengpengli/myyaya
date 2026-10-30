@@ -12,6 +12,7 @@ export type NavigationProbeStatus = {
 type Native = {
   getStatus(): Promise<NavigationProbeStatus>;
   open(): Promise<string | null>;
+  openMap(): Promise<string | null>;
 };
 let native: Native | undefined;
 function getNative(): Native {
@@ -22,3 +23,4 @@ export const getNavigationProbeStatus = () => getNative().getStatus();
 // Resolves only when the Android activity has closed, so camera/runtime leases
 // cannot be released immediately after launch.
 export const openNativeNavigationProbe = () => getNative().open();
+export const openNativeRoomMap = () => getNative().openMap();
