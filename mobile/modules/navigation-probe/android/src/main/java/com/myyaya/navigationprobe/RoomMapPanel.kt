@@ -31,12 +31,13 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private var stableImage: RigidPose? = null
   private var stableSince = 0L
   private var stableCount = 0
+  @Volatile private var referenceState = "NOT_SEEN"
+  @Volatile private var referenceMethod = "NOT_SEEN"
   private var name = ""
   private lateinit var title: TextView
   private lateinit var state: TextView
   private lateinit var mapView: SurfaceMapView
   private lateinit var places: TextView
-  private var pendingReference: ByteArray? = null
   private var exportBytes: ByteArray? = null
   @Volatile private var savedAt = 0L
   @Volatile private var savedId: String? = null
@@ -124,7 +125,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     val map=mapper?.snapshot() ?: run { toast("请先新建地图"); return }
     if (map.voxels.isNotEmpty() || map.path.isNotEmpty()) { toast("参照图需在首次扫描前设置；已有地图请新建后设置。"); return }
     AlertDialog.Builder(activity).setTitle("登记固定参照图")
-      .setMessage("从相册选取一张已打印、固定在墙面上的清晰照片原图。之后输入纸上图像的实际宽度。不要选二维码、简单线条或重复纹理；参照物移动后必须重建地图。")
+      .setMessage("选择固定平面照片或海报的原图，也可选实物照片并校正四角。之后输入图像实际宽高。不要选二维码、简单线条或重复纹理；登记后实物不能移动。")
       .setNegativeButton("取消",null).setPositiveButton("选择图片") { _,_ ->
         stopAndReset()
         activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -146,34 +147,33 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       val decoded=runCatching { decodeReference(uri) }
       activity.runOnUiThread {
         if (activity.isDestroyed) return@runOnUiThread
-        val bytes=decoded.getOrNull()
-        if (bytes==null) { toast("图片无法读取，请选择清晰的静态图片"); return@runOnUiThread }
-        pendingReference=bytes
-        val width=EditText(activity).apply { hint="实际图像宽度（厘米），例如 20"; inputType=8194 }
-        AlertDialog.Builder(activity).setTitle("参照图实际宽度").setView(width)
-          .setMessage("测量固定实物上图像的宽度，不包括白边。填错尺寸会导致整个地图比例错误。")
-          .setNegativeButton("取消") { _,_ -> pendingReference=null }
-          .setPositiveButton("登记") { _,_ ->
-            val meters=(width.text.toString().toFloatOrNull() ?: 0f)/100f
-            if (!meters.isFinite() || meters !in .05f..3f) { pendingReference=null; toast("宽度需为 5～300 厘米，请重新登记"); return@setPositiveButton }
-            val map=mapper?.snapshot() ?: return@setPositiveButton
-            mapper=RoomMapper(map.copy(referenceJpeg=pendingReference ?: byteArrayOf(),referenceWidth=meters,imageFromMap=null))
-            pendingReference=null
-            render(mapper!!.snapshot(),"参照图已登记。开始扫描，将后摄对准固定图片，保持约两秒以对齐地图。")
-          }.show()
+        val image=decoded.getOrNull()
+        if (image==null) { toast("图片无法读取，请选择清晰的静态图片"); return@runOnUiThread }
+        ReferenceImageEditor(activity,image) { bytes,meters ->
+          val map=mapper?.snapshot() ?: return@ReferenceImageEditor
+          mapper=RoomMapper(map.copy(referenceJpeg=bytes,referenceWidth=meters,imageFromMap=null))
+          render(mapper!!.snapshot(),"参照图已登记。开始扫描，将后摄对准固定图片，保持约两秒以对齐地图。")
+          save(true)
+        }.show()
       }
     }
     return true
   }
-  private fun decodeReference(uri: Uri): ByteArray {
+  private fun decodeReference(uri: Uri): Bitmap {
     val options=BitmapFactory.Options().apply { inJustDecodeBounds=true }
     activity.contentResolver.openInputStream(uri).use { BitmapFactory.decodeStream(it,null,options) }
     require(options.outWidth >= 300 && options.outHeight >= 300)
     require(options.outWidth <= 30000 && options.outHeight <= 30000)
-    var scale=1; while (max(options.outWidth,options.outHeight)/scale > 1400) scale*=2
+    var scale=1; while (max(options.outWidth,options.outHeight)/scale > 2400) scale*=2
     val bitmap=activity.contentResolver.openInputStream(uri).use { BitmapFactory.decodeStream(it,null,BitmapFactory.Options().apply { inSampleSize=scale }) } ?: error("图片解码失败")
-    return try { ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.JPEG,92,it) }.toByteArray().also { require(it.size <= 2_000_000) } }
-      finally { bitmap.recycle() }
+    val orientation=runCatching { activity.contentResolver.openInputStream(uri).use { android.media.ExifInterface(requireNotNull(it)).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION,1) } }.getOrDefault(1)
+    if (orientation==1) return bitmap
+    val matrix=Matrix().apply { when (orientation) {
+      2 -> postScale(-1f,1f); 3 -> postRotate(180f); 4 -> postScale(1f,-1f)
+      5 -> { postScale(-1f,1f); postRotate(270f) }; 6 -> postRotate(90f)
+      7 -> { postScale(-1f,1f); postRotate(90f) }; 8 -> postRotate(270f)
+    } }
+    return Bitmap.createBitmap(bitmap,0,0,bitmap.width,bitmap.height,matrix,true).also { if (it!==bitmap) bitmap.recycle() }
   }
   private fun addPlace() {
     val current=mapper ?: run { toast("请先新建或打开地图"); return }
@@ -251,6 +251,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   /** Before Session.configure. Called on UI thread while GL is stopped. */
   fun configure(session: Session,id: String,config: Config) {
     generation++
+    referenceState="NOT_SEEN"; referenceMethod="NOT_SEEN"
     runCatching { anchor?.detach() }; anchor=null; stableImage=null; stableCount=0; stableSince=0
     sessionId=id
     if (freshMap) {
@@ -268,7 +269,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   }
   fun pause() { generation++; active=false; mapper?.invalidate(); if (::mapView.isInitialized) { mapView.position=null; mapView.forward=null; mapView.invalidate(); state.text="扫描已暂停，当前位置无效。地图可保存或重新打开。" } }
   fun close() { io.shutdown() }
-  fun report(): Map<String,Any?>? = mapper?.summary()?.let { it + mapOf("lastSavedAt" to if (it["mapId"]==savedId) savedAt else 0L) }
+  fun report(): Map<String,Any?>? = mapper?.summary()?.let { it + mapOf("lastSavedAt" to if (it["mapId"]==savedId) savedAt else 0L,
+    "referenceTrackingState" to referenceState,"referenceTrackingMethod" to referenceMethod,"stableReferenceSamples" to stableCount) }
   fun canStart() = mapper != null && !saving
   /** GL thread, throttled by the host to 2 Hz. */
   fun frame(frame: Frame, sample: DepthSamples.Result?, depthNs: Long) {
@@ -279,7 +281,9 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     if (!tracking) { anchor?.detach(); anchor=null; stableImage=null; stableCount=0 }
     if (anchor?.trackingState==TrackingState.STOPPED) { anchor?.detach(); anchor=null; stableImage=null; stableCount=0 }
     if (hasReference && tracking && anchor==null) {
-      val image=frame.getUpdatedTrackables(AugmentedImage::class.java).firstOrNull {
+      val updated=frame.getUpdatedTrackables(AugmentedImage::class.java)
+      updated.firstOrNull()?.let { referenceState=it.trackingState.name; referenceMethod=it.trackingMethod.name }
+      val image=updated.firstOrNull {
         it.trackingState==TrackingState.TRACKING && it.trackingMethod==AugmentedImage.TrackingMethod.FULL_TRACKING
       }
       if (image==null) { stableImage=null; stableCount=0 }
@@ -308,7 +312,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     val map=current.snapshot(); val position=current.livePosition?.clone(); val direction=current.liveForward?.clone()
     val text=if (located) "定位有效 · ${if (hasReference) "固定参照图对齐" else "仅本次会话"}\n原始深度 ≥60% 置信度 · 0.2～4 米 · ${map.voxels.size}/${RoomMapper.MAX_CELLS} 表面点"
       else if (!tracking) "定位已中断，暂停融合；请缓慢移动恢复跟踪${if (hasReference) "，并对准参照图" else ""}。"
-      else if (hasReference) "等待固定参照图：请让整张实物图像占画面至少四分之一，保持约两秒。"
+      else if (hasReference) "等待固定参照图：请让整张实物图像占画面至少四分之一，保持约两秒。\n检测：$referenceState / $referenceMethod · 稳定 $stableCount 次"
       else "旧地图仅供查看：未登记固定参照图，不能在新会话中恢复坐标。"
     activity.runOnUiThread {
       if (!activity.isDestroyed && token==generation) {
