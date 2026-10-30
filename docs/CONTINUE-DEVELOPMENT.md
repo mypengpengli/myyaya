@@ -1,6 +1,16 @@
 # 换电脑继续开发
 
-## 最新：2026-10-30，2.1.173
+## 最新：2026-10-30，2.1.174
+
+174 已原签名安装。新增“设置参照图 → 用后摄拍摄”，外部相机返回后校正登记；实际图库数量诊断已记录。27 项原生测试、TypeScript、[完整 CI](https://github.com/mypengpengli/myyaya/actions/runs/41017316703) 通过。最终源码 `2dbeae7a796e704df23f53f55ceb71f3491e533f`，APK SHA256 `261508c5ea4bb164e93ca19d708c576c35fe0f5fc0d7ae12dfba72c453a36992`。
+
+已用原地固定的券新拍图片，登记Coupon174（UUID `26e96b4e-cef9-49a5-a073-08da710bf74d`）/ Desk174；首次识别与三次结束进程后的新会话均FULL_TRACKING、known/configured=1、referenceAligned/localized=true。其中第三次是用户左移约20cm后从新位置启动，198体素及原地点恢复。没有独立位置真值，不是精度/整房间验收。新图仍评分0，评分不能作为旧图失败的唯一根因。
+
+当前手机停在Coupon174暂停页，用户已完成平移，已告知无需回到初始位置、可放稳手机，券暂不移动。最终导出 `Coupon174 (1).yayamap`，357710字节、198体素、42轨迹样本、Desk174，CRC32正确；本地证据在忽略的 `.tools/174-*`、`.tools/Coupon174-validated.yayamap`。新版原地图未覆盖：Coupon172（78体素）、RoomTest171（1534体素）保留。另有空的CaptureRecovery174测试图，取消拍摄返回通过；am kill没有实际结束进程，外部相机期间系统回收恢复不可记通过。
+
+本轮未驱动底座。后续先做不同视角的重新定位、参照坐标下补采与地面观测/距离标定，再开发通行判断与规划闭环。不要凭表面点图让底座直接寻路。个人券面图片保存在忽略的 `.tools` 和设备，不进源码/APK/Release。
+
+## 173 阶段记录（历史）
 
 173 已原签名覆盖安装，27 项原生测试、TypeScript 和[源码 CI](https://github.com/mypengpengli/myyaya/actions/runs/41012546507) 通过。左滑菜单新增房间地图，支持 `myyaya://room-map` 打开独立入口页，不用反复滚动设置；点击“打开房间地图”仍走原有相机/runtime lease。
 

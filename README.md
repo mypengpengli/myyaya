@@ -8,7 +8,7 @@
 
 **[下载最新 APK](https://github.com/mypengpengli/myyaya/releases/latest)**
 
-支持 Android 7.0 及以上 ARM64 手机，横屏使用。本轮在小米 12 Pro / HyperOS 3 和 LOOI 上验证；具体版本、安装包与校验文件以 Release 页面为准。当前版本为 **2.1.173**，新增地图快捷入口并修补[参照定位状态](docs/ROOM-MAPS.md)；[手机验收记录](docs/PHONE-CHECK-2026-10-30.md)、[此前手机验收](docs/PHONE-CHECK-2026-10-29.md)与[功能完成度](docs/FEATURE-COMPLETION-2026-10-28.md)分别说明已验证范围。
+支持 Android 7.0 及以上 ARM64 手机，横屏使用。本轮在小米 12 Pro / HyperOS 3 和 LOOI 上验证；具体版本、安装包与校验文件以 Release 页面为准。当前版本为 **2.1.174**，新增参照图现场拍摄，已验证原位及左移约 20cm 后冷启动恢复地图定位；[地图说明](docs/ROOM-MAPS.md)、[手机验收记录](docs/PHONE-CHECK-2026-10-30.md)、[此前手机验收](docs/PHONE-CHECK-2026-10-29.md)与[功能完成度](docs/FEATURE-COMPLETION-2026-10-28.md)分别说明已验证范围。
 
 ## 开始使用
 
