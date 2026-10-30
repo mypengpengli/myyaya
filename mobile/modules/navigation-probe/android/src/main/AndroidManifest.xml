@@ -5,8 +5,14 @@
   <queries>
     <package android:name="com.google.ar.core" />
     <intent><action android:name="android.intent.action.VIEW" /><data android:scheme="market" /></intent>
+    <intent><action android:name="android.media.action.IMAGE_CAPTURE" /></intent>
   </queries>
   <application>
+    <provider android:name=".ReferencePhotoProvider"
+      android:authorities="${applicationId}.myyaya.reference-photo"
+      android:exported="false" android:grantUriPermissions="true">
+      <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/myyaya_reference_photo_paths" />
+    </provider>
     <meta-data android:name="com.google.ar.core" android:value="optional" />
     <activity android:name=".NavigationProbeActivity"
       android:exported="false"

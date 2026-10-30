@@ -108,6 +108,7 @@ class NavigationProbeActivity : Activity() {
       userWantsRunning = false; pauseCapture("map-export-paused")
     })
     buildUi()
+    roomMap?.restoreState(savedInstanceState)
     record(JSONObject().put("event", "opened").put("trackingState", "NOT_STARTED"))
   }
 
@@ -300,6 +301,8 @@ class NavigationProbeActivity : Activity() {
         planeFindingMode = Config.PlaneFindingMode.DISABLED
         if (mapping) roomMap?.configure(current, requireNotNull(sessionId), this)
       })
+      if (mapping) record(JSONObject().put("event","reference-database-configured")
+        .put("configuredReferenceImages",current.config.augmentedImageDatabase.numImages))
       configuredDepthMode = activeMode
       current.resume()
       breakPath = true
@@ -350,6 +353,11 @@ class NavigationProbeActivity : Activity() {
     pauseCapture("activity-paused")
     roomMap?.save(true)
     super.onPause()
+  }
+
+  override fun onSaveInstanceState(outState: Bundle) {
+    roomMap?.saveState(outState)
+    super.onSaveInstanceState(outState)
   }
 
   override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {

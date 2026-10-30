@@ -5,6 +5,9 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.*
 import android.net.Uri
+import android.os.Bundle
+import android.provider.MediaStore
+import androidx.core.content.FileProvider
 import android.util.AtomicFile
 import android.view.View
 import android.widget.*
@@ -34,6 +37,10 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   @Volatile private var referenceState = "NOT_SEEN"
   @Volatile private var referenceMethod = "NOT_SEEN"
   @Volatile private var knownReferenceImages = 0
+  @Volatile private var configuredReferenceImages = 0
+  private var capturedPhoto: File? = null
+  @Volatile private var restoring = false
+  private var deferredPhotoResult: (() -> Unit)? = null
   private var name = ""
   private lateinit var title: TextView
   private lateinit var state: TextView
@@ -123,18 +130,86 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     }
   }
   private fun chooseReference() {
+    if (saving || restoring) { toast("正在保存或恢复地图，请稍后"); return }
     val map=mapper?.snapshot() ?: run { toast("请先新建地图"); return }
     if (map.voxels.isNotEmpty() || map.path.isNotEmpty()) { toast("参照图需在首次扫描前设置；已有地图请新建后设置。"); return }
     AlertDialog.Builder(activity).setTitle("登记固定参照图")
       .setMessage("选择固定平面照片或海报的原图，也可选实物照片并校正四角。之后输入图像实际宽高。不要选二维码、简单线条或重复纹理；登记后实物不能移动。")
-      .setNegativeButton("取消",null).setPositiveButton("选择图片") { _,_ ->
+      .setNegativeButton("取消",null).setNeutralButton("用后摄拍摄") { _,_ -> captureReference() }
+      .setPositiveButton("选择图片") { _,_ ->
         stopAndReset()
         activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
           type="image/*"; addCategory(Intent.CATEGORY_OPENABLE)
         },SELECT_REFERENCE)
       }.show()
   }
+  private fun captureReference() {
+    stopAndReset()
+    val map=mapper?.snapshot() ?: return
+    saving=true
+    io.execute {
+      val result=runCatching {
+        write(map)
+        val dir=File(activity.cacheDir,"reference-photo").apply { mkdirs() }
+        dir.listFiles()?.forEach { it.delete() }
+        File.createTempFile("reference-",".jpg",dir)
+      }
+      activity.runOnUiThread {
+        saving=false
+        if (activity.isDestroyed || activity.isFinishing) return@runOnUiThread
+        val file=result.getOrNull() ?: run { toast("拍摄准备失败，请重试"); return@runOnUiThread }
+        capturedPhoto=file
+        val uri=photoUri(file)
+        try {
+          activity.startActivityForResult(Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+            putExtra(MediaStore.EXTRA_OUTPUT,uri)
+            putExtra("android.intent.extras.CAMERA_FACING",0)
+            clipData=android.content.ClipData.newRawUri("参照图",uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+          },CAPTURE_REFERENCE)
+        } catch (_: Exception) { clearCapturedPhoto(); toast("未找到可用相机，请拍摄后从相册选择") }
+      }
+    }
+  }
+  private fun photoUri(file: File)=FileProvider.getUriForFile(activity,activity.packageName+".myyaya.reference-photo",file)
+  private fun clearCapturedPhoto() {
+    capturedPhoto?.let { file ->
+      runCatching { activity.revokeUriPermission(photoUri(file),Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+      file.delete()
+    }
+    capturedPhoto=null
+  }
+  fun saveState(out: Bundle) {
+    out.putString("room-map-id",mapper?.snapshot()?.id)
+    out.putString("room-reference-photo",capturedPhoto?.name)
+    save(true)
+  }
+  fun restoreState(saved: Bundle?) {
+    val id=saved?.getString("room-map-id") ?: return
+    if (runCatching { UUID.fromString(id).toString()==id }.getOrDefault(false).not()) return
+    saved.getString("room-reference-photo")?.takeIf { it.matches(Regex("reference-[A-Za-z0-9-]+\\.jpg")) }?.let {
+      capturedPhoto=File(activity.cacheDir,"reference-photo/$it")
+    }
+    restoring=true
+    io.execute {
+      val result=runCatching { read(File(directory,"$id.yayamap")) }
+      activity.runOnUiThread {
+        restoring=false
+        if (activity.isDestroyed) return@runOnUiThread
+        result.onSuccess { mapper=RoomMapper(it); freshMap=it.sessionId=="pending"; name=it.name; render(it,"地图已恢复，开始扫描后重新定位。") }
+          .onFailure { toast("地图恢复失败，请重新打开地图") }
+        deferredPhotoResult?.also { deferredPhotoResult=null; it() }
+      }
+    }
+  }
   fun activityResult(request: Int,result: Int,data: Intent?): Boolean {
+    if (request==CAPTURE_REFERENCE) {
+      if (restoring) { deferredPhotoResult={ activityResult(request,result,data); Unit }; return true }
+      val file=capturedPhoto
+      if (result==Activity.RESULT_OK && file!=null && file.length()>0 && mapper!=null) editReference(photoUri(file),true)
+      else { clearCapturedPhoto(); toast("已取消拍摄，原参照图未修改") }
+      return true
+    }
     if (request != SELECT_REFERENCE && request != EXPORT_MAP) return false
     if (result != Activity.RESULT_OK) return true
     val uri=data?.data ?: return true
@@ -144,10 +219,15 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
         val saved=runCatching { requireNotNull(activity.contentResolver.openOutputStream(uri,"w")).use { it.write(bytes) } }
         activity.runOnUiThread { toast(if (saved.isSuccess) "地图已导出，包含参照图（若有）、地点与表面点。" else "导出失败，请重试") }
       }
-    } else io.execute {
+    } else editReference(uri,false)
+    return true
+  }
+  private fun editReference(uri: Uri,fromCamera: Boolean) {
+    io.execute {
       val decoded=runCatching { decodeReference(uri) }
       activity.runOnUiThread {
-        if (activity.isDestroyed) return@runOnUiThread
+        if (fromCamera) clearCapturedPhoto()
+        if (activity.isDestroyed) { decoded.getOrNull()?.recycle(); return@runOnUiThread }
         val image=decoded.getOrNull()
         if (image==null) { toast("图片无法读取，请选择清晰的静态图片"); return@runOnUiThread }
         ReferenceImageEditor(activity,image) { bytes,meters ->
@@ -158,14 +238,13 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
         }.show()
       }
     }
-    return true
   }
   private fun decodeReference(uri: Uri): Bitmap {
     val options=BitmapFactory.Options().apply { inJustDecodeBounds=true }
     activity.contentResolver.openInputStream(uri).use { BitmapFactory.decodeStream(it,null,options) }
     require(options.outWidth >= 300 && options.outHeight >= 300)
     require(options.outWidth <= 30000 && options.outHeight <= 30000)
-    var scale=1; while (max(options.outWidth,options.outHeight)/scale > 2400) scale*=2
+    var scale=1; while (max(options.outWidth,options.outHeight)/scale > 4096) scale*=2
     val bitmap=activity.contentResolver.openInputStream(uri).use { BitmapFactory.decodeStream(it,null,BitmapFactory.Options().apply { inSampleSize=scale }) } ?: error("图片解码失败")
     val orientation=runCatching { activity.contentResolver.openInputStream(uri).use { android.media.ExifInterface(requireNotNull(it)).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION,1) } }.getOrDefault(1)
     if (orientation==1) return bitmap
@@ -253,6 +332,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   fun configure(session: Session,id: String,config: Config) {
     generation++
     referenceState="NOT_SEEN"; referenceMethod="NOT_SEEN"; knownReferenceImages=0
+    configuredReferenceImages=0
     runCatching { anchor?.detach() }; anchor=null; stableImage=null; stableCount=0; stableSince=0
     sessionId=id
     if (freshMap) {
@@ -265,6 +345,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       val bitmap=BitmapFactory.decodeByteArray(map.referenceJpeg,0,map.referenceJpeg.size) ?: error("参照图无法解码")
       try {
         config.augmentedImageDatabase=AugmentedImageDatabase(session).apply { addImage("room-reference",bitmap,map.referenceWidth) }
+        configuredReferenceImages=config.augmentedImageDatabase.numImages
+        check(configuredReferenceImages==1) { "参照图库未正确配置" }
       } finally { bitmap.recycle() }
     }
   }
@@ -272,8 +354,9 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   fun close() { io.shutdown() }
   fun report(): Map<String,Any?>? = mapper?.summary()?.let { it + mapOf("lastSavedAt" to if (it["mapId"]==savedId) savedAt else 0L,
     "referenceTrackingState" to referenceState,"referenceTrackingMethod" to referenceMethod,
+    "configuredReferenceImages" to configuredReferenceImages,
     "knownReferenceImages" to knownReferenceImages,"stableReferenceSamples" to stableCount) }
-  fun canStart() = mapper != null && !saving
+  fun canStart() = mapper != null && !saving && !restoring
   /** GL thread, throttled by the host to 2 Hz. */
   fun frame(session: Session, frame: Frame, sample: DepthSamples.Result?, depthNs: Long) {
     val token=generation
@@ -338,7 +421,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     places.text=if (map.places.isEmpty()) "尚无命名地点" else map.places.joinToString("   ") { "${it.name} (%.2f, %.2f)m".format(it.position[0],it.position[2]) }
     mapView.map=map; mapView.position=null; mapView.forward=null; mapView.invalidate()
   }
-  companion object { const val SELECT_REFERENCE=841; const val EXPORT_MAP=842 }
+  companion object { const val SELECT_REFERENCE=841; const val EXPORT_MAP=842; const val CAPTURE_REFERENCE=843 }
 }
 
 /** Top-down surface view; no occupancy/free-space or path planning is inferred. */
