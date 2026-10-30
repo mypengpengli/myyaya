@@ -1,6 +1,16 @@
 # 换电脑继续开发
 
-## 最新：2026-10-30，2.1.172
+## 最新：2026-10-30，2.1.173
+
+173 已原签名覆盖安装，27 项原生测试、TypeScript 和[源码 CI](https://github.com/mypengpengli/myyaya/actions/runs/41012546507) 通过。左滑菜单新增房间地图，支持 `myyaya://room-map` 打开独立入口页，不用反复滚动设置；点击“打开房间地图”仍走原有相机/runtime lease。
+
+参照图首次实物识别已取得 FULL_TRACKING，保存旧地图 Coupon172（UUID `b5e31a9c-b78b-4444-bbd5-5f3c3a8c565f`）和 RefDesk172 地点。冷启动后文件恢复通过，但新会话没有检测到目标；173 将 2 Hz 单帧变化查询换成 Session 全部已知图像后，knownReferenceImages 仍为 0，说明本次并非仅漏读状态。不要将这一风险修补写成确定解决了冷启动失败。
+
+用户已被请求保持券固定、四角完整入镜，并缓慢左右平移 3～5cm、稍靠近后稳住。继续时先读最新报告，确认本次 sessionId、knownReferenceImages、FULL_TRACKING、referenceAligned 和 localized；savedReferenceTransform=true 仅表示有已保存关系，不能拿它冒充当前位置有效。需要实际完成至少一次新会话识别/对齐，再扩展不同起点、遮挡、精度与地面观测。当前没有自主行驶入口，本轮未发送电机命令。
+
+最终源码 `ae485554b4fbbec1c0ed185a93c0b012d0ca9bc9`，APK SHA256 `8b2a1ebcf12684108c028e228d786c789025353afd9b7e46950b8a1ce6fdb0d1`，用户参照图未进入源码/APK。旧的 172 首次识别和冷启动失败记录已保存在忽略的 `.tools/reference172-*`，173 结果见 `.tools/reference173-*`，手机最新日志在外部应用目录 navigation-probe。
+
+## 172 阶段记录（历史）
 
 172 已增加实物参照图四角校正和 EXIF 方向：系统选图后进入原生编辑页，拖动 TL/TR/BR/BL 四角、填写宽高，确定性透视校正并预览登记。参数/四角验证 5 项，加此前 20 项共 25 项原生测试通过；[源码 CI](https://github.com/mypengpengli/myyaya/actions/runs/40995147223) 通过，源码 `93ce17f4ad7d1cc5ffaa9c5d766a205d93ecf75a`。
 

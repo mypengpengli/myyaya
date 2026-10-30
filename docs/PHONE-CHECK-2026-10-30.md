@@ -1,5 +1,17 @@
 # 2026-10-30：手机视觉建图与参照定位
 
+## 173 冷启动续测与状态修补
+
+用户把整张券放入后摄并稳住后，172 实际取得 FULL_TRACKING，连续稳定样本 3 次；同一 `Coupon172` 地图变为当前位置有效并融合 78 个表面体素。保存 `RefDesk172` 地点时地图有 11 个轨迹样本，当前位置约 `(-0.0002, 0.0046, 0.4257)m`（相对参照图，非独立量测精度）。随后暂停、退出并 force-stop 应用。
+
+172 冷启动恢复同一地图 UUID 和 RefDesk172 地点，创建不同 sessionId，但图像保持 NOT_SEEN，当前位置无效。因此首次对齐通过，跨会话实物定位当时未通过，不能由地图能显示推出定位成功。
+
+源码核对发现原来只在 2 Hz 采样时查询 `Frame.getUpdatedTrackables`，可能漏掉 30 Hz 更新中的变化；173 改为在当前 GL 会话查询 `Session.getAllTrackables`。另将保存的参照关系 `savedReferenceTransform` 与本次有效对齐 `referenceAligned` 分开，新会话、暂停后不再沿用历史 true 值。新增已知目标数 `knownReferenceImages`。这是修补状态读取风险，不等于已证实它是本次未识别的唯一根因。[Frame 语义](https://developers.google.com/ar/reference/java/com/google/ar/core/Frame#getUpdatedTrackables(java.lang.Class%3CT%3E))、[Session 语义](https://developers.google.com/ar/reference/java/com/google/ar/core/Session#getAllTrackables(java.lang.Class%3CT%3E))
+
+173 已覆盖安装并通过 `myyaya://room-map` 进入新增地图页，恢复旧地图和地点。创建新会话后，报告保存关系存在、当前对齐 false、当前位置为空；全部已知参照图数量为 0，说明 SDK 尚未重新检测到目标。本轮已请求用户保持券固定、完整入镜并短距离缓慢平移，继续复核观察条件。跨会话重定位尚未通过。
+
+最终源码 `ae485554b4fbbec1c0ed185a93c0b012d0ca9bc9` 的[完整 CI](https://github.com/mypengpengli/myyaya/actions/runs/41012546507)、TypeScript 与 27 项原生测试通过。APK 174328362 字节，SHA256 `8b2a1ebcf12684108c028e228d786c789025353afd9b7e46950b8a1ce6fdb0d1`；签名、16 KB ZIP 对齐、ARM64、中文模型与凭据排除检查通过。新增菜单入口和滚动，不改变底座运动能力；本轮没有发送电机命令。
+
 ## 172 实物参照图四角校正
 
 用户提供了相册中的代金券实物照片，宽 15cm、高约 27cm，已将券移到鼠标旁供测试。原照片包含墙面、桌面与邻近物体，并有透视倾斜，不能将整张照片直接作为 15cm 平面图像。
