@@ -72,8 +72,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   fun buildColumn(): View = LinearLayout(activity).apply {
     orientation=LinearLayout.VERTICAL
     title=label("房间表面地图"); addView(title)
-    state=label("新建地图后开始扫描。青色是观测到的表面，黑色是未知，不代表可通行区域。"); addView(state)
-    addView(label("地面与通行判断 · 本次会话实验"))
+    state=label("新建地图后开始扫描。青色是观测到的表面，黑色是未知，不代表可通行区域。")
     val terrainActions=LinearLayout(activity)
     terrainActions.addView(button("点选地面") {
       if (!active) toast("请先开始扫描并恢复当前地图定位")
@@ -82,10 +81,11 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     terrainActions.addView(button("底座尺寸") { editEnvelope() },LinearLayout.LayoutParams(0,-2,1f))
     terrainActions.addView(button("清除判断") { clearTerrain(); renderTerrain() },LinearLayout.LayoutParams(0,-2,1f))
     addView(terrainActions)
-    terrainState=label("开始扫描后点选实际地面；灰色未知、青色地面、红色障碍、橙色落差、绿色候选中心。")
+    terrainState=label("开始扫描后点选实际地面；灰未知、青地面、红障碍、橙落差、绿候选。").apply { textSize=12f }
     addView(terrainState)
-    terrainView=TerrainView(activity); addView(terrainView,LinearLayout.LayoutParams(-1,(160*resources.displayMetrics.density).toInt()))
-    addView(label("绿色需完整占地范围都有近期地面观测，只作候选；未标定相机与底座外参，不授权行驶。").apply { textSize=12f })
+    terrainView=TerrainView(activity); addView(terrainView,LinearLayout.LayoutParams(-1,(130*resources.displayMetrics.density).toInt()))
+    addView(label("绿色仅为候选，实际通行范围待验证；本页不会驱动底座。").apply { textSize=11f })
+    addView(state)
     mapView=SurfaceMapView(activity); addView(mapView,LinearLayout.LayoutParams(-1,(130*resources.displayMetrics.density).toInt()))
     places=label("尚无地点。扫描时可将当前位置命名为客厅、沙发旁等。"); addView(places)
     addView(label("保存并重新打开地图后，只有识别到已登记的固定参照图，才会恢复当前位置。未设置参照图的旧地图仅供查看。"))
@@ -118,9 +118,12 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     val length=field("最大前后长度（厘米，10～100）",saved?.length)
     val height=field("装好手机后的最高高度（厘米，10～200）",saved?.height)
     val margin=field("额外余量（厘米，2～30）",saved?.margin ?: .05f)
-    val dialog=AlertDialog.Builder(activity).setTitle("整车尺寸与余量").setMessage("按整车最大投影尺寸填写，默认余量5厘米。白圈按长宽对角线包络，不表示相机已标定到底座中心。")
-      .setView(ScrollView(activity).apply { addView(content) }).setNegativeButton("取消",null).setPositiveButton("保存",null).create()
+    val scroll=ScrollView(activity).apply { addView(content) }
+    val dialog=AlertDialog.Builder(activity).setTitle("整车尺寸与余量").setMessage("按装好手机后的最大尺寸填写。默认余量5厘米，后续可调整。")
+      .setView(scroll).setNegativeButton("取消",null).setPositiveButton("保存",null).create()
     dialog.setOnShowListener {
+      // Constrain the custom panel so the save button stays visible in landscape.
+      scroll.layoutParams=android.widget.FrameLayout.LayoutParams(-1,(activity.resources.displayMetrics.heightPixels*.35f).toInt())
       dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
         val value=runCatching { RobotEnvelope(width.text.toString().toFloat()/100,length.text.toString().toFloat()/100,
           height.text.toString().toFloat()/100,margin.text.toString().toFloat()/100) }.getOrNull()
@@ -149,7 +152,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       "GROUND_LOST" -> "所选平面跟踪已丢失，请重新点选实际地面。"
       "CAMERA_HEIGHT_INVALID" -> "相机不在所选地面上方的有效高度内，请重新确认实际地面。"
       "SELECT_GROUND","CLOCK_RESET" -> "请点选实际地面，再缓慢移动手机补充原始深度。"
-      else -> "地面 ${r["groundCells"]} · 障碍 ${r["obstacleCells"]} · 落差 ${r["dropCells"]} · 未定 ${r["uncertainCells"]} · 候选 ${r["candidateCenterCells"]}\n相机距所选平面 ${s.cameraHeight?.let { "%.0f厘米".format(it*100) } ?: "待测"}；${if (s.envelope==null) "请填写底座尺寸" else "仅作观测，禁止据此直接行驶"}"
+      else -> "地面 ${r["groundCells"]} · 障碍 ${r["obstacleCells"]} · 落差 ${r["dropCells"]} · 未定 ${r["uncertainCells"]} · 候选 ${r["candidateCenterCells"]}\n相机距所选平面 ${s.cameraHeight?.let { "%.0f厘米".format(it*100) } ?: "待测"}；${if (s.envelope==null) "请填写底座尺寸" else "本页仅显示判断"}"
     }
     if (!groundArmed) terrainState.text=message+"\n灰未知 / 青地面 / 红障碍 / 橙落差 / 绿候选"
     terrainView.snapshot=s; terrainView.invalidate()
