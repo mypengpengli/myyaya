@@ -38,6 +38,15 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   @Volatile private var referenceMethod = "NOT_SEEN"
   @Volatile private var knownReferenceImages = 0
   @Volatile private var configuredReferenceImages = 0
+  private val terrain=TerrainAnalysis()
+  @Volatile private var terrainSnapshot=TerrainSnapshot(false,"SELECT_GROUND")
+  @Volatile private var groundArmed=false
+  @Volatile private var horizontalPlanes=0
+  @Volatile private var groundTap: FloatArray?=null
+  @Volatile private var pendingGround: Plane?=null
+  @Volatile private var selectedGround: Plane?=null
+  private lateinit var terrainState: TextView
+  private lateinit var terrainView: TerrainView
   private var capturedPhoto: File? = null
   @Volatile private var restoring = false
   private var deferredPhotoResult: (() -> Unit)? = null
@@ -52,6 +61,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   @Volatile private var generation = 0
   @Volatile private var saveFailed = false
 
+  init { terrain.setEnvelope(readEnvelope()) }
+
   private fun label(value: String) = TextView(activity).apply {
     text=value; textSize=14f; setTextColor(Color.WHITE); setPadding(12,8,12,8)
   }
@@ -62,6 +73,19 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     orientation=LinearLayout.VERTICAL
     title=label("房间表面地图"); addView(title)
     state=label("新建地图后开始扫描。青色是观测到的表面，黑色是未知，不代表可通行区域。"); addView(state)
+    addView(label("地面与通行判断 · 本次会话实验"))
+    val terrainActions=LinearLayout(activity)
+    terrainActions.addView(button("点选地面") {
+      if (!active) toast("请先开始扫描并恢复当前地图定位")
+      else { groundArmed=true; terrainState.text="请点击左侧后摄画面中的实际地面。不要选择桌面或架子。" }
+    },LinearLayout.LayoutParams(0,-2,1f))
+    terrainActions.addView(button("底座尺寸") { editEnvelope() },LinearLayout.LayoutParams(0,-2,1f))
+    terrainActions.addView(button("清除判断") { clearTerrain(); renderTerrain() },LinearLayout.LayoutParams(0,-2,1f))
+    addView(terrainActions)
+    terrainState=label("开始扫描后点选实际地面；灰色未知、青色地面、红色障碍、橙色落差、绿色候选中心。")
+    addView(terrainState)
+    terrainView=TerrainView(activity); addView(terrainView,LinearLayout.LayoutParams(-1,(160*resources.displayMetrics.density).toInt()))
+    addView(label("绿色需完整占地范围都有近期地面观测，只作候选；未标定相机与底座外参，不授权行驶。").apply { textSize=12f })
     mapView=SurfaceMapView(activity); addView(mapView,LinearLayout.LayoutParams(-1,(130*resources.displayMetrics.density).toInt()))
     places=label("尚无地点。扫描时可将当前位置命名为客厅、沙发旁等。"); addView(places)
     addView(label("保存并重新打开地图后，只有识别到已登记的固定参照图，才会恢复当前位置。未设置参照图的旧地图仅供查看。"))
@@ -78,6 +102,58 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   }
 
   private fun toast(message: String) { Toast.makeText(activity,message,Toast.LENGTH_LONG).show() }
+  private fun readEnvelope(): RobotEnvelope? = runCatching {
+    val prefs=activity.getSharedPreferences("terrain-envelope",0)
+    RobotEnvelope(prefs.getFloat("width",0f),prefs.getFloat("length",0f),prefs.getFloat("height",0f),prefs.getFloat("margin",.05f))
+  }.getOrNull()
+  private fun editEnvelope() {
+    val saved=readEnvelope()
+    val content=LinearLayout(activity).apply { orientation=LinearLayout.VERTICAL; setPadding(28,4,28,4) }
+    fun field(hint: String,value: Float?): EditText = EditText(activity).apply {
+      this.hint=hint; inputType=8194; setSingleLine()
+      if (value!=null) setText(java.lang.String.format(java.util.Locale.US,"%.1f",value*100))
+      content.addView(this)
+    }
+    val width=field("最大宽度（厘米，10～100）",saved?.width)
+    val length=field("最大前后长度（厘米，10～100）",saved?.length)
+    val height=field("装好手机后的最高高度（厘米，10～200）",saved?.height)
+    val margin=field("额外余量（厘米，2～30）",saved?.margin ?: .05f)
+    val dialog=AlertDialog.Builder(activity).setTitle("整车尺寸与余量").setMessage("按整车最大投影尺寸填写，默认余量5厘米。白圈按长宽对角线包络，不表示相机已标定到底座中心。")
+      .setView(ScrollView(activity).apply { addView(content) }).setNegativeButton("取消",null).setPositiveButton("保存",null).create()
+    dialog.setOnShowListener {
+      dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+        val value=runCatching { RobotEnvelope(width.text.toString().toFloat()/100,length.text.toString().toFloat()/100,
+          height.text.toString().toFloat()/100,margin.text.toString().toFloat()/100) }.getOrNull()
+        if (value==null) { toast("请在提示范围内填写完整长、宽、高和余量"); return@setOnClickListener }
+        activity.getSharedPreferences("terrain-envelope",0).edit().putFloat("width",value.width).putFloat("length",value.length)
+          .putFloat("height",value.height).putFloat("margin",value.margin).apply()
+        terrain.setEnvelope(value); terrainSnapshot=TerrainSnapshot(terrain.hasGround(),"OBSERVING",envelope=value)
+        renderTerrain(); dialog.dismiss()
+      }
+    }
+    dialog.show()
+  }
+  private fun clearTerrain(status: String="SELECT_GROUND") {
+    groundArmed=false; groundTap=null; pendingGround=null; selectedGround=null; terrain.reset()
+    terrainSnapshot=TerrainSnapshot(false,status,envelope=readEnvelope())
+  }
+  fun cameraTapped(x: Float,y: Float): Boolean {
+    if (!groundArmed || !x.isFinite() || !y.isFinite()) return false
+    groundArmed=false; groundTap=floatArrayOf(x,y); return true
+  }
+  private fun renderTerrain() {
+    if (!::terrainState.isInitialized) return
+    val s=terrainSnapshot; val r=s.report()
+    val message=when (s.status) {
+      "LOCALIZATION_REQUIRED" -> "定位无效，已清除本次判断。请恢复定位后重新点选地面。"
+      "GROUND_LOST" -> "所选平面跟踪已丢失，请重新点选实际地面。"
+      "CAMERA_HEIGHT_INVALID" -> "相机不在所选地面上方的有效高度内，请重新确认实际地面。"
+      "SELECT_GROUND","CLOCK_RESET" -> "请点选实际地面，再缓慢移动手机补充原始深度。"
+      else -> "地面 ${r["groundCells"]} · 障碍 ${r["obstacleCells"]} · 落差 ${r["dropCells"]} · 未定 ${r["uncertainCells"]} · 候选 ${r["candidateCenterCells"]}\n相机距所选平面 ${s.cameraHeight?.let { "%.0f厘米".format(it*100) } ?: "待测"}；${if (s.envelope==null) "请填写底座尺寸" else "仅作观测，禁止据此直接行驶"}"
+    }
+    if (!groundArmed) terrainState.text=message+"\n灰未知 / 青地面 / 红障碍 / 橙落差 / 绿候选"
+    terrainView.snapshot=s; terrainView.invalidate()
+  }
   private fun newMap() {
     if (saving) { toast("正在保存地图，请稍后"); return }
     val input=EditText(activity).apply { hint="例如：客厅"; setSingleLine() }
@@ -331,6 +407,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   /** Before Session.configure. Called on UI thread while GL is stopped. */
   fun configure(session: Session,id: String,config: Config) {
     generation++
+    clearTerrain()
+    horizontalPlanes=0
     referenceState="NOT_SEEN"; referenceMethod="NOT_SEEN"; knownReferenceImages=0
     configuredReferenceImages=0
     runCatching { anchor?.detach() }; anchor=null; stableImage=null; stableCount=0; stableSince=0
@@ -350,18 +428,22 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       } finally { bitmap.recycle() }
     }
   }
-  fun pause() { generation++; active=false; mapper?.invalidate(); if (::mapView.isInitialized) { mapView.position=null; mapView.forward=null; mapView.invalidate(); state.text="扫描已暂停，当前位置无效。地图可保存或重新打开。" } }
+  fun pause() { generation++; active=false; mapper?.invalidate(); clearTerrain(); renderTerrain(); if (::mapView.isInitialized) { mapView.position=null; mapView.forward=null; mapView.invalidate(); state.text="扫描已暂停，当前位置无效。地图可保存或重新打开。" } }
   fun close() { io.shutdown() }
   fun report(): Map<String,Any?>? = mapper?.summary()?.let { it + mapOf("lastSavedAt" to if (it["mapId"]==savedId) savedAt else 0L,
     "referenceTrackingState" to referenceState,"referenceTrackingMethod" to referenceMethod,
     "configuredReferenceImages" to configuredReferenceImages,
-    "knownReferenceImages" to knownReferenceImages,"stableReferenceSamples" to stableCount) }
+    "knownReferenceImages" to knownReferenceImages,"stableReferenceSamples" to stableCount,
+    "terrain" to (terrainSnapshot.report()+mapOf("trackedHorizontalPlanes" to horizontalPlanes))) }
   fun canStart() = mapper != null && !saving && !restoring
   /** GL thread, throttled by the host to 2 Hz. */
   fun frame(session: Session, frame: Frame, sample: DepthSamples.Result?, depthNs: Long) {
     val token=generation
     val current=mapper ?: return
     val tracking=frame.camera.trackingState==TrackingState.TRACKING
+    horizontalPlanes=if (tracking) session.getAllTrackables(Plane::class.java).count {
+      it.trackingState==TrackingState.TRACKING && it.type==Plane.Type.HORIZONTAL_UPWARD_FACING && it.subsumedBy==null
+    } else 0
     val hasReference=current.snapshotReference()
     if (!tracking) { anchor?.detach(); anchor=null; stableImage=null; stableCount=0 }
     if (anchor?.trackingState==TrackingState.STOPPED) { anchor?.detach(); anchor=null; stableImage=null; stableCount=0 }
@@ -401,6 +483,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       val intrinsics=frame.camera.textureIntrinsics; val f=intrinsics.focalLength; val c=intrinsics.principalPoint; val dim=intrinsics.imageDimensions
       current.fuse(sessionId,rigid(frame.camera.pose),sample,f[0],f[1],c[0],c[1],dim[0],dim[1],frame.timestamp,depthNs)
     }
+    if (located) analyzeTerrain(current,frame,sample,depthNs,token)
+    else clearTerrain("LOCALIZATION_REQUIRED")
     val map=current.snapshot(); val position=current.livePosition?.clone(); val direction=current.liveForward?.clone()
     val text=if (located) "定位有效 · ${if (hasReference) "固定参照图对齐" else "仅本次会话"}\n原始深度 ≥60% 置信度 · 0.2～4 米 · ${map.voxels.size}/${RoomMapper.MAX_CELLS} 表面点"
       else if (!tracking) "定位已中断，暂停融合；请缓慢移动恢复跟踪${if (hasReference) "，并对准参照图" else ""}。"
@@ -410,8 +494,55 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       if (!activity.isDestroyed && token==generation) {
         render(map,text + if (saveFailed) "\n最近保存失败，请检查存储空间并重新保存。" else "")
         mapView.position=position; mapView.forward=direction; mapView.invalidate()
+        renderTerrain()
       }
     }
+  }
+  /** GL thread only: ARCore planes are proposals, never automatically declared floor. */
+  private fun analyzeTerrain(current: RoomMapper,frame: Frame,sample: DepthSamples.Result?,depthNs: Long,token: Int) {
+    val tap=groundTap; groundTap=null
+    if (tap!=null) {
+      val hit=frame.hitTest(tap[0],tap[1]).firstOrNull {
+        val plane=it.trackable as? Plane
+        plane!=null && plane.trackingState==TrackingState.TRACKING && plane.type==Plane.Type.HORIZONTAL_UPWARD_FACING &&
+          plane.isPoseInPolygon(it.hitPose) && it.distance in .15f..4f
+      }
+      val plane=hit?.trackable as? Plane
+      if (plane==null) activity.runOnUiThread { if (token==generation) toast("此处未检测到向上的水平面，请缓慢扫描实际地面后再点选") }
+      else {
+        val cameraHeight=frame.camera.pose.ty()-requireNotNull(hit).hitPose.ty()
+        activity.runOnUiThread {
+          if (token!=generation || activity.isDestroyed) return@runOnUiThread
+          AlertDialog.Builder(activity).setTitle("确认实际地面")
+            .setMessage("这是实际地面，而不是桌面、架子或台阶吗？\n相机距所选平面约%.0f厘米（未校准）。".format(cameraHeight*100))
+            .setNegativeButton("重新选择") { _,_ -> if (token==generation) groundArmed=true }
+            .setPositiveButton("确认是地面") { _,_ -> if (token==generation && active) pendingGround=plane }.show()
+        }
+      }
+    }
+    pendingGround?.let { plane ->
+      pendingGround=null
+      val ground=current.poseInMap(sessionId,rigid(plane.centerPose))?.let { runCatching { GroundPlane.fromPose(it) }.getOrNull() }
+      if (plane.trackingState==TrackingState.TRACKING && ground!=null) {
+        selectedGround=plane; terrain.selectGround(ground)
+      }
+    }
+    var plane=selectedGround ?: run {
+      terrainSnapshot=TerrainSnapshot(false,"SELECT_GROUND",envelope=readEnvelope()); return
+    }
+    repeat(10) { plane.subsumedBy?.let { plane=it } }
+    selectedGround=plane
+    val ground=current.poseInMap(sessionId,rigid(plane.centerPose))?.let { runCatching { GroundPlane.fromPose(it) }.getOrNull() }
+    val camera=current.poseInMap(sessionId,rigid(frame.camera.pose))
+    if (plane.trackingState!=TrackingState.TRACKING || plane.subsumedBy!=null || ground==null || camera==null) {
+      clearTerrain("GROUND_LOST"); return
+    }
+    val points=ArrayList<FloatArray>()
+    if (sample!=null && depthNs>0 && depthNs<=frame.timestamp && frame.timestamp-depthNs<=250_000_000L) {
+      val k=frame.camera.textureIntrinsics; val f=k.focalLength; val c=k.principalPoint; val d=k.imageDimensions
+      DepthProjection.points(sample,camera,f[0],f[1],c[0],c[1],d[0],d[1]) { points.add(it) }
+    }
+    terrainSnapshot=terrain.update(camera,ground,frame.timestamp,depthNs,points)
   }
   private fun RoomMapper.snapshotReference() = referenceEnabled()
   private fun rigid(pose: Pose)=RigidPose(pose.translation,pose.rotationQuaternion)

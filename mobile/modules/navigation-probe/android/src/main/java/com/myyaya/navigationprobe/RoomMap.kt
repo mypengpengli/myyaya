@@ -74,6 +74,8 @@ internal class RoomMapper(initial: RoomMapData) {
     if (id != currentSession) { currentSession = id; worldFromMap = null; lastDepth = 0; invalidate() }
   }
   @Synchronized fun invalidate() { if (livePosition != null) segment++; livePosition = null; liveForward = null }
+  @Synchronized fun poseInMap(session: String, pose: RigidPose): RigidPose? =
+    if (session==currentSession && livePosition!=null) worldFromMap?.inverse()?.compose(pose) else null
   /** Called only for a fully tracked, stable, physically fixed reference image. */
   @Synchronized fun alignReference(session: String, worldFromImage: RigidPose): Boolean {
     if (session != currentSession || data.referenceJpeg.isEmpty()) return false
@@ -115,23 +117,15 @@ internal class RoomMapper(initial: RoomMapData) {
       depthNs <= 0 || depthNs <= lastDepth || depthNs > frameNs || frameNs-depthNs > 250_000_000L) {
       rejectedFrames++; return 0
     }
-    require(fx.isFinite() && fy.isFinite() && fx > 0 && fy > 0 && cx.isFinite() && cy.isFinite() && textureWidth > 0 && textureHeight > 0)
-    val dx = sample.sourceWidth.toFloat()/textureWidth; val dy = sample.sourceHeight.toFloat()/textureHeight
     val cameraToMap = worldFromMap!!.inverse().compose(pose)
     lastDepth = depthNs
     var added = 0
-    for (y in 0 until sample.height) for (x in 0 until sample.width) {
-      val mm = sample.millimeters[y*sample.width+x]
-      // Conservative observation range. This is a surface cloud, NEVER free-space evidence.
-      if (mm !in 200..4000) continue
-      val d = mm/1000f
-      val p = cameraToMap.point(floatArrayOf(d*(x*sample.step-cx*dx)/(fx*dx), d*(cy*dy-y*sample.step)/(fy*dy), -d))
-      if (p.any { !it.isFinite() || abs(it) > 25f }) continue
+    DepthProjection.points(sample,cameraToMap,fx,fy,cx,cy,textureWidth,textureHeight) { p ->
       val ix = floor(p[0]/CELL).toInt(); val iy = floor(p[1]/CELL).toInt(); val iz = floor(p[2]/CELL).toInt()
       val key = key(ix,iy,iz); val existing = cells[key]
       if (existing != null) existing[3] = min(65535,existing[3]+1)
       else if (cells.size < MAX_CELLS) cells[key] = intArrayOf(ix,iy,iz,1)
-      else continue
+      else return@points
       added++
     }
     acceptedFrames++

@@ -20,6 +20,7 @@ import android.text.Html
 import android.text.method.LinkMovementMethod
 import android.view.Gravity
 import android.view.View
+import android.view.MotionEvent
 import android.view.WindowManager
 import android.view.WindowInsets
 import android.widget.Button
@@ -144,6 +145,10 @@ class NavigationProbeActivity : Activity() {
       setRenderer(ProbeRenderer())
       renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
       onPause()
+      setOnTouchListener { _,event ->
+        if (mapping && event.actionMasked==MotionEvent.ACTION_UP) roomMap?.cameraTapped(event.x,event.y) ?: false
+        else mapping
+      }
     }
     camera.addView(surface, FrameLayout.LayoutParams(-1, -1))
     camera.addView(label("后摄画面", 13f).apply { setBackgroundColor(0x99000000.toInt()) },
@@ -298,7 +303,7 @@ class NavigationProbeActivity : Activity() {
       current.configure(Config(current).apply {
         depthMode = activeMode
         focusMode = Config.FocusMode.AUTO
-        planeFindingMode = Config.PlaneFindingMode.DISABLED
+        planeFindingMode = if (mapping) Config.PlaneFindingMode.HORIZONTAL else Config.PlaneFindingMode.DISABLED
         if (mapping) roomMap?.configure(current, requireNotNull(sessionId), this)
       })
       if (mapping) record(JSONObject().put("event","reference-database-configured")
