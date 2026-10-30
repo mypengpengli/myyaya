@@ -21,6 +21,7 @@ import android.text.method.LinkMovementMethod
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import android.view.WindowInsets
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -84,6 +85,7 @@ class NavigationProbeActivity : Activity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
     directory = getExternalFilesDir("navigation-probe") ?: File(filesDir, "navigation-probe")
     directory.mkdirs()
     val probeId = UUID.randomUUID().toString()
@@ -94,6 +96,7 @@ class NavigationProbeActivity : Activity() {
       .put("device", "${Build.MANUFACTURER} ${Build.MODEL}").put("sdk", Build.VERSION.SDK_INT)
       .put("coordinateFrame", "arcore-session-camera-not-base")
       .put("autonomousMotionEnabled", false).put("mapPersisted", false)
+      .put("depthPollIntervalMs", 500).put("position", JSONObject.NULL).put("running", false)
     buildUi()
     record(JSONObject().put("event", "opened").put("trackingState", "NOT_STARTED"))
   }
@@ -108,6 +111,18 @@ class NavigationProbeActivity : Activity() {
   private fun buildUi() {
     val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.rgb(12, 19, 28)) }
     root.setPadding(20, 12, 20, 12)
+    // Android 15 enforces edge-to-edge. Keep controls and title outside both
+    // system bars and camera cutouts on either landscape orientation.
+    root.setOnApplyWindowInsetsListener { view, insets ->
+      if (Build.VERSION.SDK_INT >= 30) {
+        val safe = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+        view.setPadding(20 + safe.left, 12 + safe.top, 20 + safe.right, 12 + safe.bottom)
+      } else {
+        view.setPadding(20 + insets.systemWindowInsetLeft, 12 + insets.systemWindowInsetTop,
+          20 + insets.systemWindowInsetRight, 12 + insets.systemWindowInsetBottom)
+      }
+      insets
+    }
     root.addView(label("房间视觉探针 · 本次仅观察，不控制底座", 19f))
     val body = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
     root.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))

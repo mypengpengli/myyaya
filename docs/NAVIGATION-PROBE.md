@@ -30,7 +30,7 @@
 
 打开入口先取得外部 Activity 租约、释放社交相机、停止现有运动并暂停 App 语音/身体运行时；原生 Activity 完成并返回后再释放租约、恢复前台运行时。租约覆盖整个 Activity 生命周期，避免沿用应用的后台五秒退出策略导致采集半途结束。
 
-AR 帧留在 Kotlin/GL 线程；界面和记录约每 500ms 更新一次。AR 服务包 `com.google.ar.core` 独立安装，不打进小丫 APK；SDK 固定 `com.google.ar:core:1.48.0`。页面包含 Google ARCore 的服务条款与隐私政策说明。
+AR 帧留在 Kotlin/GL 线程；界面、深度轮询和记录约每 500ms 更新一次。`depthSamples` 只统计轮询时观察到的新深度，不代表原生深度生成频率；相机帧率另计。AR 服务包 `com.google.ar.core` 独立安装，不打进小丫 APK；SDK 固定 `com.google.ar:core:1.48.0`。页面包含 Google ARCore 的服务条款与隐私政策说明。
 
 调试记录在应用专属 `navigation-probe` 外部文件目录；`latest.json` 为最新汇总，每次打开生成独立 `probe-<UUID>.ndjson`。保留最多五次记录，每次最多 3000 条，达到上限后继续显示现场状态但停止追加；导出包含汇总和已有采样。它们只是诊断，不作为保存地图或恢复行驶的依据。
 
