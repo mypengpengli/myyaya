@@ -68,6 +68,7 @@ class NavigationProbeActivity : Activity() {
   private var lastReport = JSONObject()
   private var logRows = 0
   @Volatile private var session: Session? = null
+  @Volatile private var sessionId: String? = null
   @Volatile private var running = false
   @Volatile private var resumed = false
   @Volatile private var rotation = 0
@@ -81,6 +82,8 @@ class NavigationProbeActivity : Activity() {
   private var supportedRaw = false
   private var checking = false
   private var installRequested = false
+  private var configuredDepthMode: Config.DepthMode? = null
+  private var closingForModeChange = false
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -215,7 +218,7 @@ class NavigationProbeActivity : Activity() {
   }
 
   private fun startCapture() {
-    if (!resumed || running) return
+    if (!resumed || running || closingForModeChange) return
     if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
       if (!permissionPending) {
         permissionPending = true
@@ -231,6 +234,8 @@ class NavigationProbeActivity : Activity() {
           return
         }
         session = Session(this)
+        sessionId = UUID.randomUUID().toString()
+        record(JSONObject().put("event", "session-created").put("position", JSONObject.NULL))
       }
       val current = requireNotNull(session)
       check(current.cameraConfig.facingDirection == CameraConfig.FacingDirection.BACK) { "Navigation probe requires the rear camera" }
@@ -238,11 +243,41 @@ class NavigationProbeActivity : Activity() {
       supportedRaw = current.isDepthModeSupported(Config.DepthMode.RAW_DEPTH_ONLY)
       activeMode = if (rawPreferred && supportedRaw) Config.DepthMode.RAW_DEPTH_ONLY
         else if (supportedAuto) Config.DepthMode.AUTOMATIC else Config.DepthMode.DISABLED
+      // On this phone, changing RAW_DEPTH_ONLY -> AUTOMATIC on an existing
+      // Session produced implausible dense distances; a clean Session did not.
+      // Compare modes in isolated sessions, never reusing their coordinates.
+      if (configuredDepthMode != null && configuredDepthMode != activeMode) {
+        closingForModeChange = true
+        session = null
+        configuredDepthMode = null
+        trajectory.points = emptyArray()
+        trajectory.invalidate()
+        startButton.isEnabled = false
+        modeButton.isEnabled = false
+        status.text = "正在切换为独立采集会话，旧轨迹不会沿用。"
+        record(JSONObject().put("event", "mode-change-session-ended").put("position", JSONObject.NULL))
+        io.execute {
+          val closed = runCatching { current.close() }
+          runOnUiThread {
+            closingForModeChange = false
+            if (isDestroyed || isFinishing) return@runOnUiThread
+            startButton.isEnabled = true
+            modeButton.isEnabled = true
+            if (closed.isFailure) {
+              userWantsRunning = false
+              status.text = "旧会话未能正常结束，请返回后重新打开探针。"
+              recordError("mode-close", closed.exceptionOrNull() as? Exception ?: IllegalStateException("Session close failed"))
+            } else if (userWantsRunning && resumed) startCapture()
+          }
+        }
+        return
+      }
       current.configure(Config(current).apply {
         depthMode = activeMode
         focusMode = Config.FocusMode.AUTO
         planeFindingMode = Config.PlaneFindingMode.DISABLED
       })
+      configuredDepthMode = activeMode
       current.resume()
       breakPath = true
       running = true
@@ -305,6 +340,7 @@ class NavigationProbeActivity : Activity() {
 
   private fun record(fields: JSONObject) = synchronized(reportLock) {
     fields.put("epochMs", System.currentTimeMillis()).put("elapsedMs", SystemClock.elapsedRealtime())
+    fields.put("sessionId", sessionId ?: JSONObject.NULL)
     val keys = fields.keys()
     while (keys.hasNext()) { val key = keys.next(); lastReport.put(key, fields.get(key)) }
     try {
@@ -377,6 +413,7 @@ class NavigationProbeActivity : Activity() {
     private var program = 0
     private var initializationError: Exception? = null
     private var boundSession: Session? = null
+    private var pathSession: Session? = null
     private val vertices = floats(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f))
     private val uv = floats(FloatArray(8))
     private var lastUiMs = 0L
@@ -430,7 +467,16 @@ class NavigationProbeActivity : Activity() {
           intervalFrames = 0
           lastUiMs = 0
         }
-        if (boundSession !== current) { current.setCameraTextureName(texture); boundSession = current }
+        if (pathSession !== current) {
+          path.clear(); segment = 0; frames = 0; newDepthSamples = 0
+          lastFrameNs = 0; lastDepthNs = 0; lastUiMs = 0
+          previousTracking = false
+          pathSession = current
+        }
+        if (boundSession !== current) {
+          current.setCameraTextureName(texture)
+          boundSession = current
+        }
         current.setDisplayGeometry(rotation, width, height)
         val frame = current.update()
         if (frame.timestamp == 0L) return
