@@ -16,7 +16,8 @@ import java.util.concurrent.Executors
 import kotlin.math.*
 
 /** Native mapping UI. No motor APIs. All ARCore objects are accessed on the GL thread. */
-internal class RoomMapPanel(private val activity: Activity, private val stopAndReset: () -> Unit) {
+internal class RoomMapPanel(private val activity: Activity, private val stopAndReset: () -> Unit,
+  private val pauseOnly: () -> Unit) {
   private val directory = File(activity.filesDir,"room-maps").apply { mkdirs() }
   private val io = Executors.newSingleThreadExecutor()
   @Volatile private var mapper: RoomMapper? = null
@@ -39,6 +40,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private var exportBytes: ByteArray? = null
   @Volatile private var savedAt = 0L
   @Volatile private var savedId: String? = null
+  @Volatile private var generation = 0
+  @Volatile private var saveFailed = false
 
   private fun label(value: String) = TextView(activity).apply {
     text=value; textSize=14f; setTextColor(Color.WHITE); setPadding(12,8,12,8)
@@ -197,6 +200,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       while (next != null) {
         val current=next
         result=runCatching { write(current) }
+        saveFailed=result.isFailure
         synchronized(saveLock) {
           next=pendingSave; pendingSave=null
           if (next==null) saving=false
@@ -209,7 +213,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     }
   }
   private fun export() {
-    stopAndReset()
+    pauseOnly()
     val map=mapper?.snapshot() ?: run { toast("暂无地图"); return }
     io.execute {
       val result=runCatching { write(map); RoomMapCodec.encode(map) }
@@ -246,6 +250,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
 
   /** Before Session.configure. Called on UI thread while GL is stopped. */
   fun configure(session: Session,id: String,config: Config) {
+    generation++
     runCatching { anchor?.detach() }; anchor=null; stableImage=null; stableCount=0; stableSince=0
     sessionId=id
     if (freshMap) {
@@ -261,12 +266,13 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       } finally { bitmap.recycle() }
     }
   }
-  fun pause() { active=false; mapper?.invalidate(); if (::mapView.isInitialized) { mapView.position=null; mapView.forward=null; mapView.invalidate(); state.text="扫描已暂停，当前位置无效。地图可保存或重新打开。" } }
+  fun pause() { generation++; active=false; mapper?.invalidate(); if (::mapView.isInitialized) { mapView.position=null; mapView.forward=null; mapView.invalidate(); state.text="扫描已暂停，当前位置无效。地图可保存或重新打开。" } }
   fun close() { io.shutdown() }
   fun report(): Map<String,Any?>? = mapper?.summary()?.let { it + mapOf("lastSavedAt" to if (it["mapId"]==savedId) savedAt else 0L) }
   fun canStart() = mapper != null && !saving
   /** GL thread, throttled by the host to 2 Hz. */
   fun frame(frame: Frame, sample: DepthSamples.Result?, depthNs: Long) {
+    val token=generation
     val current=mapper ?: return
     val tracking=frame.camera.trackingState==TrackingState.TRACKING
     val hasReference=current.snapshotReference()
@@ -305,7 +311,10 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       else if (hasReference) "等待固定参照图：请让整张实物图像占画面至少四分之一，保持约两秒。"
       else "旧地图仅供查看：未登记固定参照图，不能在新会话中恢复坐标。"
     activity.runOnUiThread {
-      if (!activity.isDestroyed) { render(map,text); mapView.position=position; mapView.forward=direction; mapView.invalidate() }
+      if (!activity.isDestroyed && token==generation) {
+        render(map,text + if (saveFailed) "\n最近保存失败，请检查存储空间并重新保存。" else "")
+        mapView.position=position; mapView.forward=direction; mapView.invalidate()
+      }
     }
   }
   private fun RoomMapper.snapshotReference() = referenceEnabled()
@@ -333,8 +342,10 @@ internal class SurfaceMapView(activity: Activity): View(activity) {
     val minX=min(-1f,xs.minOrNull() ?: -1f); val maxX=max(1f,xs.maxOrNull() ?: 1f)
     val minZ=min(-1f,zs.minOrNull() ?: -1f); val maxZ=max(1f,zs.maxOrNull() ?: 1f)
     val scale=min((width-70)/max(2f,maxX-minX),(height-65)/max(2f,maxZ-minZ))
-    fun x(v: Float)=35+(v-minX)*scale
-    fun z(v: Float)=20+(v-minZ)*scale
+    val left=(width-(maxX-minX)*scale)/2
+    val top=(height-40-(maxZ-minZ)*scale)/2
+    fun x(v: Float)=left+(v-minX)*scale
+    fun z(v: Float)=top+(v-minZ)*scale
     paint.color=Color.rgb(40,55,66); paint.strokeWidth=1f
     for (i in floor(minX).toInt()..ceil(maxX).toInt()) canvas.drawLine(x(i.toFloat()),z(minZ),x(i.toFloat()),z(maxZ),paint)
     for (i in floor(minZ).toInt()..ceil(maxZ).toInt()) canvas.drawLine(x(minX),z(i.toFloat()),x(maxX),z(i.toFloat()),paint)

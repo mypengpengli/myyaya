@@ -104,7 +104,9 @@ class NavigationProbeActivity : Activity() {
       .put("autonomousMotionEnabled", false).put("mapPersisted", false)
       .put("depthPollIntervalMs", 500).put("position", JSONObject.NULL).put("running", false)
     mapping = intent.getBooleanExtra("mapping", false)
-    if (mapping) roomMap = RoomMapPanel(this) { resetMapSession() }
+    if (mapping) roomMap = RoomMapPanel(this, { resetMapSession() }, {
+      userWantsRunning = false; pauseCapture("map-export-paused")
+    })
     buildUi()
     record(JSONObject().put("event", "opened").put("trackingState", "NOT_STARTED"))
   }
@@ -339,7 +341,8 @@ class NavigationProbeActivity : Activity() {
       .put("trackingState", "PAUSED").put("position", JSONObject.NULL)
       .put("quaternion", JSONObject.NULL).put("depthFresh", false).put("depthAgeMs", JSONObject.NULL)
       .put("depthTimestampNs", JSONObject.NULL).put("depthValidRatio", JSONObject.NULL)
-      .put("depthMedianMm", JSONObject.NULL).put("depthNearP05Mm", JSONObject.NULL))
+      .put("depthMedianMm", JSONObject.NULL).put("depthNearP05Mm", JSONObject.NULL)
+      .put("roomMap", roomMap?.report()?.let { JSONObject(it) } ?: JSONObject.NULL))
   }
 
   override fun onPause() {
@@ -612,7 +615,9 @@ class NavigationProbeActivity : Activity() {
         }
         if (mapping) {
           roomMap?.frame(frame, mapSample, mapDepthNs)
-          row.put("roomMap", roomMap?.report()?.let { JSONObject(it) } ?: JSONObject.NULL)
+          val mapReport = roomMap?.report()
+          row.put("roomMap", mapReport?.let { JSONObject(it) } ?: JSONObject.NULL)
+            .put("mapPersisted", (mapReport?.get("lastSavedAt") as? Long ?: 0L) > 0)
           if (now - lastMapAutosave > 15_000) {
             lastMapAutosave = now
             runOnUiThread { if (running && !isDestroyed) roomMap?.save(true) }
