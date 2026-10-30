@@ -101,4 +101,21 @@ class RoomMapTest {
     m.snapshot().voxels.single()[3]=0
     assertEquals(1,m.snapshot().voxels.single()[3])
   }
+  @Test fun savedImageTransformIsNotCurrentSessionAlignment() {
+    val original=mapper(true); original.alignReference("a",pose()); original.observePose("a",pose(1f),true)
+    val reloaded=RoomMapper(RoomMapCodec.decode(RoomMapCodec.encode(original.snapshot())))
+    reloaded.bindSession("b")
+    assertEquals(true,reloaded.summary()["savedReferenceTransform"])
+    assertEquals(false,reloaded.summary()["referenceAligned"])
+    assertEquals(false,reloaded.summary()["localized"])
+    reloaded.alignReference("b",pose(5f)); reloaded.observePose("b",pose(6f),true)
+    assertEquals(true,reloaded.summary()["referenceAligned"])
+  }
+  @Test fun pausingReferenceMapClearsCurrentAlignmentWithoutErasingSavedRelation() {
+    val m=mapper(true); m.alignReference("a",pose()); m.observePose("a",pose(),true)
+    assertEquals(true,m.summary()["referenceAligned"])
+    m.invalidate()
+    assertEquals(false,m.summary()["referenceAligned"])
+    assertEquals(true,m.summary()["savedReferenceTransform"])
+  }
 }

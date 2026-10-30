@@ -252,6 +252,7 @@ function RootLayoutNav() {
           <Stack.Screen name="model-settings" options={{ headerShown: false, animation: "slide_from_right" }} />
           <Stack.Screen name="search-settings" options={{ headerShown: false, animation: "slide_from_right" }} />
           <Stack.Screen name="skills" options={{ headerShown: false, animation: "slide_from_right" }} />
+          <Stack.Screen name="room-map" options={{ headerShown: false, animation: "slide_from_right" }} />
           <Stack.Screen name="artifacts" options={{ headerShown: false, animation: "slide_from_right" }} />
         </Stack>
         {appMode === 'local' && !onboardingVisible ? <RecordingOverlay /> : null}

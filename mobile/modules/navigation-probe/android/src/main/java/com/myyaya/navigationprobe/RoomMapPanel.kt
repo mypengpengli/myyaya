@@ -33,6 +33,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private var stableCount = 0
   @Volatile private var referenceState = "NOT_SEEN"
   @Volatile private var referenceMethod = "NOT_SEEN"
+  @Volatile private var knownReferenceImages = 0
   private var name = ""
   private lateinit var title: TextView
   private lateinit var state: TextView
@@ -251,7 +252,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   /** Before Session.configure. Called on UI thread while GL is stopped. */
   fun configure(session: Session,id: String,config: Config) {
     generation++
-    referenceState="NOT_SEEN"; referenceMethod="NOT_SEEN"
+    referenceState="NOT_SEEN"; referenceMethod="NOT_SEEN"; knownReferenceImages=0
     runCatching { anchor?.detach() }; anchor=null; stableImage=null; stableCount=0; stableSince=0
     sessionId=id
     if (freshMap) {
@@ -270,10 +271,11 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   fun pause() { generation++; active=false; mapper?.invalidate(); if (::mapView.isInitialized) { mapView.position=null; mapView.forward=null; mapView.invalidate(); state.text="扫描已暂停，当前位置无效。地图可保存或重新打开。" } }
   fun close() { io.shutdown() }
   fun report(): Map<String,Any?>? = mapper?.summary()?.let { it + mapOf("lastSavedAt" to if (it["mapId"]==savedId) savedAt else 0L,
-    "referenceTrackingState" to referenceState,"referenceTrackingMethod" to referenceMethod,"stableReferenceSamples" to stableCount) }
+    "referenceTrackingState" to referenceState,"referenceTrackingMethod" to referenceMethod,
+    "knownReferenceImages" to knownReferenceImages,"stableReferenceSamples" to stableCount) }
   fun canStart() = mapper != null && !saving
   /** GL thread, throttled by the host to 2 Hz. */
-  fun frame(frame: Frame, sample: DepthSamples.Result?, depthNs: Long) {
+  fun frame(session: Session, frame: Frame, sample: DepthSamples.Result?, depthNs: Long) {
     val token=generation
     val current=mapper ?: return
     val tracking=frame.camera.trackingState==TrackingState.TRACKING
@@ -281,11 +283,18 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     if (!tracking) { anchor?.detach(); anchor=null; stableImage=null; stableCount=0 }
     if (anchor?.trackingState==TrackingState.STOPPED) { anchor?.detach(); anchor=null; stableImage=null; stableCount=0 }
     if (hasReference && tracking && anchor==null) {
-      val updated=frame.getUpdatedTrackables(AugmentedImage::class.java)
-      updated.firstOrNull()?.let { referenceState=it.trackingState.name; referenceMethod=it.trackingMethod.name }
-      val image=updated.firstOrNull {
+      // Frame.getUpdatedTrackables contains only this frame's changes. Polling
+      // at 2 Hz can miss a transition from the 30 Hz Session.update loop.
+      // Consult the current session's known objects, never a previous session.
+      val known=session.getAllTrackables(AugmentedImage::class.java).filter {
+        it.name=="room-reference" && it.trackingState!=TrackingState.STOPPED
+      }
+      knownReferenceImages=known.size
+      val image=known.firstOrNull {
         it.trackingState==TrackingState.TRACKING && it.trackingMethod==AugmentedImage.TrackingMethod.FULL_TRACKING
       }
+      (image ?: known.firstOrNull())?.let { referenceState=it.trackingState.name; referenceMethod=it.trackingMethod.name }
+        ?: run { referenceState="NOT_SEEN"; referenceMethod="NOT_SEEN" }
       if (image==null) { stableImage=null; stableCount=0 }
       else {
         val pose=rigid(image.centerPose); val previous=stableImage

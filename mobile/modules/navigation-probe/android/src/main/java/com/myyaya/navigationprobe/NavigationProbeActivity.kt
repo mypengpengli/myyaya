@@ -614,7 +614,7 @@ class NavigationProbeActivity : Activity() {
           }
         }
         if (mapping) {
-          roomMap?.frame(frame, mapSample, mapDepthNs)
+          roomMap?.frame(current, frame, mapSample, mapDepthNs)
           val mapReport = roomMap?.report()
           row.put("roomMap", mapReport?.let { JSONObject(it) } ?: JSONObject.NULL)
             .put("mapPersisted", (mapReport?.get("lastSavedAt") as? Long ?: 0L) > 0)

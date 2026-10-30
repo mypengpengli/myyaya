@@ -64,7 +64,9 @@ internal class RoomMapper(initial: RoomMapData) {
   @Synchronized fun referenceEnabled() = data.referenceJpeg.isNotEmpty()
   @Synchronized fun summary(): Map<String, Any?> = mapOf("mapId" to data.id,"mapName" to data.name,
     "surfaceCells" to cells.size,"pathSamples" to path.size,"places" to places.map { it.name },
-    "fixedReference" to data.referenceJpeg.isNotEmpty(),"referenceAligned" to (data.imageFromMap != null),
+    "fixedReference" to data.referenceJpeg.isNotEmpty(),
+    "savedReferenceTransform" to (data.imageFromMap != null),
+    "referenceAligned" to (data.referenceJpeg.isNotEmpty() && worldFromMap != null && livePosition != null),
     "localized" to (livePosition != null),"position" to livePosition?.toList(),
     "acceptedDepthFrames" to acceptedFrames,"rejectedDepthFrames" to rejectedFrames,
     "freeSpaceInferred" to false,"motorControl" to false)
