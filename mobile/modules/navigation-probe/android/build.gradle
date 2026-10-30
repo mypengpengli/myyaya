@@ -1,0 +1,17 @@
+apply plugin: 'com.android.library'
+apply plugin: 'expo-module-gradle-plugin'
+
+group = 'com.myyaya.navigationprobe'
+version = '1.0.0'
+
+expoModule { canBePublished false }
+
+android {
+  namespace 'com.myyaya.navigationprobe'
+  defaultConfig { minSdkVersion 24 }
+}
+
+dependencies {
+  implementation 'com.google.ar:core:1.48.0'
+  testImplementation 'junit:junit:4.13.2'
+}

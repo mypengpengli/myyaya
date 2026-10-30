@@ -1,5 +1,7 @@
 # Building My LOOI
 
+The optional Android ARCore room-vision probe is a local Expo module under `modules/navigation-probe`. It requires the Google Maven dependency `com.google.ar:core:1.48.0`; Google Play Services for AR is installed separately on the phone. After prebuild, run `:navigation-probe:testReleaseUnitTest` with the same configured signing/build environment. See the [probe guide](../docs/NAVIGATION-PROBE.md).
+
 ## myyaya Hermes integration APK on Windows
 
 The first implementation scope and device checks are in [APK iteration 1](../docs/APK-ITERATION-1.md).

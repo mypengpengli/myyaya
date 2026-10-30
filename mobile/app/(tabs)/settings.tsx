@@ -4,6 +4,7 @@ import Constants from "expo-constants";
 import { useFocusEffect } from "expo-router";
 
 import { DeviceShell } from "@/src/ui/DeviceShell";
+import { NavigationProbeSettings } from "@/src/navigation/NavigationProbeSettings";
 import { looiTheme } from "@/src/ui/looi-theme";
 import { useUserStore, type ConversationMode, type CustomVoiceCommandAction, type FacePaletteId, type FaceStyleId, type VoiceCommandLanguage } from "@/src/store/user";
 import { voiceRuntime } from "@/src/perceivers/voice-runtime";
@@ -641,6 +642,8 @@ export default function SettingsScreen() {
         {robotUi.saved ? <Action label={t("settings.forgetRobot")} onPress={forgetRobot} secondary /> : null}
         {robotUi.result ? <Text style={styles.result}>{robotUi.result}</Text> : null}
       </Section>
+
+      <NavigationProbeSettings />
 
       <Section title={t("settings.helpGuide")}>
         <Text style={styles.help}>{t("settings.helpGuideText")}</Text>

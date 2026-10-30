@@ -34,4 +34,6 @@ OpenAI model weights are not distributed with My LOOI. Realtime models and voice
 
 ## JavaScript and Android dependencies
 
+The optional Android room-vision probe uses `com.google.ar:core:1.48.0`. The SDK is provided under the [ARCore Additional Terms of Service](https://developers.google.com/ar/develop/terms), as identified by its Maven POM; it is not covered by this application's MIT license. ARCore functionality is provided by Google and its use is subject to the current [Google Terms of Service](https://policies.google.com/terms) and [Google Privacy Policy](https://policies.google.com/privacy). The probe displays this notice. Google Play Services for AR is installed separately and is not redistributed inside this APK. RTAB-Map, OpenBot and AprilTag are research candidates, not bundled navigation dependencies in this iteration.
+
 The application also includes packages resolved through pnpm, Expo/React Native autolinking, and Gradle. Each dependency remains subject to its own license. A final public APK should receive a binary/license inventory audit before release.
