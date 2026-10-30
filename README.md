@@ -8,7 +8,7 @@
 
 **[下载最新 APK](https://github.com/mypengpengli/myyaya/releases/latest)**
 
-支持 Android 7.0 及以上 ARM64 手机，横屏使用。本轮在小米 12 Pro / HyperOS 3 和 LOOI 上验证；具体版本、安装包与校验文件以 Release 页面为准。当前版本为 **2.1.171**，新增[房间表面地图](docs/ROOM-MAPS.md)；[手机验收记录](docs/PHONE-CHECK-2026-10-30.md)、[此前手机验收](docs/PHONE-CHECK-2026-10-29.md)与[功能完成度](docs/FEATURE-COMPLETION-2026-10-28.md)分别说明已验证范围。
+支持 Android 7.0 及以上 ARM64 手机，横屏使用。本轮在小米 12 Pro / HyperOS 3 和 LOOI 上验证；具体版本、安装包与校验文件以 Release 页面为准。当前版本为 **2.1.172**，新增[参照图四角校正](docs/ROOM-MAPS.md)；[手机验收记录](docs/PHONE-CHECK-2026-10-30.md)、[此前手机验收](docs/PHONE-CHECK-2026-10-29.md)与[功能完成度](docs/FEATURE-COMPLETION-2026-10-28.md)分别说明已验证范围。
 
 ## 开始使用
 
@@ -58,6 +58,8 @@
 房间地图优先利用现有手机，不先购买雷达。170 已在小米 12 Pro 上取得约 30 FPS 定位与带置信度的原始深度；171 增加本地表面地图、保存/重开、地点标记和固定参照图辅助定位代码。未设参照图的旧地图仅供查看，不能沿用旧坐标；该地图还不是可通行地图，没有自主行驶。Google Play Services for AR 单独安装。后续仍按后摄观察方向倒车、到点停车后再转向面对用户的方案进行标定。见[地图使用](docs/ROOM-MAPS.md)、[探针使用](docs/NAVIGATION-PROBE.md)与[导航方案](docs/PHONE-FIRST-NAVIGATION.md)。
 
 171 真机已验证短程表面融合、升级后恢复 1534 个表面体素与 117 个轨迹点、地点冷启动恢复及地图导出。固定照片辅助找回位置的代码已加入，实物定位精度、整房间建图和自主导航仍需后续验证与开发。
+
+172 支持选择实物照片，按四角校正、排除背景，再输入实际宽高并预览登记。真机已通过相册选图、校正预览与登记；首次识别需要整张实物图像完整进入后摄画面，实物跨会话找回位置仍待验收。
 
 ## 开发文档
 

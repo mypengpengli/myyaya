@@ -1,6 +1,14 @@
 # 换电脑继续开发
 
-## 最新：2026-10-30，2.1.171
+## 最新：2026-10-30，2.1.172
+
+172 已增加实物参照图四角校正和 EXIF 方向：系统选图后进入原生编辑页，拖动 TL/TR/BR/BL 四角、填写宽高，确定性透视校正并预览登记。参数/四角验证 5 项，加此前 20 项共 25 项原生测试通过；[源码 CI](https://github.com/mypengpengli/myyaya/actions/runs/40995147223) 通过，源码 `93ce17f4ad7d1cc5ffaa9c5d766a205d93ecf75a`。
+
+最终包已安装，手机新建 `Coupon172`，用用户相册里的代金券照片完成校正、预览与登记，输入宽15cm、高约27cm。用户把实物放在鼠标旁，必须保持位置不动；当前后摄仅部分看到券，ARCore NOT_SEEN，坐标无效、未写入地图。已请求用户手动将整张券置于后摄画面中并稳住，等待首次识别后再保存/结束进程/重定位。用户照片在忽略目录和手机内，未进入源码或 APK。
+
+继续时先检查手机最新报告 `files/navigation-probe/latest.json` 的 roomMap.referenceTrackingState、referenceTrackingMethod、stableReferenceSamples、referenceAligned、localized。NOT_SEEN 或旧地图能显示都不代表重定位通过。首次识别尚待实物入镜，跨会话定位和精度不得提前标通过；当前没有任何自主导航工具或运动。
+
+## 171 阶段记录（历史）
 
 171 新增 Kotlin 本地房间表面建图、地图/地点文件、固定参照图辅助定位与地图管理页。设置 → 房间地图 → 打开房间地图，原视觉探针入口保留。数据在应用内部 `files/room-maps`，导出为 `.yayamap`，CRC32 与原子替换保护；单个地图有点数/地点数/文件长度上限。具体坐标、原始深度投影和参照图流程见 [ROOM-MAPS](ROOM-MAPS.md)。
 
