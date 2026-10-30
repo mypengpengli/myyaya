@@ -106,4 +106,22 @@ class TerrainAnalysisTest {
     assertThrows(IllegalArgumentException::class.java) { GroundPlane(floatArrayOf(0f,0f,0f),floatArrayOf(0f,-1f,0f)) }
     assertThrows(IllegalArgumentException::class.java) { GroundPlane(floatArrayOf(0f,0f,0f),floatArrayOf(1f,0f,0f)) }
   }
+  @Test fun tabletopExperimentIsNeverReportedAsConfirmedFloorOrFloorCandidates() {
+    val a=analyzer(); a.selectGround(plane,false)
+    val r=observe(a,patch()); val report=r.report()
+    assertEquals(false,report["groundSelected"]); assertEquals(true,report["referenceSurfaceSelected"])
+    assertEquals("bench-test",report["surfaceRole"]); assertEquals(0,report["candidateCenterCells"])
+    assertTrue((report["benchCandidateCenterCells"] as Int)>0); assertEquals(false,report["motionAuthorized"])
+    a.reset(); a.selectGround(plane,true)
+    val floor=observe(a,patch(),4_000_000_000L).report()
+    assertEquals("floor-confirmed",floor["surfaceRole"]); assertEquals(true,floor["groundSelected"])
+    assertEquals(0,floor["benchCandidateCenterCells"])
+  }
+  @Test fun lowMountedCameraCanObserveAPlaneWithoutPretendingItIsFloor() {
+    val a=analyzer(); a.selectGround(plane,false)
+    val low=RigidPose(floatArrayOf(0f,.05f,0f),camera.q)
+    val r=a.update(low,plane,1_000_000_000L,1_000_000_000L,patch())
+    assertEquals("OBSERVING",r.status); assertEquals(.05f,r.cameraHeight!!,.00001f)
+    assertEquals(false,r.report()["groundSelected"])
+  }
 }

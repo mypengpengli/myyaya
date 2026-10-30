@@ -43,7 +43,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   @Volatile private var groundArmed=false
   @Volatile private var horizontalPlanes=0
   @Volatile private var groundTap: FloatArray?=null
-  @Volatile private var pendingGround: Plane?=null
+  private data class GroundChoice(val plane: Plane,val actualFloor: Boolean)
+  @Volatile private var pendingGround: GroundChoice?=null
   @Volatile private var selectedGround: Plane?=null
   private lateinit var terrainState: TextView
   private lateinit var terrainView: TerrainView
@@ -74,14 +75,14 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     title=label("房间表面地图"); addView(title)
     state=label("新建地图后开始扫描。青色是观测到的表面，黑色是未知，不代表可通行区域。")
     val terrainActions=LinearLayout(activity)
-    terrainActions.addView(button("点选地面") {
+    terrainActions.addView(button("点选平面") {
       if (!active) toast("请先开始扫描并恢复当前地图定位")
-      else { groundArmed=true; terrainState.text="请点击左侧后摄画面中的实际地面。不要选择桌面或架子。" }
+      else { groundArmed=true; terrainState.text="请点击左侧画面中的地板或测试台面，随后确认用途。" }
     },LinearLayout.LayoutParams(0,-2,1f))
     terrainActions.addView(button("底座尺寸") { editEnvelope() },LinearLayout.LayoutParams(0,-2,1f))
     terrainActions.addView(button("清除判断") { clearTerrain(); renderTerrain() },LinearLayout.LayoutParams(0,-2,1f))
     addView(terrainActions)
-    terrainState=label("开始扫描后点选实际地面；灰未知、青地面、红障碍、橙落差、绿候选。").apply { textSize=12f }
+    terrainState=label("开始扫描后点选平面并确认用途；灰未知、青平面、红障碍、橙落差、绿候选。").apply { textSize=12f }
     addView(terrainState)
     terrainView=TerrainView(activity); addView(terrainView,LinearLayout.LayoutParams(-1,(130*resources.displayMetrics.density).toInt()))
     addView(label("绿色仅为候选，实际通行范围待验证；本页不会驱动底座。").apply { textSize=11f })
@@ -130,7 +131,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
         if (value==null) { toast("请在提示范围内填写完整长、宽、高和余量"); return@setOnClickListener }
         activity.getSharedPreferences("terrain-envelope",0).edit().putFloat("width",value.width).putFloat("length",value.length)
           .putFloat("height",value.height).putFloat("margin",value.margin).apply()
-        terrain.setEnvelope(value); terrainSnapshot=TerrainSnapshot(terrain.hasGround(),"OBSERVING",envelope=value)
+        terrain.setEnvelope(value); terrainSnapshot=terrainSnapshot.copy(status="OBSERVING",cells=emptyList(),envelope=value)
         renderTerrain(); dialog.dismiss()
       }
     }
@@ -151,8 +152,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       "LOCALIZATION_REQUIRED" -> "定位无效，已清除本次判断。请恢复定位后重新点选地面。"
       "GROUND_LOST" -> "所选平面跟踪已丢失，请重新点选实际地面。"
       "CAMERA_HEIGHT_INVALID" -> "相机不在所选地面上方的有效高度内，请重新确认实际地面。"
-      "SELECT_GROUND","CLOCK_RESET" -> "请点选实际地面，再缓慢移动手机补充原始深度。"
-      else -> "地面 ${r["groundCells"]} · 障碍 ${r["obstacleCells"]} · 落差 ${r["dropCells"]} · 未定 ${r["uncertainCells"]} · 候选 ${r["candidateCenterCells"]}\n相机距所选平面 ${s.cameraHeight?.let { "%.0f厘米".format(it*100) } ?: "待测"}；${if (s.envelope==null) "请填写底座尺寸" else "本页仅显示判断"}"
+      "SELECT_GROUND","CLOCK_RESET" -> "请点选地板或测试台面，确认用途后缓慢扫描。"
+      else -> "${if (s.floorConfirmed) "地面判断" else "台面试验（非地板）"} · 平面 ${r["groundCells"]} / 障碍 ${r["obstacleCells"]} / 未定 ${r["uncertainCells"]} / 候选 ${if (s.floorConfirmed) r["candidateCenterCells"] else r["benchCandidateCenterCells"]}\n相机距平面 ${s.cameraHeight?.let { "%.0f厘米".format(it*100) } ?: "待测"}；${if (s.envelope==null) "请填写底座尺寸" else "本页仅显示判断"}"
     }
     if (!groundArmed) terrainState.text=message+"\n灰未知 / 青地面 / 红障碍 / 橙落差 / 绿候选"
     terrainView.snapshot=s; terrainView.invalidate()
@@ -516,18 +517,20 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
         val cameraHeight=frame.camera.pose.ty()-requireNotNull(hit).hitPose.ty()
         activity.runOnUiThread {
           if (token!=generation || activity.isDestroyed) return@runOnUiThread
-          AlertDialog.Builder(activity).setTitle("确认实际地面")
-            .setMessage("这是实际地面，而不是桌面、架子或台阶吗？\n相机距所选平面约%.0f厘米（未校准）。".format(cameraHeight*100))
+          AlertDialog.Builder(activity).setTitle("确认平面用途")
+            .setMessage("真正地板请选择“实际地面”，桌面请选择“台面试验”。\n相机距所选平面约%.0f厘米（未校准）。".format(cameraHeight*100))
             .setNegativeButton("重新选择") { _,_ -> if (token==generation) groundArmed=true }
-            .setPositiveButton("确认是地面") { _,_ -> if (token==generation && active) pendingGround=plane }.show()
+            .setNeutralButton("台面试验") { _,_ -> if (token==generation && active) pendingGround=GroundChoice(plane,false) }
+            .setPositiveButton("实际地面") { _,_ -> if (token==generation && active) pendingGround=GroundChoice(plane,true) }.show()
         }
       }
     }
-    pendingGround?.let { plane ->
+    pendingGround?.let { choice ->
       pendingGround=null
+      val plane=choice.plane
       val ground=current.poseInMap(sessionId,rigid(plane.centerPose))?.let { runCatching { GroundPlane.fromPose(it) }.getOrNull() }
       if (plane.trackingState==TrackingState.TRACKING && ground!=null) {
-        selectedGround=plane; terrain.selectGround(ground)
+        selectedGround=plane; terrain.selectGround(ground,choice.actualFloor)
       }
     }
     var plane=selectedGround ?: run {

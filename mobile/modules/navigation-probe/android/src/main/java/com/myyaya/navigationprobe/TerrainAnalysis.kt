@@ -28,11 +28,13 @@ internal data class GroundPlane(val origin: FloatArray,val normal: FloatArray) {
 internal enum class TerrainKind { GROUND, OBSTACLE, DROP, UNCERTAIN }
 internal data class TerrainCell(val x: Int,val z: Int,val kind: TerrainKind,val candidate: Boolean=false)
 internal data class TerrainSnapshot(val groundSelected: Boolean,val status: String,val cells: List<TerrainCell> = emptyList(),
-  val camera: RigidPose? = null,val cameraHeight: Float? = null,val envelope: RobotEnvelope? = null) {
-  fun report(): Map<String,Any?> = mapOf("groundSelected" to groundSelected,"status" to status,
+  val camera: RigidPose? = null,val cameraHeight: Float? = null,val envelope: RobotEnvelope? = null,val floorConfirmed: Boolean=true) {
+  fun report(): Map<String,Any?> = mapOf("groundSelected" to (groundSelected && floorConfirmed),
+    "referenceSurfaceSelected" to groundSelected,"surfaceRole" to if (!groundSelected) "none" else if (floorConfirmed) "floor-confirmed" else "bench-test","status" to status,
     "groundCells" to cells.count { it.kind==TerrainKind.GROUND },"obstacleCells" to cells.count { it.kind==TerrainKind.OBSTACLE },
     "dropCells" to cells.count { it.kind==TerrainKind.DROP },"uncertainCells" to cells.count { it.kind==TerrainKind.UNCERTAIN },
-    "candidateCenterCells" to cells.count { it.candidate },"cameraHeightMeters" to cameraHeight,
+    "candidateCenterCells" to if (floorConfirmed) cells.count { it.candidate } else 0,
+    "benchCandidateCenterCells" to if (!floorConfirmed) cells.count { it.candidate } else 0,"cameraHeightMeters" to cameraHeight,
     "cellMeters" to TerrainAnalysis.CELL,"evidenceTtlMs" to TerrainAnalysis.TTL/1_000_000,
     "robotDimensionsSet" to (envelope!=null),"robotWidthMeters" to envelope?.width,"robotLengthMeters" to envelope?.length,
     "robotHeightMeters" to envelope?.height,"marginMeters" to envelope?.margin,"footprintRadiusMeters" to envelope?.radius,
@@ -47,12 +49,13 @@ internal class TerrainAnalysis {
     var maxHeight: Float=Float.NEGATIVE_INFINITY,var obstacle: Boolean=false,var drop: Boolean=false,var uncertain: Boolean=false)
   private val cells=HashMap<Pair<Int,Int>,Evidence>()
   private var ground: GroundPlane?=null
+  private var floorConfirmed=false
   private var envelope: RobotEnvelope?=null
   private var lastDepth=0L
   private var lastTime=0L
-  @Synchronized fun reset() { cells.clear(); ground=null; lastDepth=0; lastTime=0 }
+  @Synchronized fun reset() { cells.clear(); ground=null; floorConfirmed=false; lastDepth=0; lastTime=0 }
   @Synchronized fun setEnvelope(value: RobotEnvelope?) { envelope=value; cells.clear(); lastDepth=0 }
-  @Synchronized fun selectGround(value: GroundPlane) { cells.clear(); ground=value; lastDepth=0 }
+  @Synchronized fun selectGround(value: GroundPlane,actualFloor: Boolean=true) { cells.clear(); ground=value; floorConfirmed=actualFloor; lastDepth=0 }
   @Synchronized fun hasGround()=ground!=null
 
   /** Repeated/reprojected or old depth never increases evidence votes or refreshes TTL. */
@@ -68,9 +71,9 @@ internal class TerrainAnalysis {
     val datum=ground!!
     prune(now,camera)
     val height=datum.distance(camera.t)
-    if (height !in .08f..2.5f) {
+    if (height !in .03f..2.5f) {
       cells.clear()
-      return TerrainSnapshot(true,"CAMERA_HEIGHT_INVALID",camera=camera,cameraHeight=height,envelope=envelope)
+      return TerrainSnapshot(true,"CAMERA_HEIGHT_INVALID",camera=camera,cameraHeight=height,envelope=envelope,floorConfirmed=floorConfirmed)
     }
     if (depth>0 && depth>lastDepth && depth<=now && now-depth<=250_000_000L) {
       lastDepth=depth
@@ -135,7 +138,7 @@ internal class TerrainAnalysis {
     } else emptyList()
     val result=kinds.map { (key,kind) -> TerrainCell(key.first,key.second,kind,
       radius!=null && kind==TerrainKind.GROUND && offsets.all { (x,z) -> kinds[(key.first+x) to (key.second+z)]==TerrainKind.GROUND }) }
-    return TerrainSnapshot(true,if (radius==null) "DIMENSIONS_REQUIRED" else "OBSERVING",result,camera,height,envelope)
+    return TerrainSnapshot(true,if (radius==null) "DIMENSIONS_REQUIRED" else "OBSERVING",result,camera,height,envelope,floorConfirmed)
   }
   companion object { const val CELL=.1f; const val RANGE=3f; const val TTL=3_000_000_000L; const val MAX_CELLS=4000 }
 }
