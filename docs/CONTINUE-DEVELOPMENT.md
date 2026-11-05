@@ -1,6 +1,6 @@
 # 换电脑继续开发
 
-## 开发中：2.1.178教路线与复走
+## 2.1.178预览版：教路线与复走，等待手机重连
 
 用户已授权按简化方案动手，并要求研究扫地机器人。新增[路线说明](TAUGHT-ROUTES.md)：Nav2分层思路、OpenBot手机/车体分工、Valetudo边界；没有把ROS2或OpenBot整套代码塞进APK，也未验证LOOI轮编码器。采用已教平整走廊先验+实时原始深度障碍停车，不再以实时完整绿格作为路线控制前提。普通地形诊断阈值保留。
 
@@ -10,7 +10,11 @@
 
 相机与IMU采用官方ARCore Recording/Playback，每份90秒/约100MB、保留3份；回放独立无电机。模型工具list_taught_routes/open_taught_route仅查真实路线、打开所属地图流程，首次仍需手机校验与启动。相机和普通语音由route-robot-session统一持有并释放，停止词不经过网络模型。
 
-96原生测试、navigation-robot与route-session行为测试已通过，tsc通过；其余源检查推进中，Windows下旧测试v2.1.122固定调用python3缺命令需由Linux CI验证，不要为此改无关业务。`.tools/build178-final.py`最终构建会同步到D:/mya；导出脚本`.tools/export-task178-apk.py`。需要最终源码提交后再导出/安装并核对手机hash。真实地面闭环尚未验收，此阶段没有发送履带或头部动作。
+96原生测试、navigation-robot与route-session行为测试、tsc已通过；主体源码6109d2f完整Linux CI成功，最终源码81cae42的[CI](https://github.com/mypengpengli/myyaya/actions/runs/42005572673)见链接。Windows旧测试v2.1.122固定调用python3缺命令，Linux已验证，不要为此改无关业务。最终`.tools/build178-final.py`成功；导出脚本`.tools/export-task178-apk.py`已执行，源码无未提交mobile变动。
+
+最终178源码`81cae42fb10db62fe6df72467a1262c074fce90f`，APK174420002字节，SHA256 `c211d656dc164678f272d433c0441ff0b5ca311189a1b3b4a74d1046ec1b1b6f`，源快照`0d68c8fa0168942a21abd99916d79ad19975d3a960998f737ac6ef59d6abb714`。原签名/16KB/ARM64/中文模型/独立JS/凭据排除通过。安装时ADB设备消失，尚未安装178；已询问用户重接USB并解锁，不能记为真机通过。178作为预览版，latest保持177。
+
+恢复手机后先用安装助手覆盖（不要卸载）并核对base.apk摘要，进入“教路线与复走”检查主Activity/Dialog、BLE所有权和停止按钮；先做静止相机/IMU录制及独立无电机回放，不能把已有NDJSON回放当作这项验收。本轮未发送履带或头部动作；实际地面、装稳/USB余量安排前不要在桌上点击方向校验或复走。真实地面闭环、停车距离、障碍实物对应尚未验收。新头部姿态需重新固定和方向校验。
 
 ## 最新：2026-11-05，2.1.177已发布
 

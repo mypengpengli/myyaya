@@ -8,6 +8,8 @@
 
 **[下载最新 APK](https://github.com/mypengpengli/myyaya/releases/latest)**
 
+导航联调另有 **[2.1.178 预览版](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.178)**：新增人工教路线、指定起点分步复走、障碍停车和本机相机/IMU录制回放。尚未完成178真机安装及地面实车验收，稳定版仍为177；使用范围与步骤见[教路线说明](docs/TAUGHT-ROUTES.md)。
+
 支持 Android 7.0 及以上 ARM64 手机，横屏使用。在小米 12 Pro / HyperOS 3 和 LOOI 上联调，具体安装包与校验文件以 Release 页面为准。当前版本为 **2.1.177**，改进扫描时的近处深度初始化，修复停稳后无法点选台面的流程；自主导航仍在开发。[最新实测](docs/PHONE-CHECK-2026-11-05.md)和[功能完成度](docs/FEATURE-COMPLETION-2026-10-28.md)列出已验证范围。
 
 ## 开始使用
