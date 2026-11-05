@@ -16,6 +16,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.*
@@ -59,6 +60,9 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   @Volatile private var selectedGround: Plane?=null
   private var fittedGround: GroundPlane?=null
   private var calibratedHeight: Float?=null
+  private var surfaceAnchor: Anchor?=null
+  private val surfaceAnchorsToRelease=ConcurrentLinkedQueue<Anchor>()
+  @Volatile private var surfaceAnchorState="NONE"
   @Volatile private var surfaceSource="NONE"
   private lateinit var terrainState: TextView
   private lateinit var terrainView: TerrainView
@@ -158,6 +162,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     dialog.show()
   }
   private fun clearTerrain(status: String="SELECT_GROUND") {
+    surfaceAnchor?.let { surfaceAnchorsToRelease.add(it) };surfaceAnchor=null;surfaceAnchorState="NONE"
     groundArmed=false; groundTap=null; pendingGround=null; pendingHeight=null;selectedGround=null;fittedGround=null;calibratedHeight=null;surfaceSource="NONE";terrain.reset()
     terrainSnapshot=TerrainSnapshot(false,status,envelope=readEnvelope())
     hybridReport=mapOf("status" to "WAITING")
@@ -170,7 +175,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       if (value>0) setText(java.lang.String.format(java.util.Locale.US,"%.1f",value*100))
     }
     val dialog=AlertDialog.Builder(activity).setTitle("镜头高度标定")
-      .setMessage("手机须固定在底座上，底座放平。填写镜头中心高度，不是整机高度；之后保持底座在同一平面上移动。\n由重力方向和实测高度建立参考面，仍需深度核对障碍。")
+      .setMessage("底座放平，在测量时的头部姿态填写镜头中心高度，不是整机高度。\n高度只用于建立初始参考面；之后抬头、低头或升降用实时相机位姿补偿，不强行保持同一镜头高度。跟踪丢失后需重新确认。")
       .setView(input).setNegativeButton("取消",null).setNeutralButton("台面试验",null).setPositiveButton("实际地面",null).create()
     dialog.setOnShowListener {
       fun choose(actualFloor: Boolean) {
@@ -493,11 +498,16 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     "knownReferenceImages" to knownReferenceImages,"stableReferenceSamples" to stableCount,
     "terrain" to (terrainSnapshot.report()+mapOf("trackedHorizontalPlanes" to horizontalPlanes,"surfaceSource" to surfaceSource,
       "calibratedCameraHeightMeters" to calibratedHeight,"hybridDepth" to hybridReport,
+      "surfaceAnchorTrackingState" to surfaceAnchorState,
       "depthCapture" to depthRecorder.report()))) }
   fun canStart() = mapper != null && !saving && !restoring
   /** GL thread, depth sampled at up to 10 Hz; view snapshots limited to 2 Hz. */
   fun frame(session: Session, frame: Frame, sample: DepthSamples.Result?, depthNs: Long,
     dense: DepthSamples.Result?=null,denseNs: Long=0) {
+    while (true) {
+      val old=surfaceAnchorsToRelease.poll() ?: break
+      runCatching { old.detach() }
+    }
     val token=generation
     val current=mapper ?: return
     val tracking=frame.camera.trackingState==TrackingState.TRACKING
@@ -547,7 +557,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       val intrinsics=frame.camera.textureIntrinsics; val f=intrinsics.focalLength; val c=intrinsics.principalPoint; val dim=intrinsics.imageDimensions
       current.fuse(sessionId,rigid(frame.camera.pose),sample,f[0],f[1],c[0],c[1],dim[0],dim[1],frame.timestamp,depthNs)
     }
-    if (located) analyzeTerrain(current,frame,sample,depthNs,token,dense,denseNs)
+    if (located) analyzeTerrain(session,current,frame,sample,depthNs,token,dense,denseNs)
     else clearTerrain("LOCALIZATION_REQUIRED")
     // Depth/terrain run at up to 10 Hz; map copies and Android view updates stay at 2 Hz.
     if (lastTerrainUiNs>0 && frame.timestamp>=lastTerrainUiNs && frame.timestamp-lastTerrainUiNs<500_000_000L) return
@@ -566,7 +576,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     }
   }
   /** GL thread only: ARCore planes are proposals, never automatically declared floor. */
-  private fun analyzeTerrain(current: RoomMapper,frame: Frame,sample: DepthSamples.Result?,depthNs: Long,token: Int,
+  private fun analyzeTerrain(session: Session,current: RoomMapper,frame: Frame,sample: DepthSamples.Result?,depthNs: Long,token: Int,
     dense: DepthSamples.Result?,denseNs: Long) {
     val tap=groundTap; groundTap=null
     if (tap!=null) {
@@ -604,21 +614,33 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
         }
       }
     }
+    val camera=current.poseInMap(sessionId,rigid(frame.camera.pose))
     pendingGround?.let { choice ->
       pendingGround=null
       val plane=choice.plane
       val ground=if (plane!=null) current.poseInMap(sessionId,rigid(plane.centerPose))?.let { runCatching { GroundPlane.fromPose(it) }.getOrNull() } else choice.fitted
       if ((plane==null || plane.trackingState==TrackingState.TRACKING) && ground!=null) {
+        surfaceAnchor?.let { surfaceAnchorsToRelease.add(it) };surfaceAnchor=null;surfaceAnchorState="NONE"
         selectedGround=plane;fittedGround=if (plane==null) ground else null;calibratedHeight=null
+        if (plane==null && camera!=null) {
+          val worldFromMap=rigid(frame.camera.pose).compose(camera.inverse())
+          val world=worldFromMap.point(ground.origin)
+          surfaceAnchor=runCatching { session.createAnchor(Pose.makeTranslation(world)) }.getOrNull()
+          surfaceAnchorState=surfaceAnchor?.trackingState?.name ?: "LOCAL_REFERENCE"
+        }
         surfaceSource=if (plane!=null) "ARCORE_PLANE" else "RAW_DEPTH_PATCH";terrain.selectGround(ground,choice.actualFloor)
       }
     }
-    val camera=current.poseInMap(sessionId,rigid(frame.camera.pose))
     pendingHeight?.let { choice ->
       pendingHeight=null
       if (camera!=null) {
-        calibratedHeight=choice.height;selectedGround=null;fittedGround=null;surfaceSource="MEASURED_HEIGHT"
-        terrain.selectGround(SurfaceReference.measuredHeight(camera,choice.height),choice.actualFloor)
+        calibratedHeight=choice.height;selectedGround=null;surfaceSource="MEASURED_HEIGHT"
+        fittedGround=SurfaceReference.measuredHeight(camera,choice.height)
+        surfaceAnchor?.let { surfaceAnchorsToRelease.add(it) }
+        val world=frame.camera.pose.translation.clone().apply { this[1]-=choice.height }
+        surfaceAnchor=runCatching { session.createAnchor(Pose.makeTranslation(world)) }.getOrNull()
+        surfaceAnchorState=surfaceAnchor?.trackingState?.name ?: "LOCAL_REFERENCE"
+        terrain.selectGround(fittedGround!!,choice.actualFloor)
       }
     }
     var plane=selectedGround
@@ -627,8 +649,11 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     }
     repeat(10) { plane?.subsumedBy?.let { plane=it } }
     selectedGround=plane
+    val reference=surfaceAnchor
+    if (reference!=null) surfaceAnchorState=reference.trackingState.name
     val ground=when {
-      calibratedHeight!=null && camera!=null -> SurfaceReference.measuredHeight(camera,calibratedHeight!!)
+      reference!=null && reference.trackingState==TrackingState.TRACKING -> current.poseInMap(sessionId,rigid(reference.pose))?.let { runCatching { GroundPlane.fromPose(it) }.getOrNull() }
+      reference!=null -> null
       plane!=null -> current.poseInMap(sessionId,rigid(plane!!.centerPose))?.let { runCatching { GroundPlane.fromPose(it) }.getOrNull() }
       else -> fittedGround
     }
