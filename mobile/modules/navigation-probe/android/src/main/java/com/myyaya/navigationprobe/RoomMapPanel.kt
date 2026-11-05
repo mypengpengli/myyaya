@@ -52,9 +52,14 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   @Volatile private var groundArmed=false
   @Volatile private var horizontalPlanes=0
   @Volatile private var groundTap: FloatArray?=null
-  private data class GroundChoice(val plane: Plane,val actualFloor: Boolean)
+  private data class GroundChoice(val plane: Plane?,val actualFloor: Boolean,val fitted: GroundPlane?=null)
+  private data class HeightChoice(val height: Float,val actualFloor: Boolean)
   @Volatile private var pendingGround: GroundChoice?=null
+  @Volatile private var pendingHeight: HeightChoice?=null
   @Volatile private var selectedGround: Plane?=null
+  private var fittedGround: GroundPlane?=null
+  private var calibratedHeight: Float?=null
+  @Volatile private var surfaceSource="NONE"
   private lateinit var terrainState: TextView
   private lateinit var terrainView: TerrainView
   private var capturedPhoto: File? = null
@@ -88,7 +93,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     terrainActions.addView(button("点选平面") {
       if (!active) toast("请先开始扫描并恢复当前地图定位")
       else { groundArmed=true; terrainState.text="请点击左侧画面中的地板或测试台面，随后确认用途。" }
-    },LinearLayout.LayoutParams(0,-2,1f))
+    }.apply { setOnLongClickListener { if (active) editCameraHeight() else toast("请先开始扫描");true } },LinearLayout.LayoutParams(0,-2,1f))
     terrainActions.addView(button("底座尺寸") { editEnvelope() },LinearLayout.LayoutParams(0,-2,1f))
     terrainActions.addView(button("清除判断") { clearTerrain(); renderTerrain() },LinearLayout.LayoutParams(0,-2,1f))
     terrainActions.addView(Button(activity).apply {
@@ -153,10 +158,31 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     dialog.show()
   }
   private fun clearTerrain(status: String="SELECT_GROUND") {
-    groundArmed=false; groundTap=null; pendingGround=null; selectedGround=null; terrain.reset()
+    groundArmed=false; groundTap=null; pendingGround=null; pendingHeight=null;selectedGround=null;fittedGround=null;calibratedHeight=null;surfaceSource="NONE";terrain.reset()
     terrainSnapshot=TerrainSnapshot(false,status,envelope=readEnvelope())
     hybridReport=mapOf("status" to "WAITING")
     activity.runOnUiThread { depthOverlay?.let { it.dots=emptyList();it.outlines=emptyList();it.invalidate() } }
+  }
+  private fun editCameraHeight() {
+    val input=EditText(activity).apply {
+      inputType=8194;setSingleLine();hint="主镜头中心距平面的垂直高度（厘米）"
+      val value=activity.getSharedPreferences("terrain-camera",0).getFloat("height",0f)
+      if (value>0) setText(java.lang.String.format(java.util.Locale.US,"%.1f",value*100))
+    }
+    val dialog=AlertDialog.Builder(activity).setTitle("镜头高度标定")
+      .setMessage("手机须固定在底座上，底座放平。填写镜头中心高度，不是整机高度；之后保持底座在同一平面上移动。\n由重力方向和实测高度建立参考面，仍需深度核对障碍。")
+      .setView(input).setNegativeButton("取消",null).setNeutralButton("台面试验",null).setPositiveButton("实际地面",null).create()
+    dialog.setOnShowListener {
+      fun choose(actualFloor: Boolean) {
+        val h=input.text.toString().toFloatOrNull()?.div(100)
+        if (h==null || !h.isFinite() || h !in .03f..2.5f) { input.error="请填写3～250厘米的实测镜头高度";return }
+        activity.getSharedPreferences("terrain-camera",0).edit().putFloat("height",h).apply()
+        pendingHeight=HeightChoice(h,actualFloor);dialog.dismiss()
+      }
+      dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener { choose(false) }
+      dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { choose(true) }
+    }
+    dialog.show()
   }
   fun cameraTapped(x: Float,y: Float): Boolean {
     if (!groundArmed || !x.isFinite() || !y.isFinite()) return false
@@ -170,7 +196,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       "GROUND_LOST" -> "所选平面跟踪已丢失，请重新点选实际地面。"
       "CAMERA_HEIGHT_INVALID" -> "相机不在所选地面上方的有效高度内，请重新确认实际地面。"
       "SELECT_GROUND","CLOCK_RESET" -> if (horizontalPlanes>0) "已检测水平面 $horizontalPlanes 个，请点击青色边界内的地板或台面并确认用途。" else "尚在检测水平面，请缓慢扫描后点选地板或台面。"
-      else -> "${if (s.floorConfirmed) "地面判断" else "台面试验（非地板）"} · 已选水平面\n已测平面网格 ${r["groundCells"]} / 障碍 ${r["obstacleCells"]} / 候选 ${if (s.floorConfirmed) r["candidateCenterCells"] else r["benchCandidateCenterCells"]} · 相机高 ${s.cameraHeight?.let { "%.0f厘米".format(it*100) } ?: "待测"}"
+      else -> "${if (s.floorConfirmed) "地面判断" else "台面试验（非地板）"} · ${when (surfaceSource) { "MEASURED_HEIGHT" -> "已测镜头高度参考面";"RAW_DEPTH_PATCH" -> "深度邻域拟合参考面";else -> "已选水平面" }}\n已测平面网格 ${r["groundCells"]} / 障碍 ${r["obstacleCells"]} / 候选 ${if (s.floorConfirmed) r["candidateCenterCells"] else r["benchCandidateCenterCells"]} · 相机高 ${s.cameraHeight?.let { "%.0f厘米".format(it*100) } ?: "待测"}"
     }
     val sampling=when (s.depthEvidence.blockingReason) {
       "DEPTH_UNAVAILABLE","DEPTH_STALE" -> "深度尚未更新，请缓慢左右平移。"
@@ -465,7 +491,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     "referenceTrackingState" to referenceState,"referenceTrackingMethod" to referenceMethod,
     "configuredReferenceImages" to configuredReferenceImages,
     "knownReferenceImages" to knownReferenceImages,"stableReferenceSamples" to stableCount,
-    "terrain" to (terrainSnapshot.report()+mapOf("trackedHorizontalPlanes" to horizontalPlanes,"hybridDepth" to hybridReport,
+    "terrain" to (terrainSnapshot.report()+mapOf("trackedHorizontalPlanes" to horizontalPlanes,"surfaceSource" to surfaceSource,
+      "calibratedCameraHeightMeters" to calibratedHeight,"hybridDepth" to hybridReport,
       "depthCapture" to depthRecorder.report()))) }
   fun canStart() = mapper != null && !saving && !restoring
   /** GL thread, depth sampled at up to 10 Hz; view snapshots limited to 2 Hz. */
@@ -543,41 +570,69 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     dense: DepthSamples.Result?,denseNs: Long) {
     val tap=groundTap; groundTap=null
     if (tap!=null) {
-      val hit=frame.hitTest(tap[0],tap[1]).firstOrNull {
+      val hits=frame.hitTest(tap[0],tap[1])
+      val hit=hits.firstOrNull {
         val plane=it.trackable as? Plane
         plane!=null && plane.trackingState==TrackingState.TRACKING && plane.type==Plane.Type.HORIZONTAL_UPWARD_FACING &&
           plane.isPoseInPolygon(it.hitPose) && it.distance in .15f..4f
       }
       val plane=hit?.trackable as? Plane
-      if (plane==null) activity.runOnUiThread { if (token==generation) toast("此处未检测到向上的水平面，请缓慢扫描实际地面后再点选") }
-      else {
-        val cameraHeight=frame.camera.pose.ty()-requireNotNull(hit).hitPose.ty()
+      var fitted: GroundPlane?=null
+      val mapCamera=current.poseInMap(sessionId,rigid(frame.camera.pose))
+      if (plane==null && sample!=null && mapCamera!=null && depthNs>0 && depthNs<=frame.timestamp && frame.timestamp-depthNs<=250_000_000L) {
+        val input=ByteBuffer.allocateDirect(8).order(ByteOrder.nativeOrder()).asFloatBuffer().apply { put(tap);position(0) }
+        val output=ByteBuffer.allocateDirect(8).order(ByteOrder.nativeOrder()).asFloatBuffer()
+        frame.transformCoordinates2d(Coordinates2d.VIEW,input,Coordinates2d.TEXTURE_NORMALIZED,output)
+        val k=frame.camera.textureIntrinsics;val f=k.focalLength;val c=k.principalPoint;val d=k.imageDimensions
+        val depthHit=hits.firstOrNull { it.trackable is DepthPoint && it.distance in .15f..4f }?.let { current.poseInMap(sessionId,rigid(it.hitPose))?.t }
+        fitted=SurfaceReference.fitPatch(sample,mapCamera,output.get(0),output.get(1),f[0],f[1],c[0],c[1],d[0],d[1],depthHit).plane
+      }
+      if (plane==null && fitted==null) activity.runOnUiThread {
+        if (token==generation) AlertDialog.Builder(activity).setTitle("此处参考面证据不足")
+          .setMessage("此处还没有可用的平面多边形或足够平整的深度邻域。可以继续扫描，也可以用已量好的镜头高度建立水平参考面。")
+          .setNegativeButton("继续扫描",null).setPositiveButton("填写镜头高度") { _,_ -> editCameraHeight() }.show()
+      } else {
+        val fittedChoice=fitted
+        val cameraHeight=if (plane!=null) frame.camera.pose.ty()-requireNotNull(hit).hitPose.ty() else requireNotNull(fitted).distance(requireNotNull(mapCamera).t)
         activity.runOnUiThread {
           if (token!=generation || activity.isDestroyed) return@runOnUiThread
           AlertDialog.Builder(activity).setTitle("确认平面用途")
             .setMessage("真正地板请选择“实际地面”，桌面请选择“台面试验”。\n相机距所选平面约%.0f厘米（未校准）。".format(cameraHeight*100))
             .setNegativeButton("重新选择") { _,_ -> if (token==generation) groundArmed=true }
-            .setNeutralButton("台面试验") { _,_ -> if (token==generation && active) pendingGround=GroundChoice(plane,false) }
-            .setPositiveButton("实际地面") { _,_ -> if (token==generation && active) pendingGround=GroundChoice(plane,true) }.show()
+            .setNeutralButton("台面试验") { _,_ -> if (token==generation && active) pendingGround=GroundChoice(plane,false,fittedChoice) }
+            .setPositiveButton("实际地面") { _,_ -> if (token==generation && active) pendingGround=GroundChoice(plane,true,fittedChoice) }.show()
         }
       }
     }
     pendingGround?.let { choice ->
       pendingGround=null
       val plane=choice.plane
-      val ground=current.poseInMap(sessionId,rigid(plane.centerPose))?.let { runCatching { GroundPlane.fromPose(it) }.getOrNull() }
-      if (plane.trackingState==TrackingState.TRACKING && ground!=null) {
-        selectedGround=plane; terrain.selectGround(ground,choice.actualFloor)
+      val ground=if (plane!=null) current.poseInMap(sessionId,rigid(plane.centerPose))?.let { runCatching { GroundPlane.fromPose(it) }.getOrNull() } else choice.fitted
+      if ((plane==null || plane.trackingState==TrackingState.TRACKING) && ground!=null) {
+        selectedGround=plane;fittedGround=if (plane==null) ground else null;calibratedHeight=null
+        surfaceSource=if (plane!=null) "ARCORE_PLANE" else "RAW_DEPTH_PATCH";terrain.selectGround(ground,choice.actualFloor)
       }
     }
-    var plane=selectedGround ?: run {
+    val camera=current.poseInMap(sessionId,rigid(frame.camera.pose))
+    pendingHeight?.let { choice ->
+      pendingHeight=null
+      if (camera!=null) {
+        calibratedHeight=choice.height;selectedGround=null;fittedGround=null;surfaceSource="MEASURED_HEIGHT"
+        terrain.selectGround(SurfaceReference.measuredHeight(camera,choice.height),choice.actualFloor)
+      }
+    }
+    var plane=selectedGround
+    if (plane==null && fittedGround==null && calibratedHeight==null) {
       terrainSnapshot=TerrainSnapshot(false,"SELECT_GROUND",envelope=readEnvelope()); return
     }
-    repeat(10) { plane.subsumedBy?.let { plane=it } }
+    repeat(10) { plane?.subsumedBy?.let { plane=it } }
     selectedGround=plane
-    val ground=current.poseInMap(sessionId,rigid(plane.centerPose))?.let { runCatching { GroundPlane.fromPose(it) }.getOrNull() }
-    val camera=current.poseInMap(sessionId,rigid(frame.camera.pose))
-    if (plane.trackingState!=TrackingState.TRACKING || plane.subsumedBy!=null || ground==null || camera==null) {
+    val ground=when {
+      calibratedHeight!=null && camera!=null -> SurfaceReference.measuredHeight(camera,calibratedHeight!!)
+      plane!=null -> current.poseInMap(sessionId,rigid(plane!!.centerPose))?.let { runCatching { GroundPlane.fromPose(it) }.getOrNull() }
+      else -> fittedGround
+    }
+    if ((plane!=null && (plane!!.trackingState!=TrackingState.TRACKING || plane!!.subsumedBy!=null)) || ground==null || camera==null) {
       clearTerrain("GROUND_LOST"); return
     }
     val points=ArrayList<FloatArray>()
