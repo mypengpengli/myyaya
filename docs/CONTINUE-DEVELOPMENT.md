@@ -1,5 +1,19 @@
 # 换电脑继续开发
 
+## 最新：2026-11-05，2.1.177已发布
+
+最终构建源码 `1bcfad60268b9cda01523f381b6b080064df845a`，84项原生测试与[CI](https://github.com/mypengpengli/myyaya/actions/runs/41986082518)成功。APK `mobile/output/android/myyaya-2.1.177-arm64.apk`，174361650字节，SHA256 `eb1c144ac192354c1fbbfd00a054127fe7d29ef8e9c0157b2cc999e79e79d721`，源快照 `8eda5cdd3ffcd6afb7ef17846aa3b0266b26837ccc073cff243d3eeef69c811d`。原签名/16KB/ARM64/中文模型/独立JS/凭据排除通过，最终覆盖安装且手机base.apk摘要一致。[177 Release](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.177)已公开设为最新，四附件摘要已核对，Release id434896495；不要继续发布176草稿，已由177替代。
+
+独立官方hello_ar_java v1.48.0做了SDK1.48/1.57、FIXED/AUTO、CPU640/1280/1920对照，原生rectifier错误也复现。1.57/FIXED/640在用户平移后出现0.455～0.930m近处深度、raw最多1653点，但仍52行rectifier错误，不是完整修复；没有严格同轨迹A/B或独立距离真值。[排查记录](ARCORE-RUNTIME-DIAGNOSIS.md)与 `scripts/arcore-reference-diagnostics.patch` 可复现。临时HelloAR测试App已移除；Google AR服务未改动或清数据。
+
+177的LocalDepthReadiness要求3个不同新鲜raw帧、跨度300ms、每帧32个0.2～4m高置信度点，才融合地图或新标定。最终版将初始化锁存在同一跟踪会话，停稳后深度过期仍允许选面；nearEvidenceFresh单独报告，TerrainAnalysis的3秒观测时效照常生效。首版错误地在3秒后撤销初始化，已在最终包修掉，不要恢复该行为。跟踪丢失/暂停/新Session/时钟回退重新准备。
+
+手机最终新图Final177，确认台面ARCORE_PLANE而非实际地板；手持扫描所选平面估算相机高16～20cm，未强套此前装机10cm。初始化和停稳后选面已通过；后续短扫描手机586报告内接受65新深度帧，确认平面最高5格、障碍76、落差26、候选0，单帧平面点最高553、补全263，各峰值非同帧。高度冲突单元最高47，部分区域缺独立帧和分区覆盖，未验证每个红/橙点是否对应实物。
+
+`.tools/177-final-session.ndjson`手机报告、`.tools/177-final-capture.ndjson`56份双深度回放（约4.36MB）已保存，用户无需继续移动。`.tools/177-replay.bin`和`.tools/177-replay-comparison.txt`为同批四组合：raw旧/当前基准都0格；融合旧基准2格/10正记录，融合当前基准6格/8正记录，候选全0，累计补全1907次不是独立体素。离线子集与手机采样轨迹不等价，不能写成手机6格。先继续利用该数据查残差/覆盖，别重复要求用户盲扫，也不要靠放松阈值制造绿色区域。
+
+Final177已经保存并暂停相机，本阶段未发送任何电机命令。真实地板、独立精度、底座外参、物理头部补偿和自主规划仍未验收。ARCore Recording/Playback可作为减少下一轮反复手动扫描的后续选项，当前未接入；不要将已有深度NDJSON误称为完整相机/IMU数据集。
+
 ## 最新：2026-11-05，2.1.176
 
 用户要求继续解决，不接受归因白色桌面即停止。176已做同会话AUTOMATIC原始/完整深度交叉验证与补全，修正小幅平面修正时混用旧高度基准，增加彩色深度叠加、青色AR平面边界、检测平面与已测网格分开显示、本地深度回放；最后补DepthPoint邻域拟合、镜头高度标定与会话Anchor。头部可上下滑动/俯仰，10cm只初始化参考面，之后由实时相机/Anchor位姿补偿，不每帧强制当前镜头高度不变。77项原生测试、[最终源码CI](https://github.com/mypengpengli/myyaya/actions/runs/41968264628)与原签名安装检查通过。源码 `9a856fdecba8e1f0d9ad8c2d9ac96047188236c6`；APK SHA256 `e512782074b1fd6f03f7be29608deb7b982ed5eace58d3c4fd1c27a1e81849dc`，174378086字节，源快照 `b1402836e0655691e654af3956db44391e019ab636c383e2e02b14e6b34b111b`。
