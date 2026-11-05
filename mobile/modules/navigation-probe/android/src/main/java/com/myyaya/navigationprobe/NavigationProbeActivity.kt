@@ -152,6 +152,10 @@ class NavigationProbeActivity : Activity() {
       }
     }
     camera.addView(surface, FrameLayout.LayoutParams(-1, -1))
+    if (mapping) {
+      val overlay=DepthOverlayView(this)
+      camera.addView(overlay,FrameLayout.LayoutParams(-1,-1));roomMap?.attachDepthOverlay(overlay)
+    }
     camera.addView(label("后摄画面", 13f).apply { setBackgroundColor(0x99000000.toInt()) },
       FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START))
     body.addView(camera, LinearLayout.LayoutParams(0, -1, 1.1f))
@@ -268,7 +272,8 @@ class NavigationProbeActivity : Activity() {
       check(current.cameraConfig.facingDirection == CameraConfig.FacingDirection.BACK) { "Navigation probe requires the rear camera" }
       supportedAuto = current.isDepthModeSupported(Config.DepthMode.AUTOMATIC)
       supportedRaw = current.isDepthModeSupported(Config.DepthMode.RAW_DEPTH_ONLY)
-      activeMode = if (rawPreferred && supportedRaw) Config.DepthMode.RAW_DEPTH_ONLY
+      activeMode = if (mapping && supportedAuto) Config.DepthMode.AUTOMATIC
+        else if (rawPreferred && supportedRaw) Config.DepthMode.RAW_DEPTH_ONLY
         else if (supportedAuto) Config.DepthMode.AUTOMATIC else Config.DepthMode.DISABLED
       // On this phone, changing RAW_DEPTH_ONLY -> AUTOMATIC on an existing
       // Session produced implausible dense distances; fresh sessions also had
@@ -592,10 +597,12 @@ class NavigationProbeActivity : Activity() {
         var bitmap: Bitmap? = null
         var mapSample: DepthSamples.Result? = null
         var mapDepthNs = 0L
+        var denseSample: DepthSamples.Result? = null
+        var denseDepthNs = 0L
         var depthText = if (activeMode == Config.DepthMode.DISABLED) "当前配置不支持深度，仅采集位姿" else "暂未取得深度，请缓慢移动；未知区域不是可通行区域"
         if (tracking && activeMode != Config.DepthMode.DISABLED) {
           try {
-            val raw = activeMode == Config.DepthMode.RAW_DEPTH_ONLY
+            val raw = mapping || activeMode == Config.DepthMode.RAW_DEPTH_ONLY
             (if (raw) frame.acquireRawDepthImage16Bits() else frame.acquireDepthImage16Bits()).use { depth ->
               val confidence = if (raw) frame.acquireRawDepthConfidenceImage() else null
               try {
@@ -626,8 +633,19 @@ class NavigationProbeActivity : Activity() {
             row.put("depthUnavailable", "NOT_YET_AVAILABLE")
           }
         }
+        if (mapping && tracking && activeMode==Config.DepthMode.AUTOMATIC) {
+          try {
+            frame.acquireDepthImage16Bits().use { dense ->
+              val p=dense.planes[0]
+              denseSample=DepthSamples.read(dense.width,dense.height,DepthSamples.Plane(p.buffer,p.rowStride,p.pixelStride))
+              denseDepthNs=dense.timestamp
+              row.put("denseTimestampNs",denseDepthNs).put("denseMedianMm",denseSample?.medianMm ?: JSONObject.NULL)
+                .put("denseValidRatio",denseSample?.validRatio ?: 0.0)
+            }
+          } catch (_: NotYetAvailableException) { row.put("denseUnavailable","NOT_YET_AVAILABLE") }
+        }
         if (mapping) {
-          roomMap?.frame(current, frame, mapSample, mapDepthNs)
+          roomMap?.frame(current, frame, mapSample, mapDepthNs,denseSample,denseDepthNs)
           val mapReport = roomMap?.report()
           row.put("roomMap", mapReport?.let { JSONObject(it) } ?: JSONObject.NULL)
             .put("mapPersisted", (mapReport?.get("lastSavedAt") as? Long ?: 0L) > 0)

@@ -16,6 +16,8 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.math.*
 
 /** Native mapping UI. No motor APIs. All ARCore objects are accessed on the GL thread. */
@@ -23,6 +25,11 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private val pauseOnly: () -> Unit) {
   private val directory = File(activity.filesDir,"room-maps").apply { mkdirs() }
   private val io = Executors.newSingleThreadExecutor()
+  private val depthRecorder=DepthEvidenceRecorder(activity.getExternalFilesDir("navigation-probe") ?: activity.filesDir,io)
+  private var depthOverlay: DepthOverlayView?=null
+  @Volatile private var overlayEnabled=true
+  private var lastOverlayNs=0L
+  @Volatile private var hybridReport: Map<String,Any?> = mapOf("status" to "WAITING")
   @Volatile private var mapper: RoomMapper? = null
   @Volatile private var freshMap = false
   @Volatile private var sessionId = ""
@@ -64,6 +71,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   @Volatile private var saveFailed = false
 
   init { terrain.setEnvelope(readEnvelope()) }
+  fun attachDepthOverlay(view: DepthOverlayView) { depthOverlay=view }
 
   private fun label(value: String) = TextView(activity).apply {
     text=value; textSize=14f; setTextColor(Color.WHITE); setPadding(12,8,12,8)
@@ -82,6 +90,11 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     },LinearLayout.LayoutParams(0,-2,1f))
     terrainActions.addView(button("底座尺寸") { editEnvelope() },LinearLayout.LayoutParams(0,-2,1f))
     terrainActions.addView(button("清除判断") { clearTerrain(); renderTerrain() },LinearLayout.LayoutParams(0,-2,1f))
+    terrainActions.addView(Button(activity).apply {
+      text="叠加：开";textSize=13f;isAllCaps=false
+      setOnClickListener { overlayEnabled=!overlayEnabled;text=if (overlayEnabled) "叠加：开" else "叠加：关"
+        depthOverlay?.let { it.enabledOverlay=overlayEnabled;it.invalidate() } }
+    },LinearLayout.LayoutParams(0,-2,1f))
     addView(terrainActions)
     terrainState=label("开始扫描后点选平面并确认用途；灰未知、青平面、红障碍、橙落差、绿候选。").apply { textSize=12f }
     addView(terrainState)
@@ -141,6 +154,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private fun clearTerrain(status: String="SELECT_GROUND") {
     groundArmed=false; groundTap=null; pendingGround=null; selectedGround=null; terrain.reset()
     terrainSnapshot=TerrainSnapshot(false,status,envelope=readEnvelope())
+    hybridReport=mapOf("status" to "WAITING")
+    activity.runOnUiThread { depthOverlay?.let { it.dots=emptyList();it.invalidate() } }
   }
   fun cameraTapped(x: Float,y: Float): Boolean {
     if (!groundArmed || !x.isFinite() || !y.isFinite()) return false
@@ -449,10 +464,12 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     "referenceTrackingState" to referenceState,"referenceTrackingMethod" to referenceMethod,
     "configuredReferenceImages" to configuredReferenceImages,
     "knownReferenceImages" to knownReferenceImages,"stableReferenceSamples" to stableCount,
-    "terrain" to (terrainSnapshot.report()+mapOf("trackedHorizontalPlanes" to horizontalPlanes))) }
+    "terrain" to (terrainSnapshot.report()+mapOf("trackedHorizontalPlanes" to horizontalPlanes,"hybridDepth" to hybridReport,
+      "depthCapture" to depthRecorder.report()))) }
   fun canStart() = mapper != null && !saving && !restoring
   /** GL thread, depth sampled at up to 10 Hz; view snapshots limited to 2 Hz. */
-  fun frame(session: Session, frame: Frame, sample: DepthSamples.Result?, depthNs: Long) {
+  fun frame(session: Session, frame: Frame, sample: DepthSamples.Result?, depthNs: Long,
+    dense: DepthSamples.Result?=null,denseNs: Long=0) {
     val token=generation
     val current=mapper ?: return
     val tracking=frame.camera.trackingState==TrackingState.TRACKING
@@ -498,7 +515,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       val intrinsics=frame.camera.textureIntrinsics; val f=intrinsics.focalLength; val c=intrinsics.principalPoint; val dim=intrinsics.imageDimensions
       current.fuse(sessionId,rigid(frame.camera.pose),sample,f[0],f[1],c[0],c[1],dim[0],dim[1],frame.timestamp,depthNs)
     }
-    if (located) analyzeTerrain(current,frame,sample,depthNs,token)
+    if (located) analyzeTerrain(current,frame,sample,depthNs,token,dense,denseNs)
     else clearTerrain("LOCALIZATION_REQUIRED")
     // Depth/terrain run at up to 10 Hz; map copies and Android view updates stay at 2 Hz.
     if (lastTerrainUiNs>0 && frame.timestamp>=lastTerrainUiNs && frame.timestamp-lastTerrainUiNs<500_000_000L) return
@@ -517,7 +534,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     }
   }
   /** GL thread only: ARCore planes are proposals, never automatically declared floor. */
-  private fun analyzeTerrain(current: RoomMapper,frame: Frame,sample: DepthSamples.Result?,depthNs: Long,token: Int) {
+  private fun analyzeTerrain(current: RoomMapper,frame: Frame,sample: DepthSamples.Result?,depthNs: Long,token: Int,
+    dense: DepthSamples.Result?,denseNs: Long) {
     val tap=groundTap; groundTap=null
     if (tap!=null) {
       val hit=frame.hitTest(tap[0],tap[1]).firstOrNull {
@@ -560,9 +578,38 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     val points=ArrayList<FloatArray>()
     if (sample!=null && depthNs>0 && depthNs<=frame.timestamp && frame.timestamp-depthNs<=250_000_000L) {
       val k=frame.camera.textureIntrinsics; val f=k.focalLength; val c=k.principalPoint; val d=k.imageDimensions
-      DepthProjection.points(sample,camera,f[0],f[1],c[0],c[1],d[0],d[1]) { points.add(it) }
+      val fusion=HybridDepth.fuse(sample,dense,camera,ground,f[0],f[1],c[0],c[1],d[0],d[1],depthNs,denseNs,frame.timestamp)
+      hybridReport=fusion.report()
+      DepthProjection.points(fusion.sample,camera,f[0],f[1],c[0],c[1],d[0],d[1]) { points.add(it) }
+      depthRecorder.record(frame.timestamp,depthNs,denseNs,sample,dense,camera,ground,floatArrayOf(f[0],f[1],c[0],c[1]),d,hybridReport)
+      if (frame.timestamp-lastOverlayNs>=500_000_000L) {
+        lastOverlayNs=frame.timestamp
+        drawDepthOverlay(frame,camera,ground,fusion.sample,fusion.filled,f,c,d,token)
+      }
+    } else if (frame.timestamp-lastOverlayNs>1_000_000_000L) {
+      activity.runOnUiThread { if (token==generation) depthOverlay?.let { it.dots=emptyList();it.invalidate() } }
     }
     terrainSnapshot=terrain.update(camera,ground,frame.timestamp,depthNs,points)
+  }
+  private fun drawDepthOverlay(frame: Frame,camera: RigidPose,ground: GroundPlane,sample: DepthSamples.Result,
+    filled: BooleanArray,f: FloatArray,c: FloatArray,d: IntArray,token: Int) {
+    if (!overlayEnabled) return
+    val colors=ArrayList<Int>();val sources=ArrayList<Boolean>();val uv=ArrayList<Float>();var count=0
+    DepthProjection.indexedPoints(sample,camera,f[0],f[1],c[0],c[1],d[0],d[1]) { i,p ->
+      if (count++%5==0 && colors.size<700) {
+        val h=ground.distance(p)
+        colors.add(when { abs(h)<=.025f -> Color.CYAN;h< -.04f -> Color.rgb(255,158,45);h>.03f -> Color.RED;else -> Color.LTGRAY })
+        sources.add(filled[i]);uv.add((i%sample.width)*sample.step.toFloat()/sample.sourceWidth)
+        uv.add((i/sample.width)*sample.step.toFloat()/sample.sourceHeight)
+      }
+    }
+    val input=ByteBuffer.allocateDirect(uv.size*4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply { put(uv.toFloatArray());position(0) }
+    val output=ByteBuffer.allocateDirect(uv.size*4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+    if (uv.isNotEmpty()) frame.transformCoordinates2d(Coordinates2d.TEXTURE_NORMALIZED,input,Coordinates2d.VIEW_NORMALIZED,output)
+    val dots=colors.indices.map { DepthOverlayView.Dot(output.get(it*2),output.get(it*2+1),colors[it],sources[it]) }
+    activity.runOnUiThread { if (token==generation) depthOverlay?.let {
+      it.dots=dots;it.updatedAt=android.os.SystemClock.elapsedRealtime();it.invalidate()
+    } }
   }
   private fun RoomMapper.snapshotReference() = referenceEnabled()
   private fun rigid(pose: Pose)=RigidPose(pose.translation,pose.rotationQuaternion)

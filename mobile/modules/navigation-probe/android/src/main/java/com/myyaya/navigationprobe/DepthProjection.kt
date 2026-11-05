@@ -5,6 +5,11 @@ internal object DepthProjection {
   fun points(sample: DepthSamples.Result, cameraToMap: RigidPose,
     fx: Float, fy: Float, cx: Float, cy: Float, textureWidth: Int, textureHeight: Int,
     visit: (FloatArray) -> Unit) {
+    indexedPoints(sample,cameraToMap,fx,fy,cx,cy,textureWidth,textureHeight) { _,point -> visit(point) }
+  }
+  fun indexedPoints(sample: DepthSamples.Result, cameraToMap: RigidPose,
+    fx: Float, fy: Float, cx: Float, cy: Float, textureWidth: Int, textureHeight: Int,
+    visit: (Int,FloatArray) -> Unit) {
     require(fx.isFinite() && fy.isFinite() && fx > 0 && fy > 0 && cx.isFinite() && cy.isFinite())
     require(textureWidth > 0 && textureHeight > 0 && sample.sourceWidth > 0 && sample.sourceHeight > 0)
     require(sample.width > 0 && sample.height > 0 && sample.step > 0 && sample.millimeters.size == sample.width*sample.height)
@@ -14,7 +19,7 @@ internal object DepthProjection {
       if (mm !in 200..4000) continue
       val d=mm/1000f
       val p=cameraToMap.point(floatArrayOf(d*(x*sample.step-cx*dx)/(fx*dx),d*(cy*dy-y*sample.step)/(fy*dy),-d))
-      if (p.all { it.isFinite() && kotlin.math.abs(it)<=25f }) visit(p)
+      if (p.all { it.isFinite() && kotlin.math.abs(it)<=25f }) visit(y*sample.width+x,p)
     }
   }
 }

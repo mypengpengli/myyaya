@@ -65,6 +65,7 @@ internal class TerrainAnalysis {
     var maxHeight: Float=Float.NEGATIVE_INFINITY,var obstacle: Boolean=false,var drop: Boolean=false,var uncertain: Boolean=false)
   private val cells=HashMap<Pair<Int,Int>,Evidence>()
   private var ground: GroundPlane?=null
+  private var evidenceBasis: GroundPlane?=null
   private var floorConfirmed=false
   private var envelope: RobotEnvelope?=null
   private var lastDepth=0L
@@ -72,22 +73,24 @@ internal class TerrainAnalysis {
   private var acceptedFrames=0
   private var lastPoints=TerrainDepthEvidence()
   private fun clearEvidence() { cells.clear(); lastDepth=0; acceptedFrames=0; lastPoints=TerrainDepthEvidence() }
-  @Synchronized fun reset() { clearEvidence(); ground=null; floorConfirmed=false; lastTime=0 }
+  @Synchronized fun reset() { clearEvidence(); ground=null; evidenceBasis=null; floorConfirmed=false; lastTime=0 }
   @Synchronized fun setEnvelope(value: RobotEnvelope?) { envelope=value; clearEvidence() }
-  @Synchronized fun selectGround(value: GroundPlane,actualFloor: Boolean=true) { clearEvidence(); ground=value; floorConfirmed=actualFloor; lastTime=0 }
+  @Synchronized fun selectGround(value: GroundPlane,actualFloor: Boolean=true) { clearEvidence(); ground=value; evidenceBasis=value; floorConfirmed=actualFloor; lastTime=0 }
   @Synchronized fun hasGround()=ground!=null
 
   /** Repeated/reprojected or old depth never increases evidence votes or refreshes TTL. */
   @Synchronized fun update(camera: RigidPose, plane: GroundPlane, now: Long, depth: Long, points: List<FloatArray>): TerrainSnapshot {
-    val previous=ground ?: return TerrainSnapshot(false,"SELECT_GROUND",envelope=envelope)
+    val previous=evidenceBasis ?: return TerrainSnapshot(false,"SELECT_GROUND",envelope=envelope)
     if (now<=0 || now<lastTime) { reset(); return TerrainSnapshot(false,"CLOCK_RESET",envelope=envelope) }
     val dot=(0..2).sumOf { (previous.normal[it]*plane.normal[it]).toDouble() }
     if (abs(previous.distance(plane.origin))>.03f || dot<.9986) {
-      clearEvidence(); ground=plane
+      clearEvidence(); evidenceBasis=plane
     }
     lastTime=now
-    // Keep a stable datum until the plane meaningfully changes.
-    val datum=ground!!
+    // Use the current AR plane together with the current camera pose. Retaining
+    // an old datum biases small plane refinements into false raised surfaces.
+    ground=plane
+    val datum=plane
     prune(now,camera)
     val height=datum.distance(camera.t)
     if (height !in .03f..2.5f) {

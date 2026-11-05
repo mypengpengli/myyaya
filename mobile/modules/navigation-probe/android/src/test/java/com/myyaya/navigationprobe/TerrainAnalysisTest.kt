@@ -182,4 +182,12 @@ class TerrainAnalysisTest {
     assertEquals(1,r.heightConflictCells); assertEquals(0,r.pendingGroundCells)
     assertEquals("PLANE_HEIGHT_CONFLICT",r.blockingReason)
   }
+  @Test fun currentCameraAndRefinedPlaneShareADatumWithoutIntroducingFalseObstacles() {
+    val a=analyzer();observe(a,patch())
+    val refined=GroundPlane(floatArrayOf(0f,.024f,0f),plane.normal)
+    var r=TerrainSnapshot(false,"")
+    repeat(3) { val t=2_100_000_000L+it*200_000_000L;r=a.update(camera,refined,t,t,patch(y=.039f)) }
+    assertTrue(r.cells.any { it.kind==TerrainKind.GROUND });assertFalse(r.cells.any { it.kind==TerrainKind.OBSTACLE })
+    assertEquals(.276f,r.cameraHeight!!,.00001f)
+  }
 }
