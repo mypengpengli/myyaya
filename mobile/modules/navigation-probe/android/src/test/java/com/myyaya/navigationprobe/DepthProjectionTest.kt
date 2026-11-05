@@ -20,4 +20,14 @@ class DepthProjectionTest {
     DepthProjection.indexedPoints(s,RigidPose(floatArrayOf(1f,2f,3f),RigidPose.IDENTITY.q),2f,2f,0f,0f,4,4) { i,p ->index=i;point=p }
     assertEquals(1,index);assertArrayEquals(floatArrayOf(2f,2f,2f),point,.000001f)
   }
+  @Test fun planePolygonProjectsToTextureWithYDownAndClipsBehindCamera() {
+    val square=listOf(floatArrayOf(-1f,1f,-2f),floatArrayOf(1f,1f,-2f),floatArrayOf(1f,-1f,-2f),floatArrayOf(-1f,-1f,-2f))
+    val uv=DepthProjection.polygonUv(square,100f,100f,100f,100f,200,200)
+    assertArrayEquals(floatArrayOf(.25f,.25f,.75f,.25f,.75f,.75f,.25f,.75f),uv,.00001f)
+    assertTrue(DepthProjection.polygonUv(square.map { floatArrayOf(it[0],it[1],1f) },100f,100f,100f,100f,200,200).isEmpty())
+  }
+  @Test fun nearPlaneCrossingDoesNotCreateInfiniteOutlineCoordinates() {
+    val uv=DepthProjection.polygonUv(listOf(floatArrayOf(-1f,0f,-1f),floatArrayOf(1f,0f,-1f),floatArrayOf(0f,0f,1f)),100f,100f,100f,100f,200,200)
+    assertTrue(uv.size>=6);assertTrue(uv.all { it.isFinite() })
+  }
 }

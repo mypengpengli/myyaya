@@ -29,6 +29,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private var depthOverlay: DepthOverlayView?=null
   @Volatile private var overlayEnabled=true
   private var lastOverlayNs=0L
+  private var lastOutlineNs=0L
   @Volatile private var hybridReport: Map<String,Any?> = mapOf("status" to "WAITING")
   @Volatile private var mapper: RoomMapper? = null
   @Volatile private var freshMap = false
@@ -155,7 +156,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     groundArmed=false; groundTap=null; pendingGround=null; selectedGround=null; terrain.reset()
     terrainSnapshot=TerrainSnapshot(false,status,envelope=readEnvelope())
     hybridReport=mapOf("status" to "WAITING")
-    activity.runOnUiThread { depthOverlay?.let { it.dots=emptyList();it.invalidate() } }
+    activity.runOnUiThread { depthOverlay?.let { it.dots=emptyList();it.outlines=emptyList();it.invalidate() } }
   }
   fun cameraTapped(x: Float,y: Float): Boolean {
     if (!groundArmed || !x.isFinite() || !y.isFinite()) return false
@@ -168,8 +169,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       "LOCALIZATION_REQUIRED" -> "定位无效，已清除本次判断。请恢复定位后重新点选地面。"
       "GROUND_LOST" -> "所选平面跟踪已丢失，请重新点选实际地面。"
       "CAMERA_HEIGHT_INVALID" -> "相机不在所选地面上方的有效高度内，请重新确认实际地面。"
-      "SELECT_GROUND","CLOCK_RESET" -> "请点选地板或测试台面，确认用途后缓慢扫描。"
-      else -> "${if (s.floorConfirmed) "地面判断" else "台面试验（非地板）"} · 平面 ${r["groundCells"]} / 障碍 ${r["obstacleCells"]} / 未定 ${r["uncertainCells"]} / 候选 ${if (s.floorConfirmed) r["candidateCenterCells"] else r["benchCandidateCenterCells"]}\n相机距平面 ${s.cameraHeight?.let { "%.0f厘米".format(it*100) } ?: "待测"}；${if (s.envelope==null) "请填写底座尺寸" else "本页仅显示判断"}"
+      "SELECT_GROUND","CLOCK_RESET" -> if (horizontalPlanes>0) "已检测水平面 $horizontalPlanes 个，请点击青色边界内的地板或台面并确认用途。" else "尚在检测水平面，请缓慢扫描后点选地板或台面。"
+      else -> "${if (s.floorConfirmed) "地面判断" else "台面试验（非地板）"} · 已选水平面\n已测平面网格 ${r["groundCells"]} / 障碍 ${r["obstacleCells"]} / 候选 ${if (s.floorConfirmed) r["candidateCenterCells"] else r["benchCandidateCenterCells"]} · 相机高 ${s.cameraHeight?.let { "%.0f厘米".format(it*100) } ?: "待测"}"
     }
     val sampling=when (s.depthEvidence.blockingReason) {
       "DEPTH_UNAVAILABLE","DEPTH_STALE" -> "深度尚未更新，请缓慢左右平移。"
@@ -476,6 +477,10 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     horizontalPlanes=if (tracking) session.getAllTrackables(Plane::class.java).count {
       it.trackingState==TrackingState.TRACKING && it.type==Plane.Type.HORIZONTAL_UPWARD_FACING && it.subsumedBy==null
     } else 0
+    if (tracking && frame.timestamp-lastOutlineNs>=500_000_000L) {
+      lastOutlineNs=frame.timestamp
+      drawPlaneOutlines(session,frame,token)
+    }
     val hasReference=current.snapshotReference()
     if (!tracking) { anchor?.detach(); anchor=null; stableImage=null; stableCount=0 }
     if (anchor?.trackingState==TrackingState.STOPPED) { anchor?.detach(); anchor=null; stableImage=null; stableCount=0 }
@@ -609,6 +614,27 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     val dots=colors.indices.map { DepthOverlayView.Dot(output.get(it*2),output.get(it*2+1),colors[it],sources[it]) }
     activity.runOnUiThread { if (token==generation) depthOverlay?.let {
       it.dots=dots;it.updatedAt=android.os.SystemClock.elapsedRealtime();it.invalidate()
+    } }
+  }
+  private fun drawPlaneOutlines(session: Session,frame: Frame,token: Int) {
+    if (!overlayEnabled) return
+    val cameraFromWorld=frame.camera.pose.inverse();val k=frame.camera.textureIntrinsics
+    val f=k.focalLength;val c=k.principalPoint;val d=k.imageDimensions
+    val outlines=session.getAllTrackables(Plane::class.java).filter {
+      it.trackingState==TrackingState.TRACKING && it.type==Plane.Type.HORIZONTAL_UPWARD_FACING && it.subsumedBy==null
+    }.sortedByDescending { it.extentX*it.extentZ }.take(3).mapNotNull { plane ->
+      val polygon=plane.polygon;val vertices=ArrayList<FloatArray>()
+      for (i in 0 until polygon.limit() step 2) vertices.add(cameraFromWorld.transformPoint(plane.centerPose.transformPoint(floatArrayOf(polygon.get(i),0f,polygon.get(i+1)))))
+      val uv=DepthProjection.polygonUv(vertices,f[0],f[1],c[0],c[1],d[0],d[1])
+      if (uv.isEmpty()) null else {
+        val input=ByteBuffer.allocateDirect(uv.size*4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply { put(uv);position(0) }
+        val output=ByteBuffer.allocateDirect(uv.size*4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+        frame.transformCoordinates2d(Coordinates2d.TEXTURE_NORMALIZED,input,Coordinates2d.VIEW_NORMALIZED,output)
+        FloatArray(uv.size).also { output.position(0);output.get(it) }
+      }
+    }
+    activity.runOnUiThread { if (token==generation) depthOverlay?.let {
+      it.outlines=outlines;it.outlinesUpdatedAt=android.os.SystemClock.elapsedRealtime();it.invalidate()
     } }
   }
   private fun RoomMapper.snapshotReference() = referenceEnabled()

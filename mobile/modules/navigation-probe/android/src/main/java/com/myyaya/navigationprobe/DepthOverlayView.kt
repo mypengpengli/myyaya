@@ -10,11 +10,20 @@ internal class DepthOverlayView(context: Context): View(context) {
   data class Dot(val u: Float,val v: Float,val color: Int,val filled: Boolean)
   var dots: List<Dot> = emptyList()
   var updatedAt=0L
+  var outlines: List<FloatArray> = emptyList()
+  var outlinesUpdatedAt=0L
   var enabledOverlay=true
   private val paint=Paint(Paint.ANTI_ALIAS_FLAG)
   override fun onDraw(canvas: Canvas) {
-    if (!enabledOverlay || SystemClock.elapsedRealtime()-updatedAt>1000) return
-    for (p in dots) {
+    if (!enabledOverlay) return
+    val now=SystemClock.elapsedRealtime()
+    if (now-outlinesUpdatedAt<=1000) for (uv in outlines) {
+      if (uv.size<6) continue
+      val path=Path().apply { moveTo(uv[0]*width,uv[1]*height)
+        for (i in 2 until uv.size step 2) lineTo(uv[i]*width,uv[i+1]*height);close() }
+      paint.color=Color.CYAN;paint.style=Paint.Style.STROKE;paint.strokeWidth=3f;canvas.drawPath(path,paint)
+    }
+    if (now-updatedAt<=1000) for (p in dots) {
       if (p.u !in 0f..1f || p.v !in 0f..1f) continue
       paint.color=p.color;paint.style=if (p.filled) Paint.Style.STROKE else Paint.Style.FILL;paint.strokeWidth=2f
       canvas.drawCircle(p.u*width,p.v*height,if (p.filled) 4f else 3f,paint)
@@ -22,6 +31,6 @@ internal class DepthOverlayView(context: Context): View(context) {
     paint.style=Paint.Style.FILL;paint.color=0xbb000000.toInt()
     canvas.drawRect(0f,height-40f,width.toFloat(),height.toFloat(),paint)
     paint.color=Color.WHITE;paint.textSize=23f
-    canvas.drawText("深度叠加：青平面 / 红高处 / 橙低处 · 空心为融合点",10f,height-12f,paint)
+    canvas.drawText("青线：已检测水平面 · 青点平面 / 红高处 / 橙低处",10f,height-12f,paint)
   }
 }

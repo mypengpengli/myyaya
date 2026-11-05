@@ -2,6 +2,23 @@ package com.myyaya.navigationprobe
 
 /** Raw depth is camera-Z distance, in unrotated texture coordinates. */
 internal object DepthProjection {
+  /** Clip a camera-space polygon at the near plane, then project to GPU texture UV. */
+  fun polygonUv(vertices: List<FloatArray>,fx: Float,fy: Float,cx: Float,cy: Float,tw: Int,th: Int): FloatArray {
+    require(fx>0 && fy>0 && tw>0 && th>0)
+    if (vertices.size<3 || vertices.any { it.size!=3 || it.any { v -> !v.isFinite() } }) return floatArrayOf()
+    val clipped=ArrayList<FloatArray>();var previous=vertices.last()
+    for (p in vertices) {
+      val inside=p[2]<= -.05f;val before=previous[2]<= -.05f
+      if (inside!=before) {
+        val t=(-.05f-previous[2])/(p[2]-previous[2])
+        clipped.add(FloatArray(3) { previous[it]+t*(p[it]-previous[it]) })
+      }
+      if (inside) clipped.add(p)
+      previous=p
+    }
+    if (clipped.size<3) return floatArrayOf()
+    return clipped.flatMap { p -> listOf((fx*p[0]/-p[2]+cx)/tw,(cy-fy*p[1]/-p[2])/th) }.toFloatArray()
+  }
   fun points(sample: DepthSamples.Result, cameraToMap: RigidPose,
     fx: Float, fy: Float, cx: Float, cy: Float, textureWidth: Int, textureHeight: Int,
     visit: (FloatArray) -> Unit) {
