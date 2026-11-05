@@ -1,0 +1,98 @@
+diff --git a/samples/hello_ar_java/app/build.gradle b/samples/hello_ar_java/app/build.gradle
+index 4e41750..673ffb0 100644
+--- a/samples/hello_ar_java/app/build.gradle
++++ b/samples/hello_ar_java/app/build.gradle
+@@ -17,7 +17,8 @@ apply plugin: 'com.android.application'
+ 
+ android {
+     namespace "com.google.ar.core.examples.java.helloar"
+-    compileSdkVersion 35
++    compileSdkVersion 36
++    buildToolsVersion "36.0.0"
+     defaultConfig {
+         applicationId "com.google.ar.core.examples.java.helloar"
+ 
+@@ -42,7 +43,7 @@ android {
+ 
+ dependencies {
+     // ARCore (Google Play Services for AR) library.
+-    implementation 'com.google.ar:core:1.48.0'
++    implementation "com.google.ar:core:${findProperty('diagSdk') ?: '1.48.0'}"
+ 
+     // Obj - a simple Wavefront OBJ file loader
+     // https://github.com/javagl/Obj
+diff --git a/samples/hello_ar_java/app/src/main/java/com/google/ar/core/examples/java/helloar/HelloArActivity.java b/samples/hello_ar_java/app/src/main/java/com/google/ar/core/examples/java/helloar/HelloArActivity.java
+index 7320df0..cde9dcc 100644
+--- a/samples/hello_ar_java/app/src/main/java/com/google/ar/core/examples/java/helloar/HelloArActivity.java
++++ b/samples/hello_ar_java/app/src/main/java/com/google/ar/core/examples/java/helloar/HelloArActivity.java
+@@ -488,6 +488,35 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
+       return;
+     }
+     Camera camera = frame.getCamera();
++    if (frame.getTimestamp() - diagLast >= 500000000L) {
++      diagLast = frame.getTimestamp();
++      String depthSummary = "none";
++      try (Image di = frame.acquireDepthImage16Bits()) {
++        java.nio.ByteBuffer db = di.getPlanes()[0].getBuffer().order(java.nio.ByteOrder.LITTLE_ENDIAN);
++        int[] ds = new int[di.getWidth()*di.getHeight()]; int n=0;
++        for(int yy=0;yy<di.getHeight();yy+=4) for(int xx=0;xx<di.getWidth();xx+=4) {
++          int z=db.getShort(yy*di.getPlanes()[0].getRowStride()+xx*di.getPlanes()[0].getPixelStride())&65535;
++          if(z>0)ds[n++]=z;
++        }
++        java.util.Arrays.sort(ds,0,n);
++        depthSummary="count="+n+",medianMm="+(n>0?ds[n/2]:0);
++      } catch (Exception ex) {depthSummary=ex.getClass().getSimpleName();}
++      String rawSummary="none";
++      try (Image ri=frame.acquireRawDepthImage16Bits(); Image ci=frame.acquireRawDepthConfidenceImage()) {
++        java.nio.ByteBuffer rb=ri.getPlanes()[0].getBuffer().order(java.nio.ByteOrder.LITTLE_ENDIAN);
++        java.nio.ByteBuffer cb=ci.getPlanes()[0].getBuffer();
++        int n=0,local=0; int[] vals=new int[ri.getWidth()*ri.getHeight()];
++        for(int yy=0;yy<ri.getHeight();yy++) for(int xx=0;xx<ri.getWidth();xx++) {
++          int z=rb.getShort(yy*ri.getPlanes()[0].getRowStride()+xx*ri.getPlanes()[0].getPixelStride())&65535;
++          int c=cb.get(yy*ci.getPlanes()[0].getRowStride()+xx*ci.getPlanes()[0].getPixelStride())&255;
++          if(z>0&&c>=153) {vals[n++]=z;if(z>=200&&z<=4000)local++;}
++        }
++        java.util.Arrays.sort(vals,0,n);
++        rawSummary="count="+n+",local="+local+",rawMedianMm="+(n>0?vals[n/2]:0)+",rawNs="+ri.getTimestamp();
++      } catch(Exception ex) {rawSummary=ex.getClass().getSimpleName();}
++      Log.i("IndependentArDepth", "raw="+rawSummary);
++      Log.i("IndependentArDepth", "tracking="+camera.getTrackingState()+",poseT="+java.util.Arrays.toString(camera.getPose().getTranslation())+",frameNs="+frame.getTimestamp()+",focus="+session.getConfig().getFocusMode()+",cpu="+session.getCameraConfig().getImageSize()+",depth="+depthSummary);
++    }
+ 
+     // Update BackgroundRenderer state to match the depth settings.
+     try {
+@@ -835,8 +864,21 @@ public class HelloArActivity extends AppCompatActivity implements SampleRender.R
+   }
+ 
+   /** Configures the session with feature settings. */
++  private long diagLast = 0;
++  private boolean diagConfigured = false;
+   private void configureSession() {
+     Config config = session.getConfig();
++    if (!diagConfigured) {
++      int width = getIntent().getIntExtra("cpuWidth", 0);
++      for (com.google.ar.core.CameraConfig cc : session.getSupportedCameraConfigs(new com.google.ar.core.CameraConfigFilter(session))) {
++        Log.i("IndependentArDepth", "availableCpu="+cc.getImageSize()+",gpu="+cc.getTextureSize()+",fps="+cc.getFpsRange());
++        if (width > 0 && cc.getImageSize().getWidth() == width) { session.setCameraConfig(cc); width=0; }
++      }
++      diagConfigured = true;
++    }
++    if ("AUTO".equals(getIntent().getStringExtra("focus"))) config.setFocusMode(Config.FocusMode.AUTO);
++    else config.setFocusMode(Config.FocusMode.FIXED);
++    config.setPlaneFindingMode(Config.PlaneFindingMode.HORIZONTAL);
+     config.setLightEstimationMode(Config.LightEstimationMode.ENVIRONMENTAL_HDR);
+     if (session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)) {
+       config.setDepthMode(Config.DepthMode.AUTOMATIC);
+diff --git a/samples/hello_ar_java/build.gradle b/samples/hello_ar_java/build.gradle
+index 6c9d7c0..724d79a 100644
+--- a/samples/hello_ar_java/build.gradle
++++ b/samples/hello_ar_java/build.gradle
+@@ -21,7 +21,7 @@ buildscript {
+         mavenCentral()
+     }
+     dependencies {
+-        classpath 'com.android.tools.build:gradle:8.4.0'
++        classpath 'com.android.tools.build:gradle:8.13.1'
+         // NOTE: Do not place your application dependencies here; they belong
+         // in the individual module build.gradle files
+     }

@@ -49,6 +49,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   @Volatile private var knownReferenceImages = 0
   @Volatile private var configuredReferenceImages = 0
   private val terrain=TerrainAnalysis()
+  private val depthReadiness=LocalDepthReadiness()
+  @Volatile private var depthState=LocalDepthReadiness.State()
   @Volatile private var terrainSnapshot=TerrainSnapshot(false,"SELECT_GROUND")
   @Volatile private var groundArmed=false
   @Volatile private var horizontalPlanes=0
@@ -96,6 +98,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     val terrainActions=LinearLayout(activity)
     terrainActions.addView(button("点选平面") {
       if (!active) toast("请先开始扫描并恢复当前地图定位")
+      else if (!depthState.ready) toast("深度正在准备，请先缓慢左右平移，稳住后再点选平面")
       else { groundArmed=true; terrainState.text="请点击左侧画面中的地板或测试台面，随后确认用途。" }
     }.apply { setOnLongClickListener { if (active) editCameraHeight() else toast("请先开始扫描");true } },LinearLayout.LayoutParams(0,-2,1f))
     terrainActions.addView(button("底座尺寸") { editEnvelope() },LinearLayout.LayoutParams(0,-2,1f))
@@ -169,6 +172,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     activity.runOnUiThread { depthOverlay?.let { it.dots=emptyList();it.outlines=emptyList();it.invalidate() } }
   }
   private fun editCameraHeight() {
+    if (!depthState.ready) { toast("请先缓慢平移，等待近处深度就绪；再将底座放平，按实测姿态标定");return }
     val input=EditText(activity).apply {
       inputType=8194;setSingleLine();hint="主镜头中心距平面的垂直高度（厘米）"
       val value=activity.getSharedPreferences("terrain-camera",0).getFloat("height",0f)
@@ -181,6 +185,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       fun choose(actualFloor: Boolean) {
         val h=input.text.toString().toFloatOrNull()?.div(100)
         if (h==null || !h.isFinite() || h !in .03f..2.5f) { input.error="请填写3～250厘米的实测镜头高度";return }
+        if (!active || !depthState.ready) { toast("深度暂不可用，请恢复扫描后再确认标定");dialog.dismiss();return }
         activity.getSharedPreferences("terrain-camera",0).edit().putFloat("height",h).apply()
         pendingHeight=HeightChoice(h,actualFloor);dialog.dismiss()
       }
@@ -212,7 +217,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       "FOOTPRINT_NOT_COVERED" -> "已看到局部平面，整车范围仍有未知或障碍。"
       else -> ""
     }
-    if (!groundArmed) terrainState.text=message+(if (s.groundSelected && sampling.isNotEmpty()) "\n$sampling" else "")+"\n灰未知 / 青地面 / 红障碍 / 橙落差 / 绿候选"
+    val warmup=if (active && !depthState.ready) "深度准备中：请缓慢左右平移，等待近处观测。${if (!s.groundSelected) "就绪后再点选平面或标定高度。" else "当前参考面保留，旧观测会过期。"}\n" else ""
+    if (!groundArmed) terrainState.text=warmup+message+(if (s.groundSelected && sampling.isNotEmpty()) "\n$sampling" else "")+"\n灰未知 / 青地面 / 红障碍 / 橙落差 / 绿候选"
     terrainView.snapshot=s; terrainView.invalidate()
   }
   private fun newMap() {
@@ -468,6 +474,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   /** Before Session.configure. Called on UI thread while GL is stopped. */
   fun configure(session: Session,id: String,config: Config) {
     lastTerrainUiNs=0
+    depthReadiness.reset();depthState=LocalDepthReadiness.State()
     generation++
     clearTerrain()
     horizontalPlanes=0
@@ -490,7 +497,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       } finally { bitmap.recycle() }
     }
   }
-  fun pause() { generation++; active=false; mapper?.invalidate(); clearTerrain(); renderTerrain(); if (::mapView.isInitialized) { mapView.position=null; mapView.forward=null; mapView.invalidate(); state.text="扫描已暂停，当前位置无效。地图可保存或重新打开。" } }
+  fun pause() { generation++; active=false; depthReadiness.reset();depthState=LocalDepthReadiness.State();mapper?.invalidate(); clearTerrain(); renderTerrain(); if (::mapView.isInitialized) { mapView.position=null; mapView.forward=null; mapView.invalidate(); state.text="扫描已暂停，当前位置无效。地图可保存或重新打开。" } }
   fun close() { io.shutdown() }
   fun report(): Map<String,Any?>? = mapper?.summary()?.let { it + mapOf("lastSavedAt" to if (it["mapId"]==savedId) savedAt else 0L,
     "referenceTrackingState" to referenceState,"referenceTrackingMethod" to referenceMethod,
@@ -499,6 +506,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     "terrain" to (terrainSnapshot.report()+mapOf("trackedHorizontalPlanes" to horizontalPlanes,"surfaceSource" to surfaceSource,
       "calibratedCameraHeightMeters" to calibratedHeight,"hybridDepth" to hybridReport,
       "surfaceAnchorTrackingState" to surfaceAnchorState,
+      "depthReadiness" to depthState.report(),
       "depthCapture" to depthRecorder.report()))) }
   fun canStart() = mapper != null && !saving && !restoring
   /** GL thread, depth sampled at up to 10 Hz; view snapshots limited to 2 Hz. */
@@ -553,11 +561,13 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     }
     val located=current.observePose(sessionId,rigid(frame.camera.pose),tracking && (!hasReference || anchor?.trackingState==TrackingState.TRACKING))
     active=located
-    if (located && sample!=null) {
+    depthState=depthReadiness.update(frame.timestamp,depthNs,sample,located)
+    if (located && depthState.ready && sample!=null) {
       val intrinsics=frame.camera.textureIntrinsics; val f=intrinsics.focalLength; val c=intrinsics.principalPoint; val dim=intrinsics.imageDimensions
       current.fuse(sessionId,rigid(frame.camera.pose),sample,f[0],f[1],c[0],c[1],dim[0],dim[1],frame.timestamp,depthNs)
     }
-    if (located) analyzeTerrain(session,current,frame,sample,depthNs,token,dense,denseNs)
+    if (located) analyzeTerrain(session,current,frame,if (depthState.ready) sample else null,
+      if (depthState.ready) depthNs else 0,token,dense,denseNs)
     else clearTerrain("LOCALIZATION_REQUIRED")
     // Depth/terrain run at up to 10 Hz; map copies and Android view updates stay at 2 Hz.
     if (lastTerrainUiNs>0 && frame.timestamp>=lastTerrainUiNs && frame.timestamp-lastTerrainUiNs<500_000_000L) return
@@ -578,6 +588,9 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   /** GL thread only: ARCore planes are proposals, never automatically declared floor. */
   private fun analyzeTerrain(session: Session,current: RoomMapper,frame: Frame,sample: DepthSamples.Result?,depthNs: Long,token: Int,
     dense: DepthSamples.Result?,denseNs: Long) {
+    // Do not establish a physical-height anchor before metric depth initializes.
+    // A later depth gap preserves an existing reference; terrain evidence still expires.
+    if (!depthState.ready) { groundArmed=false;groundTap=null;pendingGround=null;pendingHeight=null }
     val tap=groundTap; groundTap=null
     if (tap!=null) {
       val hits=frame.hitTest(tap[0],tap[1])

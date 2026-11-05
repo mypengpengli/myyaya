@@ -308,7 +308,9 @@ class NavigationProbeActivity : Activity() {
       if (mapping) check(supportedRaw) { "此设备不支持带置信度的原始深度建图" }
       current.configure(Config(current).apply {
         depthMode = activeMode
-        focusMode = Config.FocusMode.AUTO
+        // AR tracking follows the official sample's fixed focus. Photo/video
+        // capture uses its own camera session; this is not a fix for native faults.
+        focusMode = Config.FocusMode.FIXED
         planeFindingMode = if (mapping) Config.PlaneFindingMode.HORIZONTAL else Config.PlaneFindingMode.DISABLED
         if (mapping) roomMap?.configure(current, requireNotNull(sessionId), this)
       })
@@ -327,6 +329,7 @@ class NavigationProbeActivity : Activity() {
       record(JSONObject().put("event", "resumed").put("depthMode", activeMode.name)
         .put("automaticSupported", supportedAuto).put("rawSupported", supportedRaw)
         .put("cameraId", current.cameraConfig.cameraId)
+        .put("focusMode", current.config.focusMode.name).put("arcoreClientSdk", "1.57.0")
         .put("cameraImageWidth", imageSize.width).put("cameraImageHeight", imageSize.height))
     } catch (error: Exception) {
       userWantsRunning = false

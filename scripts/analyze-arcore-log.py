@@ -19,8 +19,12 @@ def summarize(text):
     lines = text.splitlines()
     offsets = [float(value) for value in re.findall(
         r"Camera to IMU clock offset \(([-\d.]+)ms\)", text)]
-    summaries = [line for line in lines if "IndependentArDepth" in line]
+    summaries = [line for line in lines if "IndependentArDepth" in line and "tracking=" in line]
+    raw = [line for line in lines if "IndependentArDepth" in line and "raw=" in line]
     medians = [int(value) for line in summaries for value in re.findall(r"medianMm=(\d+)", line)]
+    positive_medians = [value for value in medians if value > 0]
+    raw_counts = [int(value) for line in raw for value in re.findall(r"raw=count=(\d+)", line)]
+    raw_local = [int(value) for line in raw for value in re.findall(r",local=(\d+)", line)]
     return {
         "logLines": len(lines),
         "rectifierFailureLines": sum("Only kUnrectifiedOriginal is supported for ComputeDisparity" in line for line in lines),
@@ -37,8 +41,15 @@ def summarize(text):
             "trackingReports": sum("tracking=TRACKING" in line for line in summaries),
             "depthUnavailableReports": sum("NotYetAvailableException" in line for line in summaries),
             "positiveMedianReports": sum(value > 0 for value in medians),
+            "zeroDepthReports": sum(value == 0 for value in medians),
             "medianMmMin": min(medians) if medians else None,
             "medianMmMax": max(medians) if medians else None,
+            "positiveMedianMmMin": min(positive_medians) if positive_medians else None,
+            "positiveMedianMmMax": max(positive_medians) if positive_medians else None,
+            "rawReports": len(raw),
+            "rawConfidentPointsMax": max(raw_counts) if raw_counts else None,
+            "rawConfidentLocalPointsMax": max(raw_local) if raw_local else None,
+            "rawDistinctDepthTimestamps": len({value for line in raw for value in re.findall(r"rawNs=(\d+)", line)}),
         },
         "interpretation": "Native fault evidence; not a metric-accuracy test or a confirmed device-profile diagnosis.",
     }
