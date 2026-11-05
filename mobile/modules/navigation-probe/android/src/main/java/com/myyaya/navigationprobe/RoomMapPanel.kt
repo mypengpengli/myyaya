@@ -127,7 +127,9 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     taughtRoutes?.let { addView(it.buildView(),2) }
   }
   fun addActions(actions: LinearLayout) {
-    taughtRoutes?.let { panel->actions.addView(button("停止导航") { panel.stop("用户停止") },LinearLayout.LayoutParams(0,-2,1f)) }
+    taughtRoutes?.let { panel->actions.addView(button("停止导航") { panel.stop("用户停止") }.apply {
+      setBackgroundColor(Color.rgb(180,38,38));setTextColor(Color.WHITE)
+    },LinearLayout.LayoutParams(0,-2,1f)) }
     actions.addView(button("保存地图") { save() },LinearLayout.LayoutParams(0,-2,1f))
     actions.addView(button("标记地点") { addPlace() },LinearLayout.LayoutParams(0,-2,1f))
     actions.addView(button("导出地图") { export() },LinearLayout.LayoutParams(0,-2,1f))

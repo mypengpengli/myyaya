@@ -32,7 +32,7 @@ export const phoneTools: AgentTool[] = [
       const { listTaughtRoutes } = await import("../../modules/navigation-probe");
       const route = (await listTaughtRoutes()).find((r) => r.id === (params as { route_id: string }).route_id);
       if (!route) throw new Error("未找到该路线，请先查看已教路线");
-      setTimeout(() => { void import("../navigation/route-robot-session").then(({ openTaughtRouteSession }) => openTaughtRouteSession(route.id))
+      setTimeout(() => { if(signal?.aborted) return;void import("../navigation/route-robot-session").then(({ openTaughtRouteSession }) => signal?.aborted ? null : openTaughtRouteSession(route.id))
         .catch((error) => Alert.alert("路线导航",error instanceof Error ? error.message : String(error))); }, 0);
       return text({ route: route.name, status: "opening_route_setup", moving: false, notice: "正在打开指定路线，需在导航页完成定位与校验后开始复走。" });
     } },
