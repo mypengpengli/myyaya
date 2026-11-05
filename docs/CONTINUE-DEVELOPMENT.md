@@ -2,11 +2,19 @@
 
 ## 最新：2026-11-05，2.1.176
 
-用户要求继续解决，不接受归因白色桌面即停止。176已做同会话AUTOMATIC原始/完整深度交叉验证与补全，修正小幅平面修正时混用旧高度基准，增加彩色深度叠加、青色AR平面边界、检测平面与已测网格分开显示、本地深度回放。70项原生测试、[最终源码CI](https://github.com/mypengpengli/myyaya/actions/runs/41964706139)与原签名安装检查通过。源码 `7cc5272df656feed7b9257b6788d8672276f6c41`；最终APK SHA256 `2cfb74fbb60b2f7ebc404ec694e53282fc6af285cb35e10e4bc2c1e86f7d8df8`，174378086字节。
+用户要求继续解决，不接受归因白色桌面即停止。176已做同会话AUTOMATIC原始/完整深度交叉验证与补全，修正小幅平面修正时混用旧高度基准，增加彩色深度叠加、青色AR平面边界、检测平面与已测网格分开显示、本地深度回放；最后补DepthPoint邻域拟合、镜头高度标定与会话Anchor。头部可上下滑动/俯仰，10cm只初始化参考面，之后由实时相机/Anchor位姿补偿，不每帧强制当前镜头高度不变。77项原生测试、[最终源码CI](https://github.com/mypengpengli/myyaya/actions/runs/41968264628)与原签名安装检查通过。源码 `9a856fdecba8e1f0d9ad8c2d9ac96047188236c6`；APK SHA256 `e512782074b1fd6f03f7be29608deb7b982ed5eace58d3c4fd1c27a1e81849dc`，174378086字节，源快照 `b1402836e0655691e654af3956db44391e019ab636c383e2e02b14e6b34b111b`。
 
 初版Hybrid176（UUID `3a71e5fb-2e06-4bc6-a26f-14b4ae9fd31d`）已观察到融合点、3个实测平面网格，手机约30FPS/热状态0；两路重合中位差4～6mm。`.tools/176-capture.ndjson`为105份有效本地回放数据，`.tools/176-first-session.ndjson`手机原始日志。离线同批数据重建旧/当前基准、原始/融合4组合：原始最多1格，融合最多4格；所有候选0。基准修正有回归测试支持，但回放不支持将它单独认定为本场景提升主因。`.tools/176-replay-comparison.txt`保留结果，`.tools/ReplayComparison.java`和二进制为本地诊断。
 
-最终包已装并新建White176，正在等待用户按已发问题暂拿开彩色券、保持罐子不动，移动约20cm/15秒。后摄状态已经实际显示“尚在检测水平面”，不能把平面轮廓或白桌面已通过写成事实。长采样进程记录`.tools/176-white-live.ndjson`，检测出平面后会尝试桌面几个点并选择台面用途；勿重复发送运动指令，此阶段从未驱动电机。176草稿Release id `434766819`，代理与直连两个APK上传仍进行中，必须核对只保留一个正式文件名且四附件摘要一致后才发布。详见[联合校验](HYBRID-DEPTH.md)。
+White176对照已完成：用户拿开彩色券，SDK检测出多个水平候选，但部分轮廓明显不贴合桌面，不能记桌面准确识别通过。用户确认镜头中心距平面约10cm；与早先SDK给约6cm不同，但姿态不是严格真值对照，不能宣称独立4cm误差。用户提醒头部上下运动，已将未发布的固定高度逐帧重建策略改为会话Anchor固定参考面，允许当前cameraHeight变化。用户后来重新平铺彩纸，现用它核对投影，不当作产品必须贴纸。
+
+最终Height176已新建并运行，长按点选平面填写10cm并选台面：读回MEASURED_HEIGHT/0.1m/Anchor TRACKING。用户已完成20cm/10秒平移，数据`.tools/176-height-live.ndjson`500份：当前镜头高约4.05～14.10cm，平面/障碍/候选0，落差最多2格，未与实物核对。双深度回放`.tools/176-height-capture.ndjson`120份已拉回。raw缺测/稀疏、dense反复十几米；不能记为融合/测距成功。已保存并暂停，不需要用户继续平移。
+
+关键新线索：`.tools/176-arcore-internal.log`原生334行rectifier错误、138行相机/IMU时间差错误，14.62～27.39ms，未见FATAL EXCEPTION/VIO_RESET。`python scripts/analyze-arcore-log.py <本地日志>`可重算；[排查记录](ARCORE-RUNTIME-DIAGNOSIS.md)有范围和官方资料。不能只归因白桌面，也不能直接认定其他机型issue等于本机已证实根因。主摄Camera2零畸变仅是输出记录。手机global低电量模式和MIUI省电均0，电量约6%、USB慢充。
+
+独立官方示例在 `D:/myyaya-toolchain/arcore-reference`，v1.48.0（commit b73725b586bb18b622d6e1c6aee9650176d4679d），hello_ar_java加500ms深度统计，默认FIXED，对比AUTO、可选CPU图像宽度。AGP改为本机缓存8.13.1、SDK36/build-tools36；本机Gradle9.3.1构建通过。首次因锁屏安装被MIUI取消。已通过异步问题请求解锁，`.tools/compare-arcore-phone.py`可等解锁后安装、采35秒并停止；没有收到解锁时不能写成示例已经复现。这个示例不含个人数据或电机代码；临时包名 `com.google.ar.core.examples.java.helloar`。此阶段没有发送任何头部或履带命令。
+
+176草稿Release id `434766819`。最终APK已上传并改为正式文件名，asset id `712062868`、SHA e512…；旧的70测试APK资产已删除。三个小附件已换成当前最终包，需结束现场验收、核对四附件摘要及target后再发布，不能把草稿说成已公开。详见[联合校验](HYBRID-DEPTH.md)。
 
 ## 最新：2026-11-05，2.1.175续修
 

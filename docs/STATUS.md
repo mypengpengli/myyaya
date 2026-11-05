@@ -4,7 +4,11 @@
 
 已实现同会话原始/完整深度交叉校验与锚点附近补全、当前相机/平面基准一致、深度点叠加、水平面轮廓、平面检测与覆盖计数分开显示，以及有上限的本地回放。不是因白色桌面就放弃：实测移动后两路重合中位差4～6mm，融合和实测平面网格已出现；同105帧离线回放，原始深度最多1格、融合最多4格，整车候选仍0。回放未证明基准修正是本场景改善主因，融合的收益更直接。
 
-70项原生测试、[最终源码CI](https://github.com/mypengpengli/myyaya/actions/runs/41964706139)及APK检查通过，原签名最终包已安装。源码 `7cc5272df656feed7b9257b6788d8672276f6c41`，APK SHA256 `2cfb74fbb60b2f7ebc404ec694e53282fc6af285cb35e10e4bc2c1e86f7d8df8`。最终White176地图正在做拿开彩色券的对照；结果待用户完成，不能记白桌面无参照物验收或自主通行已通过。176 Release目前为草稿，等待附件上传与最后核对。见[实现与官方资料](HYBRID-DEPTH.md)、[现场记录](PHONE-CHECK-2026-11-05.md)。
+最终补齐DepthPoint邻域拟合、镜头高度标定与会话锚点。高度仅初始化参考面，之后镜头升降/俯仰通过实时6DoF位姿处理，不每帧固定在10cm。77项原生测试、[最终源码CI](https://github.com/mypengpengli/myyaya/actions/runs/41968264628)及APK检查通过，已原签名安装并核对手机哈希。源码 `9a856fdecba8e1f0d9ad8c2d9ac96047188236c6`，APK SHA256 `e512782074b1fd6f03f7be29608deb7b982ed5eace58d3c4fd1c27a1e81849dc`。
+
+用户实测镜头中心约10cm，已填入手机Height176图，读回 `surfaceSource=MEASURED_HEIGHT`、初始高0.1m、`surfaceAnchorTrackingState=TRACKING`。用户完成短平移后，锚点保持跟踪，但原始深度仍缺测/稀疏，完整深度反复十几米，确认平面及整车候选仍0。进一步取得334行ARCore rectifier计算错误与138行相机/IMU时差错误（约14.62～27.39ms）；正在用独立官方示例隔离相机配置和运行时问题，不能只归因白桌面。见[运行时排查](ARCORE-RUNTIME-DIAGNOSIS.md)。
+
+白桌面连续通行、独立精度及真实头部动作尚未通过；不会把单元测试或参考面初始化当作已完成自主导航。176 Release仍为草稿。见[实现与官方资料](HYBRID-DEPTH.md)、[现场记录](PHONE-CHECK-2026-11-05.md)。
 
 ## 最新：2026-11-05，2.1.175续修
 

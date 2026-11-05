@@ -48,3 +48,5 @@ LOOI SDK中的head写入是目标动作字节，不是已校准的镜头角度�
 诊断 `terrain.hybridDepth` 记录两路一致性和补全数。`terrain.depthCapture` 给出本地回放文件名，位于应用外部私有目录 `navigation-probe/depth-evidence-*.ndjson`，最多120个新鲜采样、保留3个文件。包含两路压缩深度、内参、当前相机位姿和平面，不保存相机照片，也不上传服务器。文件属于个人环境数据，不加入仓库或Release附件。
 
 可用 `python scripts/analyze-depth-evidence.py <文件> --frame 3 --csv points.csv` 重建逐点平面残差和3×3图像分区统计。应结合实际画面核对已知桌面、券面和罐体，不能只看总体中位数。手机验证结果继续记入[11月5日记录](PHONE-CHECK-2026-11-05.md)。
+
+同一会话的两路深度共享ARCore底层，交叉一致不能证明独立测距准确。现场后续发现原生rectifier和相机/IMU时间错误，参见[运行时排查](ARCORE-RUNTIME-DIAGNOSIS.md)；即使Anchor显示TRACKING也不能跳过这一检查。
