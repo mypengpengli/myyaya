@@ -28,11 +28,13 @@ class LocalDepthReadinessTest {
       repeat(5) { val t=base+it*200_000_000L;assertFalse(g.update(t,t,sample,true).ready) }
     }
   }
-  @Test fun briefGapsRetainReadinessButExpiredEvidenceRequiresWarmup() {
+  @Test fun stoppingToSelectPlanePreservesInitializationButMarksDepthStale() {
     val g=LocalDepthReadiness();warm(g)
     assertTrue(g.update(base+600_000_000L,0,null,true).ready)
-    assertFalse(g.update(base+3_500_000_000L,0,null,true).ready)
-    assertFalse(g.update(base+3_600_000_000L,base+3_600_000_000L,good,true).ready)
+    val stale=g.update(base+3_500_000_000L,0,null,true)
+    assertTrue(stale.ready);assertEquals("INITIALIZED_DEPTH_STALE",stale.reason)
+    assertEquals(false,stale.report()["nearEvidenceFresh"])
+    assertTrue(g.update(base+3_600_000_000L,base+3_600_000_000L,good,true).ready)
   }
   @Test fun trackingLossAndClockRollbackDiscardReadiness() {
     val g=LocalDepthReadiness();warm(g)

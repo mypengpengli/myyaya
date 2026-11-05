@@ -2,9 +2,10 @@ package com.myyaya.navigationprobe
 
 /** Startup evidence only, not a metric accuracy claim or a motion authorization. */
 internal class LocalDepthReadiness {
-  data class State(val ready: Boolean=false,val reason: String="WAITING_FOR_RAW_DEPTH",val frames: Int=0,val nearPoints: Int=0) {
+  data class State(val ready: Boolean=false,val reason: String="WAITING_FOR_RAW_DEPTH",val frames: Int=0,val nearPoints: Int=0,val ageMs: Long?=null) {
     fun report(): Map<String,Any> = mapOf("ready" to ready,"reason" to reason,"stableFrames" to frames,
-      "nearRawPoints" to nearPoints,"requiredFrames" to 3,"minimumNearPoints" to 32,"evidenceTtlMs" to 3000)
+      "nearRawPoints" to nearPoints,"requiredFrames" to 3,"minimumNearPoints" to 32,
+      "nearEvidenceFresh" to (ageMs!=null && ageMs<=3000),"initializedUntilTrackingLost" to true)
   }
   private var lastNow=0L
   private var lastRaw=0L
@@ -19,7 +20,9 @@ internal class LocalDepthReadiness {
     if (!tracking || now<=0) { reset();return State(reason="TRACKING_LOST") }
     if (now<lastNow) reset()
     lastNow=now
-    if (lastGood>0 && now-lastGood>3_000_000_000L) { established=false;goodFrames=0;firstGood=0 }
+    // Initialization survives a stationary camera. The terrain's separate TTL
+    // still expires observations; a depth gap must not prevent selecting a plane.
+    if (!established && lastGood>0 && now-lastGood>3_000_000_000L) { goodFrames=0;firstGood=0 }
     val near=sample?.millimeters?.count { it in 200..4000 } ?: 0
     var reason=when {
       sample==null -> "WAITING_FOR_RAW_DEPTH"
@@ -34,8 +37,9 @@ internal class LocalDepthReadiness {
         if (goodFrames==0) firstGood=rawNs
         goodFrames++;lastGood=rawNs
         if (goodFrames>=3 && rawNs-firstGood>=300_000_000L) established=true
-      } else { goodFrames=0;firstGood=0 }
+      } else if (!established) { goodFrames=0;firstGood=0 }
     } else if (!fresh) reason="WAITING_FOR_FRESH_DEPTH"
-    return State(established,if (established) "READY" else reason,goodFrames,near)
+    val age=if (lastGood>0) (now-lastGood)/1_000_000L else null
+    return State(established,if (established) if (age!=null && age<=3000) "READY" else "INITIALIZED_DEPTH_STALE" else reason,goodFrames,near,age)
   }
 }
