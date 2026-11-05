@@ -97,14 +97,15 @@ class NavigationProbeActivity : Activity() {
     directory.mkdirs()
     val probeId = UUID.randomUUID().toString()
     logFile = File(directory, "probe-$probeId.ndjson")
+    mapping = intent.getBooleanExtra("mapping", false)
     directory.listFiles()?.filter { it.name.startsWith("probe-") && it.extension == "ndjson" }
       ?.sortedByDescending { it.lastModified() }?.drop(4)?.forEach { it.delete() }
     lastReport = JSONObject().put("schemaVersion", 1).put("probeId", probeId)
       .put("device", "${Build.MANUFACTURER} ${Build.MODEL}").put("sdk", Build.VERSION.SDK_INT)
       .put("coordinateFrame", "arcore-session-camera-not-base")
       .put("autonomousMotionEnabled", false).put("mapPersisted", false)
-      .put("depthPollIntervalMs", 500).put("position", JSONObject.NULL).put("running", false)
-    mapping = intent.getBooleanExtra("mapping", false)
+      .put("depthPollIntervalMs", if (mapping) 100 else 500).put("reportIntervalMs", 500)
+      .put("position", JSONObject.NULL).put("running", false)
     if (mapping) roomMap = RoomMapPanel(this, { resetMapSession() }, {
       userWantsRunning = false; pauseCapture("map-export-paused")
     })
@@ -481,7 +482,7 @@ class NavigationProbeActivity : Activity() {
     private var pathSession: Session? = null
     private val vertices = floats(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f))
     private val uv = floats(FloatArray(8))
-    private var lastUiMs = 0L
+    private val cadence = ProbeCadence(mapping)
     private var lastFrameNs = 0L
     private var lastDepthNs = 0L
     private var intervalFrames = 0
@@ -530,11 +531,11 @@ class NavigationProbeActivity : Activity() {
           wasRunning = true
           intervalStart = SystemClock.elapsedRealtime()
           intervalFrames = 0
-          lastUiMs = 0
+          cadence.reset()
         }
         if (pathSession !== current) {
           path.clear(); segment = 0; frames = 0; newDepthSamples = 0
-          lastFrameNs = 0; lastDepthNs = 0; lastUiMs = 0
+          lastFrameNs = 0; lastDepthNs = 0; cadence.reset()
           previousTracking = false
           pathSession = current
         }
@@ -560,8 +561,7 @@ class NavigationProbeActivity : Activity() {
         GLES20.glDisableVertexAttribArray(p); GLES20.glDisableVertexAttribArray(t)
         if (lastFrameNs != frame.timestamp) { frames++; intervalFrames++; lastFrameNs = frame.timestamp }
         val now = SystemClock.elapsedRealtime()
-        if (now - lastUiMs < 500) return
-        lastUiMs = now
+        val tick = cadence.poll(now) ?: return
         val tracking = frame.camera.trackingState == TrackingState.TRACKING
         if (breakPath || !tracking || !previousTracking) { segment++; breakPath = false }
         previousTracking = tracking
@@ -571,7 +571,7 @@ class NavigationProbeActivity : Activity() {
           if (path.size > 1200) path.removeAt(0)
         }
         val fps = intervalFrames * 1000.0 / max(1L, now - intervalStart)
-        intervalStart = now; intervalFrames = 0
+        if (tick.publish) { intervalStart = now; intervalFrames = 0 }
         val row = JSONObject().put("event", "sample").put("running", true).put("frameTimestampNs", frame.timestamp)
           .put("trackingState", frame.camera.trackingState.name).put("trackingFailureReason", frame.camera.trackingFailureReason.name)
           .put("position", pose?.let { JSONArray(it.translation.toList()) } ?: JSONObject.NULL)
@@ -614,7 +614,7 @@ class NavigationProbeActivity : Activity() {
                   .put("depthNearP05Mm", sample.nearP05Mm ?: JSONObject.NULL)
                   .put("depthWidth", depth.width).put("depthHeight", depth.height).put("depthSamples", newDepthSamples)
                   .put("confidenceThreshold", if (raw) if (mapping) 153 else 77 else JSONObject.NULL)
-                bitmap = depthBitmap(sample)
+                if (tick.publish && !mapping) bitmap = depthBitmap(sample)
                 val distances = if (sample.medianMm == null) "尚无有效距离" else String.format(Locale.US,
                   "距离统计 P05 %.2fm / 中位 %.2fm（未校准）", (sample.nearP05Mm ?: 0) / 1000.0, sample.medianMm / 1000.0)
                 depthText = String.format(Locale.US, "%s：%s %.0f%% · %s · 数据龄 %.0fms\n%s\n红近蓝远，黑色未知；深度图为传感器原始方向。",
@@ -636,6 +636,8 @@ class NavigationProbeActivity : Activity() {
             runOnUiThread { if (running && !isDestroyed) roomMap?.save(true) }
           }
         }
+        if (!tick.publish) return
+        row.put("depthPollIntervalMs", cadence.sampleIntervalMs).put("reportIntervalMs", cadence.reportIntervalMs)
         record(row)
         val snapshot = path.toTypedArray()
         val positionText = pose?.let { String.format(Locale.US, "相机位置 x %.2f / y %.2f / z %.2f 米", it.tx(), it.ty(), it.tz()) } ?: "位置无效：等待重新跟踪"

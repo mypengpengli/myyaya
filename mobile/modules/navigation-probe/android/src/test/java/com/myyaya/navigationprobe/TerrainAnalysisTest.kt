@@ -124,4 +124,50 @@ class TerrainAnalysisTest {
     assertEquals("OBSERVING",r.status); assertEquals(.05f,r.cameraHeight!!,.00001f)
     assertEquals(false,r.report()["groundSelected"])
   }
+  @Test fun diagnosticsSeparateSparseCoverageFromMissingFrames() {
+    val a=analyzer(); val point=listOf(floatArrayOf(.025f,0f,-.375f))
+    val first=a.update(camera,plane,1_000_000_000L,1_000_000_000L,point).depthEvidence
+    assertEquals(1,first.insufficientFramesCells); assertEquals(1,first.insufficientCoverageCells)
+    val repeated=observe(a,point,1_100_000_000L).depthEvidence
+    assertEquals(0,repeated.insufficientFramesCells); assertEquals(1,repeated.insufficientCoverageCells)
+    assertEquals("PLANE_EVIDENCE_INSUFFICIENT",repeated.blockingReason)
+  }
+  @Test fun diagnosticsDistinguishPlaneEvidenceFromFullFootprintCoverage() {
+    val narrow=observe(analyzer(),patch(-1..0)).depthEvidence
+    assertEquals("FOOTPRINT_NOT_COVERED",narrow.blockingReason)
+    assertEquals("CANDIDATES_PRESENT",observe(analyzer(),patch()).depthEvidence.blockingReason)
+  }
+  @Test fun diagnosticCountsAndHeightDistributionDescribeOnlyAcceptedDepth() {
+    val a=analyzer()
+    val points=listOf(floatArrayOf(.025f,0f,-.375f),floatArrayOf(.125f,.1f,-.375f),
+      floatArrayOf(.225f,-.1f,-.375f),floatArrayOf(.325f,.5f,-.375f))
+    val first=a.update(camera,plane,1_000_000_000L,1_000_000_000L,points).depthEvidence
+    assertEquals(4,first.projectedPoints); assertEquals(1,first.planePoints); assertEquals(1,first.obstaclePoints)
+    assertEquals(1,first.dropPoints); assertEquals(1,first.otherPoints)
+    assertEquals(-.1f,first.heightP05Meters!!,.0001f)
+    val repeat=a.update(camera,plane,1_100_000_000L,1_000_000_000L,emptyList()).depthEvidence
+    assertEquals("REPROJECTED",repeat.state); assertEquals(1,repeat.acceptedFrames)
+    assertEquals(4,repeat.projectedPoints); assertEquals(100L,repeat.ageMs)
+    val expired=a.update(camera,plane,4_000_000_001L,1_000_000_000L,points).depthEvidence
+    assertEquals("DEPTH_STALE",expired.blockingReason); assertEquals(0,expired.projectedPoints)
+    assertNull(expired.heightP05Meters)
+  }
+  @Test fun missingStaleAndFutureDepthCannotPretendToHaveAcceptedPoints() {
+    for ((depth,state,reason) in listOf(Triple(0L,"UNAVAILABLE","DEPTH_UNAVAILABLE"),
+      Triple(1L,"STALE","DEPTH_STALE"),Triple(2_000_000_001L,"FUTURE","DEPTH_UNAVAILABLE"))) {
+      val r=analyzer().update(camera,plane,2_000_000_000L,depth,patch()).depthEvidence
+      assertEquals(state,r.state); assertEquals(reason,r.blockingReason)
+      assertEquals(0,r.acceptedFrames); assertEquals(0,r.projectedPoints)
+    }
+  }
+  @Test fun selectionAndPlaneChangesDiscardPreviousDiagnosticEvidence() {
+    val a=analyzer(); observe(a,patch())
+    a.selectGround(plane,false)
+    val empty=a.update(camera,plane,3_000_000_000L,0,emptyList()).depthEvidence
+    assertEquals(0,empty.acceptedFrames); assertEquals(0,empty.projectedPoints)
+    observe(a,patch(),3_100_000_000L)
+    val moved=GroundPlane(floatArrayOf(0f,.1f,0f),plane.normal)
+    val after=a.update(camera,moved,5_000_000_000L,0,emptyList()).depthEvidence
+    assertEquals(0,after.acceptedFrames); assertNull(after.ageMs)
+  }
 }

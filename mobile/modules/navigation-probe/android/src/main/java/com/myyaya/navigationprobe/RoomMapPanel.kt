@@ -34,6 +34,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private var stableImage: RigidPose? = null
   private var stableSince = 0L
   private var stableCount = 0
+  private var lastTerrainUiNs = 0L
   @Volatile private var referenceState = "NOT_SEEN"
   @Volatile private var referenceMethod = "NOT_SEEN"
   @Volatile private var knownReferenceImages = 0
@@ -155,7 +156,15 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       "SELECT_GROUND","CLOCK_RESET" -> "请点选地板或测试台面，确认用途后缓慢扫描。"
       else -> "${if (s.floorConfirmed) "地面判断" else "台面试验（非地板）"} · 平面 ${r["groundCells"]} / 障碍 ${r["obstacleCells"]} / 未定 ${r["uncertainCells"]} / 候选 ${if (s.floorConfirmed) r["candidateCenterCells"] else r["benchCandidateCenterCells"]}\n相机距平面 ${s.cameraHeight?.let { "%.0f厘米".format(it*100) } ?: "待测"}；${if (s.envelope==null) "请填写底座尺寸" else "本页仅显示判断"}"
     }
-    if (!groundArmed) terrainState.text=message+"\n灰未知 / 青地面 / 红障碍 / 橙落差 / 绿候选"
+    val sampling=when (s.depthEvidence.blockingReason) {
+      "DEPTH_UNAVAILABLE","DEPTH_STALE" -> "深度尚未更新，请缓慢左右平移。"
+      "NO_PROJECTED_POINTS" -> "有效深度不足，请扫描较近且有纹理的区域。"
+      "NO_PLANE_OBSERVATIONS" -> "尚无贴近平面的有效深度，请核对所选平面并向下扫描。"
+      "PLANE_EVIDENCE_INSUFFICIENT" -> "平面采样还不充分，请缓慢扫描有纹理的区域。"
+      "FOOTPRINT_NOT_COVERED" -> "已看到局部平面，整车范围仍有未知或障碍。"
+      else -> ""
+    }
+    if (!groundArmed) terrainState.text=message+(if (s.groundSelected && sampling.isNotEmpty()) "\n$sampling" else "")+"\n灰未知 / 青地面 / 红障碍 / 橙落差 / 绿候选"
     terrainView.snapshot=s; terrainView.invalidate()
   }
   private fun newMap() {
@@ -410,6 +419,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
 
   /** Before Session.configure. Called on UI thread while GL is stopped. */
   fun configure(session: Session,id: String,config: Config) {
+    lastTerrainUiNs=0
     generation++
     clearTerrain()
     horizontalPlanes=0
@@ -440,7 +450,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     "knownReferenceImages" to knownReferenceImages,"stableReferenceSamples" to stableCount,
     "terrain" to (terrainSnapshot.report()+mapOf("trackedHorizontalPlanes" to horizontalPlanes))) }
   fun canStart() = mapper != null && !saving && !restoring
-  /** GL thread, throttled by the host to 2 Hz. */
+  /** GL thread, depth sampled at up to 10 Hz; view snapshots limited to 2 Hz. */
   fun frame(session: Session, frame: Frame, sample: DepthSamples.Result?, depthNs: Long) {
     val token=generation
     val current=mapper ?: return
@@ -489,6 +499,9 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     }
     if (located) analyzeTerrain(current,frame,sample,depthNs,token)
     else clearTerrain("LOCALIZATION_REQUIRED")
+    // Depth/terrain run at up to 10 Hz; map copies and Android view updates stay at 2 Hz.
+    if (lastTerrainUiNs>0 && frame.timestamp>=lastTerrainUiNs && frame.timestamp-lastTerrainUiNs<500_000_000L) return
+    lastTerrainUiNs=frame.timestamp
     val map=current.snapshot(); val position=current.livePosition?.clone(); val direction=current.liveForward?.clone()
     val text=if (located) "定位有效 · ${if (hasReference) "固定参照图对齐" else "仅本次会话"}\n原始深度 ≥60% 置信度 · 0.2～4 米 · ${map.voxels.size}/${RoomMapper.MAX_CELLS} 表面点"
       else if (!tracking) "定位已中断，暂停融合；请缓慢移动恢复跟踪${if (hasReference) "，并对准参照图" else ""}。"
