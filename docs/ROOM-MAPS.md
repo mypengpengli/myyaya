@@ -32,7 +32,7 @@
 
 ## 数据和计算
 
-- 原生 Kotlin 内计算，2 Hz 融合，不逐帧上传服务器、不经过 JavaScript 传送点云。
+- 原生 Kotlin 内计算，地图模式最多10Hz读取并融合新的原始深度，界面与日志2Hz；不逐帧上传服务器、不经过 JavaScript 传送点云。
 - 仅使用 Raw Depth + 置信度图，阈值 153/255（约 60%）；投影采用 textureIntrinsics，与传感器深度原始坐标对齐，保留下采样源像素步长。相机坐标 +X 右、+Y 上、-Z 前。[官方投影示例](https://github.com/google-ar/arcore-android-sdk/blob/main/samples/raw_depth_java/app/src/main/java/com/google/ar/core/examples/java/rawdepth/PointCloudHelper.java)
 - 仅融合新时间戳且距当前相机帧不超过 250ms 的数据，距离限定 0.2～4m。5cm 体素，最多 60,000 个体素、8,000 个轨迹点、128 个命名地点；地图范围限定相对原点各轴 ±25m。
 - 文件带版本号、长度限制、CRC32 校验，使用 AtomicFile 替换。损坏文件拒绝加载；坐标、参照图关系和创建会话一起保存。

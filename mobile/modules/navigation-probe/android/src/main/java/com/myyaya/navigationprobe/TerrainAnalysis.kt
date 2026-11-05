@@ -31,14 +31,14 @@ internal data class TerrainDepthEvidence(val state: String="UNAVAILABLE",val age
   val acceptedFrames: Int=0,val projectedPoints: Int=0,val planePoints: Int=0,
   val obstaclePoints: Int=0,val dropPoints: Int=0,val otherPoints: Int=0,
   val heightP05Meters: Float?=null,val heightMedianMeters: Float?=null,val heightP95Meters: Float?=null,
-  val pendingGroundCells: Int=0,val insufficientFramesCells: Int=0,val insufficientCoverageCells: Int=0,
+  val pendingGroundCells: Int=0,val insufficientFramesCells: Int=0,val insufficientCoverageCells: Int=0,val heightConflictCells: Int=0,
   val blockingReason: String="DEPTH_UNAVAILABLE") {
   fun report(): Map<String,Any?> = mapOf("state" to state,"lastAcceptedAgeMs" to ageMs,"acceptedFrames" to acceptedFrames,
     "projectedPoints" to projectedPoints,"planePoints" to planePoints,"obstaclePoints" to obstaclePoints,
     "dropPoints" to dropPoints,"otherPoints" to otherPoints,"heightP05Meters" to heightP05Meters,
     "heightMedianMeters" to heightMedianMeters,"heightP95Meters" to heightP95Meters,
     "pendingGroundCells" to pendingGroundCells,"insufficientFramesCells" to insufficientFramesCells,
-    "insufficientCoverageCells" to insufficientCoverageCells,"blockingReason" to blockingReason)
+    "insufficientCoverageCells" to insufficientCoverageCells,"heightConflictCells" to heightConflictCells,"blockingReason" to blockingReason)
 }
 internal data class TerrainSnapshot(val groundSelected: Boolean,val status: String,val cells: List<TerrainCell> = emptyList(),
   val camera: RigidPose? = null,val cameraHeight: Float? = null,val envelope: RobotEnvelope? = null,val floorConfirmed: Boolean=true,
@@ -59,7 +59,8 @@ internal data class TerrainSnapshot(val groundSelected: Boolean,val status: Stri
 /** Session-local, short-lived diagnostic evidence. Never authorizes motor commands. */
 internal class TerrainAnalysis {
   private data class Evidence(var groundAt: Long=0,val groundFrames: ArrayDeque<Long> = ArrayDeque(),
-    val quadrants: LongArray = LongArray(4),var obstacleAt: Long=0,var dropAt: Long=0,var uncertainAt: Long=0)
+    val quadrants: LongArray = LongArray(4),var obstacleAt: Long=0,var dropAt: Long=0,var uncertainAt: Long=0,
+    var planeObservedAt: Long=0)
   private data class FrameCell(var quadrants: Int=0,var minHeight: Float=Float.POSITIVE_INFINITY,
     var maxHeight: Float=Float.NEGATIVE_INFINITY,var obstacle: Boolean=false,var drop: Boolean=false,var uncertain: Boolean=false)
   private val cells=HashMap<Pair<Int,Int>,Evidence>()
@@ -132,6 +133,7 @@ internal class TerrainAnalysis {
         if (frame.drop) cell.dropAt=now
         if (frame.uncertain) cell.uncertainAt=now
         if (frame.quadrants!=0) {
+          cell.planeObservedAt=now
           if (frame.maxHeight-frame.minHeight>.03f) cell.uncertainAt=now
           else {
             cell.groundAt=now; cell.groundFrames.addLast(now)
@@ -175,21 +177,22 @@ internal class TerrainAnalysis {
       radius!=null && kind==TerrainKind.GROUND && offsets.all { (x,z) -> kinds[(key.first+x) to (key.second+z)]==TerrainKind.GROUND }) }
     val pending=cells.filter { (key,c) -> recent(c.groundAt) && kinds[key]==TerrainKind.UNCERTAIN &&
       !recent(c.uncertainAt) && !recent(c.obstacleAt) && !recent(c.dropAt) }.values
+    val conflicts=cells.values.count { recent(it.planeObservedAt) && (recent(it.uncertainAt) || recent(it.obstacleAt) || recent(it.dropAt)) }
     val age=if (lastDepth>0) (now-lastDepth)/1_000_000 else null
     val livePoints=if (lastDepth>0 && now-lastDepth<=TTL) lastPoints else TerrainDepthEvidence()
     val reason=when {
       lastDepth==0L -> if (depthState=="STALE") "DEPTH_STALE" else "DEPTH_UNAVAILABLE"
       now-lastDepth>TTL -> "DEPTH_STALE"
+      result.any { it.candidate } -> "CANDIDATES_PRESENT"
+      result.any { it.kind==TerrainKind.GROUND } -> if (envelope==null) "DIMENSIONS_REQUIRED" else "FOOTPRINT_NOT_COVERED"
+      pending.isNotEmpty() -> "PLANE_EVIDENCE_INSUFFICIENT"
+      conflicts>0 -> "PLANE_HEIGHT_CONFLICT"
       livePoints.projectedPoints==0 -> "NO_PROJECTED_POINTS"
-      cells.values.none { recent(it.groundAt) } -> "NO_PLANE_OBSERVATIONS"
-      result.none { it.kind==TerrainKind.GROUND } -> "PLANE_EVIDENCE_INSUFFICIENT"
-      envelope==null -> "DIMENSIONS_REQUIRED"
-      result.none { it.candidate } -> "FOOTPRINT_NOT_COVERED"
-      else -> "CANDIDATES_PRESENT"
+      else -> "NO_PLANE_OBSERVATIONS"
     }
     val evidence=livePoints.copy(state=depthState,ageMs=age,acceptedFrames=acceptedFrames,
       pendingGroundCells=pending.size,insufficientFramesCells=pending.count { c -> c.groundFrames.count { recent(it) }<3 },
-      insufficientCoverageCells=pending.count { c -> c.quadrants.count { recent(it) }<3 },blockingReason=reason)
+      insufficientCoverageCells=pending.count { c -> c.quadrants.count { recent(it) }<3 },heightConflictCells=conflicts,blockingReason=reason)
     return TerrainSnapshot(true,if (radius==null) "DIMENSIONS_REQUIRED" else "OBSERVING",result,camera,height,envelope,floorConfirmed,evidence)
   }
   companion object { const val CELL=.1f; const val RANGE=3f; const val TTL=3_000_000_000L; const val MAX_CELLS=4000 }

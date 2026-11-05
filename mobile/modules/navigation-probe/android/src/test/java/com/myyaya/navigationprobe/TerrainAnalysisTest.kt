@@ -170,4 +170,16 @@ class TerrainAnalysisTest {
     val after=a.update(camera,moved,5_000_000_000L,0,emptyList()).depthEvidence
     assertEquals(0,after.acceptedFrames); assertNull(after.ageMs)
   }
+  @Test fun emptyNewFrameDoesNotHideStillRecentGroundEvidenceInDiagnostics() {
+    val a=analyzer(); observe(a,patch())
+    val r=a.update(camera,plane,2_100_000_000L,2_100_000_000L,emptyList())
+    assertTrue(r.cells.any { it.candidate }); assertEquals(0,r.depthEvidence.projectedPoints)
+    assertEquals("CANDIDATES_PRESENT",r.depthEvidence.blockingReason)
+  }
+  @Test fun roughPlaneReportsHeightConflictInsteadOfRequestingMoreIdenticalFrames() {
+    val points=patch(0..0,-4..-4).mapIndexed { i,p -> p.clone().also { it[1]=if (i%2==0) -.024f else .024f } }
+    val r=observe(analyzer(),points).depthEvidence
+    assertEquals(1,r.heightConflictCells); assertEquals(0,r.pendingGroundCells)
+    assertEquals("PLANE_HEIGHT_CONFLICT",r.blockingReason)
+  }
 }

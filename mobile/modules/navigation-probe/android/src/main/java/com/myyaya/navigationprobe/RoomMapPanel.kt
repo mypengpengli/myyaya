@@ -132,7 +132,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
         if (value==null) { toast("请在提示范围内填写完整长、宽、高和余量"); return@setOnClickListener }
         activity.getSharedPreferences("terrain-envelope",0).edit().putFloat("width",value.width).putFloat("length",value.length)
           .putFloat("height",value.height).putFloat("margin",value.margin).apply()
-        terrain.setEnvelope(value); terrainSnapshot=terrainSnapshot.copy(status="OBSERVING",cells=emptyList(),envelope=value)
+        terrain.setEnvelope(value); terrainSnapshot=terrainSnapshot.copy(status="OBSERVING",cells=emptyList(),envelope=value,depthEvidence=TerrainDepthEvidence())
         renderTerrain(); dialog.dismiss()
       }
     }
@@ -161,6 +161,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       "NO_PROJECTED_POINTS" -> "有效深度不足，请扫描较近且有纹理的区域。"
       "NO_PLANE_OBSERVATIONS" -> "尚无贴近平面的有效深度，请核对所选平面并向下扫描。"
       "PLANE_EVIDENCE_INSUFFICIENT" -> "平面采样还不充分，请缓慢扫描有纹理的区域。"
+      "PLANE_HEIGHT_CONFLICT" -> "平面观测中混有高度差，请核对平面并扫描开阔区域。"
       "FOOTPRINT_NOT_COVERED" -> "已看到局部平面，整车范围仍有未知或障碍。"
       else -> ""
     }
