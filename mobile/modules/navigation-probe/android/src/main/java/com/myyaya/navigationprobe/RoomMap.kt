@@ -62,6 +62,7 @@ internal class RoomMapper(initial: RoomMapData) {
   @Synchronized fun snapshot() = data.copy(voxels = cells.values.map { it.clone() },
     path = path.map { it.clone() }, places = places.map { it.copy(position = it.position.clone()) })
   @Synchronized fun referenceEnabled() = data.referenceJpeg.isNotEmpty()
+  @Synchronized fun metadata() = data.copy(voxels=emptyList(),path=emptyList(),places=emptyList())
   @Synchronized fun summary(): Map<String, Any?> = mapOf("mapId" to data.id,"mapName" to data.name,
     "surfaceCells" to cells.size,"pathSamples" to path.size,"places" to places.map { it.name },
     "fixedReference" to data.referenceJpeg.isNotEmpty(),

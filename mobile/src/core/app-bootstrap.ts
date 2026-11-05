@@ -21,6 +21,7 @@ import { startAmbientMotionController, stopAmbientMotionController } from "./amb
 import { startSocialAttentionController, stopSocialAttentionController } from "./social-attention";
 import { isLegacyVoiceReady } from "../setup/setup-readiness";
 import { getAppMode } from "../setup/setup-storage";
+import { hasNavigationControl } from "./navigation-control-lease";
 
 let bootstrapped = false;
 let paused = false;
@@ -102,11 +103,14 @@ export async function bootstrapApp(): Promise<void> {
   runOptInLiveVoiceAcceptanceOnBoot();
 }
 
-export async function pauseAppRuntime(reason: "background" | "sleep" = "background"): Promise<void> {
+export async function pauseAppRuntime(reason: "background" | "sleep" | "navigation" = "background"): Promise<void> {
   if (!bootstrapped) return;
   desiredForegroundActive = false;
 
   return enqueueRuntimeLifecycle(async () => {
+    // Navigation is an in-app foreground dialog. It keeps BLE, but a real Home /
+    // lock event must still disconnect even though audio was already paused.
+    if (paused && reason !== "navigation" && hasNavigationControl()) await suspendLooiRobotAutoConnection(reason);
     if (desiredForegroundActive || paused) return;
     paused = true;
     stopAmbientMotionController(reason);
@@ -125,7 +129,7 @@ export async function pauseAppRuntime(reason: "background" | "sleep" = "backgrou
     await Promise.allSettled([
       // Screen-off/background is a hard suspend: stop motion and release the BLE
       // link so LOOI is free to idle/sleep and no reconnect can occur off-screen.
-      suspendLooiRobotAutoConnection(reason),
+      reason === "navigation" ? Promise.resolve() : suspendLooiRobotAutoConnection(reason),
       perceiverManager.stopAll(),
       kwsAudioFeeder.stop(),
       sttModule?.then(({ sttService }) => sttService.cancel({ resumeWakeword: false })),
@@ -155,6 +159,7 @@ export async function pauseAppRuntime(reason: "background" | "sleep" = "backgrou
 
 export async function resumeAppRuntime(): Promise<void> {
   if (!bootstrapped) return;
+  if (hasNavigationControl()) return;
   if (useUserStore.getState().robotSleeping) {
     desiredForegroundActive = false;
     recordDiagnosticEvent("app", "runtime-resume-blocked-by-sleep");

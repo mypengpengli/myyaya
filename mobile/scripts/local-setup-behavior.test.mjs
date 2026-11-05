@@ -294,6 +294,7 @@ let perceiverStarts = 0;
 let sttPrewarms = 0;
 const localFeeder = { isRunning: false, setAppCaptureAllowed() {}, stop: async () => {}, diagnosticStatus: {} };
 const bootstrap = loadTs("src/core/app-bootstrap.ts", {
+  "./navigation-control-lease": loadTs("src/core/navigation-control-lease.ts", {}),
   "./perceiver-manager": { perceiverManager: { register() {}, getRegisteredNames: () => ["voice"], start: async () => { perceiverStarts += 1; }, stopAll: () => runtime.stop() } },
   "../perceivers/voice-runtime": { voiceRuntime: runtime },
   "../store/user": { useUserStore: { getState: () => userState }, isRealtimeConversationMode: () => true },

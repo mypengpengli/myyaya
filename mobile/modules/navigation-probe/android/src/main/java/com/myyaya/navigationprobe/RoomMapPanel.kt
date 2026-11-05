@@ -23,7 +23,7 @@ import kotlin.math.*
 
 /** Native mapping UI. No motor APIs. All ARCore objects are accessed on the GL thread. */
 internal class RoomMapPanel(private val activity: Activity, private val stopAndReset: () -> Unit,
-  private val pauseOnly: () -> Unit) {
+  private val pauseOnly: () -> Unit, motor: RouteMotorGateway?=null) {
   private val directory = File(activity.filesDir,"room-maps").apply { mkdirs() }
   private val io = Executors.newSingleThreadExecutor()
   private val depthRecorder=DepthEvidenceRecorder(activity.getExternalFilesDir("navigation-probe") ?: activity.filesDir,io)
@@ -33,6 +33,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private var lastOutlineNs=0L
   @Volatile private var hybridReport: Map<String,Any?> = mapOf("status" to "WAITING")
   @Volatile private var mapper: RoomMapper? = null
+  private val taughtRoutes=motor?.let { TaughtRoutePanel(activity,it,{ mapper?.metadata() },{save(true)}) }
+  @Volatile private var observedGround: GroundPlane?=null
   @Volatile private var freshMap = false
   @Volatile private var sessionId = ""
   @Volatile private var active = false
@@ -122,8 +124,10 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     first.addView(button("打开地图") { openMap() },LinearLayout.LayoutParams(0,-2,1f))
     first.addView(button("设置参照图") { chooseReference() },LinearLayout.LayoutParams(0,-2,1f))
     addView(first,1)
+    taughtRoutes?.let { addView(it.buildView(),2) }
   }
   fun addActions(actions: LinearLayout) {
+    taughtRoutes?.let { panel->actions.addView(button("停止导航") { panel.stop("用户停止") },LinearLayout.LayoutParams(0,-2,1f)) }
     actions.addView(button("保存地图") { save() },LinearLayout.LayoutParams(0,-2,1f))
     actions.addView(button("标记地点") { addPlace() },LinearLayout.LayoutParams(0,-2,1f))
     actions.addView(button("导出地图") { export() },LinearLayout.LayoutParams(0,-2,1f))
@@ -165,6 +169,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     dialog.show()
   }
   private fun clearTerrain(status: String="SELECT_GROUND") {
+    observedGround=null
     surfaceAnchor?.let { surfaceAnchorsToRelease.add(it) };surfaceAnchor=null;surfaceAnchorState="NONE"
     groundArmed=false; groundTap=null; pendingGround=null; pendingHeight=null;selectedGround=null;fittedGround=null;calibratedHeight=null;surfaceSource="NONE";terrain.reset()
     terrainSnapshot=TerrainSnapshot(false,status,envelope=readEnvelope())
@@ -497,9 +502,10 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       } finally { bitmap.recycle() }
     }
   }
-  fun pause() { generation++; active=false; depthReadiness.reset();depthState=LocalDepthReadiness.State();mapper?.invalidate(); clearTerrain(); renderTerrain(); if (::mapView.isInitialized) { mapView.position=null; mapView.forward=null; mapView.invalidate(); state.text="扫描已暂停，当前位置无效。地图可保存或重新打开。" } }
+  fun pause() { taughtRoutes?.pause();generation++; active=false; depthReadiness.reset();depthState=LocalDepthReadiness.State();mapper?.invalidate(); clearTerrain(); renderTerrain(); if (::mapView.isInitialized) { mapView.position=null; mapView.forward=null; mapView.invalidate(); state.text="扫描已暂停，当前位置无效。地图可保存或重新打开。" } }
   fun close() { io.shutdown() }
   fun report(): Map<String,Any?>? = mapper?.summary()?.let { it + mapOf("lastSavedAt" to if (it["mapId"]==savedId) savedAt else 0L,
+    "taughtRoute" to taughtRoutes?.report(),
     "referenceTrackingState" to referenceState,"referenceTrackingMethod" to referenceMethod,
     "configuredReferenceImages" to configuredReferenceImages,
     "knownReferenceImages" to knownReferenceImages,"stableReferenceSamples" to stableCount,
@@ -509,6 +515,20 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       "depthReadiness" to depthState.report(),
       "depthCapture" to depthRecorder.report()))) }
   fun canStart() = mapper != null && !saving && !restoring
+  fun stopTaughtRoute(reason: String) { taughtRoutes?.stop(reason) }
+  fun openTaughtRoute(id: String) {
+    runCatching {
+      require(UUID.fromString(id).toString()==id)
+      val file=File(activity.filesDir,"taught-routes/$id.yayaroute");require(file.length() in 32..64000)
+      val route=TaughtRouteCodec.decode(file.readBytes());require(UUID.fromString(route.mapId).toString()==route.mapId)
+      val map=read(File(directory,"${route.mapId}.yayamap"));mapper=RoomMapper(map);freshMap=false;name=map.name
+      taughtRoutes?.selectInitial(route);render(map,"已打开路线所属地图。开始扫描后识别同一固定参照图恢复定位。")
+    }.onFailure { toast("无法打开指定路线：${it.message}") }
+  }
+  fun newPlaybackMap() {
+    mapper=RoomMapper(RoomMapData(name="录制回放",sessionId="pending"));freshMap=true
+    mapper?.snapshot()?.let { render(it,"录制回放，不驱动底座。点击开始扫描后可分析已录场景。") }
+  }
   /** GL thread, depth sampled at up to 10 Hz; view snapshots limited to 2 Hz. */
   fun frame(session: Session, frame: Frame, sample: DepthSamples.Result?, depthNs: Long,
     dense: DepthSamples.Result?=null,denseNs: Long=0) {
@@ -569,6 +589,20 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     if (located) analyzeTerrain(session,current,frame,if (depthState.ready) sample else null,
       if (depthState.ready) depthNs else 0,token,dense,denseNs)
     else clearTerrain("LOCALIZATION_REQUIRED")
+    taughtRoutes?.let { panel->
+      val camera=if(located) current.poseInMap(sessionId,rigid(frame.camera.pose)) else null
+      val points=ArrayList<FloatArray>()
+      val fresh=sample!=null && depthNs>0 && depthNs<=frame.timestamp && frame.timestamp-depthNs<=250_000_000L
+      if (fresh && camera!=null && sample!=null) {
+        val k=frame.camera.textureIntrinsics;val f=k.focalLength;val c=k.principalPoint;val d=k.imageDimensions
+        DepthProjection.points(sample,camera,f[0],f[1],c[0],c[1],d[0],d[1]) { points.add(it) }
+      }
+      val pose=camera?.let { runCatching { panel.basePose(it) }.getOrNull() }
+      val envelope=readEnvelope()
+      val clearance=if(envelope!=null) RoutePerception.evaluate(points,observedGround,pose,fresh,
+        envelope.width,envelope.length,envelope.height,max(.10f,envelope.margin),true) else RouteClearance.DEPTH_UNKNOWN
+      panel.frame(sessionId,camera,located && terrainSnapshot.groundSelected && terrainSnapshot.floorConfirmed,clearance)
+    }
     // Depth/terrain run at up to 10 Hz; map copies and Android view updates stay at 2 Hz.
     if (lastTerrainUiNs>0 && frame.timestamp>=lastTerrainUiNs && frame.timestamp-lastTerrainUiNs<500_000_000L) return
     lastTerrainUiNs=frame.timestamp
@@ -580,7 +614,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     activity.runOnUiThread {
       if (!activity.isDestroyed && token==generation) {
         render(map,text + if (saveFailed) "\n最近保存失败，请检查存储空间并重新保存。" else "")
-        mapView.position=position; mapView.forward=direction; mapView.invalidate()
+        mapView.position=position; mapView.forward=direction;mapView.route=taughtRoutes?.previewPoints() ?: emptyList();mapView.invalidate()
         renderTerrain()
       }
     }
@@ -673,6 +707,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     if ((plane!=null && (plane!!.trackingState!=TrackingState.TRACKING || plane!!.subsumedBy!=null)) || ground==null || camera==null) {
       clearTerrain("GROUND_LOST"); return
     }
+    observedGround=ground
     val points=ArrayList<FloatArray>()
     if (sample!=null && depthNs>0 && depthNs<=frame.timestamp && frame.timestamp-depthNs<=250_000_000L) {
       val k=frame.camera.textureIntrinsics; val f=k.focalLength; val c=k.principalPoint; val d=k.imageDimensions
@@ -743,6 +778,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
 
 /** Top-down surface view; no occupancy/free-space or path planning is inferred. */
 internal class SurfaceMapView(activity: Activity): View(activity) {
+  var route: List<RoutePose> = emptyList()
   var map: RoomMapData?=null
   var position: FloatArray?=null
   var forward: FloatArray?=null
@@ -750,8 +786,8 @@ internal class SurfaceMapView(activity: Activity): View(activity) {
   override fun onDraw(canvas: Canvas) {
     canvas.drawColor(Color.rgb(7,15,22))
     val map=map ?: return
-    val xs=map.voxels.map { it[0]*RoomMapper.CELL }+map.path.map { it[0] }
-    val zs=map.voxels.map { it[2]*RoomMapper.CELL }+map.path.map { it[2] }
+    val xs=map.voxels.map { it[0]*RoomMapper.CELL }+map.path.map { it[0] }+route.map { it.x }
+    val zs=map.voxels.map { it[2]*RoomMapper.CELL }+map.path.map { it[2] }+route.map { it.z }
     val minX=min(-1f,xs.minOrNull() ?: -1f); val maxX=max(1f,xs.maxOrNull() ?: 1f)
     val minZ=min(-1f,zs.minOrNull() ?: -1f); val maxZ=max(1f,zs.maxOrNull() ?: 1f)
     val scale=min((width-70)/max(2f,maxX-minX),(height-65)/max(2f,maxZ-minZ))
@@ -772,6 +808,8 @@ internal class SurfaceMapView(activity: Activity): View(activity) {
       val a=map.path[i-1]; val b=map.path[i]
       if (a[3]==b[3]) canvas.drawLine(x(a[0]),z(a[2]),x(b[0]),z(b[2]),paint)
     }
+    paint.color=Color.MAGENTA;paint.strokeWidth=4f
+    route.zipWithNext().forEach { (a,b)->canvas.drawLine(x(a.x),z(a.z),x(b.x),z(b.z),paint) }
     paint.textSize=22f
     map.places.forEach { place ->
       paint.color=Color.WHITE; canvas.drawCircle(x(place.position[0]),z(place.position[2]),5f,paint)
@@ -783,6 +821,6 @@ internal class SurfaceMapView(activity: Activity): View(activity) {
       forward?.let { canvas.drawLine(x(p[0]),z(p[2]),x(p[0]+it[0]*.35f),z(p[2]+it[2]*.35f),paint) }
     }
     paint.color=Color.LTGRAY; paint.textSize=19f
-    canvas.drawText("网格 1m · 表面投影 / 黄线轨迹 / 绿点当前位置",10f,height-9f,paint)
+    canvas.drawText("网格1m · 黄线轨迹 / 紫线所选路线 / 绿点当前位置",10f,height-9f,paint)
   }
 }

@@ -24,7 +24,9 @@ const events = [];
 const writes = [];
 let notifyFed9 = null;
 
+const navigationLease = compileTs("src/core/navigation-control-lease.ts");
 const customRequire = (id) => {
+  if (id === "../core/navigation-control-lease") return navigationLease;
   if (id === "@sourcebug/looi-sdk") return sdk;
   if (id === "./fed9-sensors") return fed9;
   if (id === "../diagnostics/diagnostic-log") {

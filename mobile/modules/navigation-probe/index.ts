@@ -13,7 +13,14 @@ type Native = {
   getStatus(): Promise<NavigationProbeStatus>;
   open(): Promise<string | null>;
   openMap(): Promise<string | null>;
+  openRoutes(token: string, name: string): Promise<string | null>;
+  routeRobotState(token: string, connected: boolean, voiceStop: boolean): Promise<void>;
+  acknowledgeRouteMotion(token: string, sequence: number, ok: boolean, message: string): Promise<void>;
+  addListener(event: string, callback: (event: RouteMotorEvent) => void): { remove(): void };
+  listTaughtRoutes(): Promise<Array<{ id: string; name: string; mapId: string; requiresReference: boolean; waypoints: number }>>;
+  stopTaughtRoute(token: string): Promise<void>;
 };
+export type RouteMotorEvent = { token: string; sequence: number; action: string; durationMs: number; reason?: string };
 let native: Native | undefined;
 function getNative(): Native {
   if (Platform.OS !== "android") throw new Error("房间视觉探针目前仅支持 Android");
@@ -24,3 +31,9 @@ export const getNavigationProbeStatus = () => getNative().getStatus();
 // cannot be released immediately after launch.
 export const openNativeNavigationProbe = () => getNative().open();
 export const openNativeRoomMap = () => getNative().openMap();
+export const openNativeTaughtRoutes = (token: string, name = "") => getNative().openRoutes(token, name);
+export const publishRouteRobotState = (token: string, connected: boolean, voiceStop = false) => getNative().routeRobotState(token, connected, voiceStop);
+export const acknowledgeRouteMotion = (token: string, sequence: number, ok: boolean, message: string) => getNative().acknowledgeRouteMotion(token, sequence, ok, message);
+export const subscribeRouteMotion = (callback: (event: RouteMotorEvent) => void) => getNative().addListener("onRouteMotion", callback);
+export const listTaughtRoutes = () => getNative().listTaughtRoutes();
+export const stopNativeTaughtRoute = (token: string) => getNative().stopTaughtRoute(token);

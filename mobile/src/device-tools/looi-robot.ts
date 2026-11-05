@@ -6,6 +6,7 @@ import {
   type LooiTransport,
 } from "@sourcebug/looi-sdk";
 import { recordDiagnosticEvent } from "../diagnostics/diagnostic-log";
+import { assertNavigationControl } from "../core/navigation-control-lease";
 import {
   decodeFed9SensorFrame,
   PROVISIONAL_TOF_OBSTACLE_MM,
@@ -635,10 +636,13 @@ async function runBoundedMotion(
   mode: "manual-bounded" | "calibrated-turn",
   details: Record<string, unknown> = {}
 ) {
+  const controlOwner = typeof details.navigationOwner === "string" ? details.navigationOwner : undefined;
+  assertNavigationControl(controlOwner);
   const requestToken = motionSequenceAbortGeneration;
   const robot = await getRobot();
   await waitForMovementSafetyReady(direction, mode);
   assertPendingMotionCurrent(requestToken, robot);
+  assertNavigationControl(controlOwner);
   assertMovementAllowed(direction, mode);
   const boundedDurationMs = clampDuration(durationMs);
   prepareMotionStart(robot, direction, mode);
@@ -684,6 +688,7 @@ export async function moveLooi(direction: string, durationMs = DEFAULT_MOVE_DURA
     await stopLooiMotion("manual-stop");
     return { ok: true, direction: normalizedDirection, durationMs: 0, safetyBounded: true };
   }
+  assertNavigationControl();
   if (normalizedDirection === "left" || normalizedDirection === "right") {
     recordDiagnosticEvent("robot", "manual-control-start", {
       direction: normalizedDirection,
@@ -726,8 +731,18 @@ export async function performLooiSocialAttentionPivot(direction: "left" | "right
   });
 }
 
+/** Route controller's short pulses reuse community BLE and all existing interlocks. */
+export async function moveLooiNavigationPulse(direction: "back" | "left" | "right", durationMs: number, owner: string) {
+  assertNavigationControl(owner);
+  if (!owner || !["back", "left", "right"].includes(direction) || !Number.isFinite(durationMs) || durationMs < 90 || durationMs > 250) {
+    throw new Error("导航短动作参数无效");
+  }
+  return runBoundedMotion(direction, Math.round(durationMs), "manual-bounded", { navigationOwner: owner });
+}
+
 /** Calibrated bounded turn. First build uses time estimates that must be tuned on the real robot. */
 export async function turnLooi(direction: "left" | "right", degrees: 90 | 180 = 90) {
+  assertNavigationControl();
   const requestToken = motionSequenceAbortGeneration;
   const robot = await getRobot();
   const durationMs = clampDuration(degrees === 180 ? TURN_180_MS : TURN_90_MS);
@@ -790,13 +805,14 @@ export async function turnLooi(direction: "left" | "right", degrees: 90 | 180 = 
  * rotations are always bounded by turnLooi().
  */
 export async function startLooiMotion(direction: string) {
-  const requestToken = motionSequenceAbortGeneration;
-  const robot = await getRobot();
   const normalizedDirection = normalizeMoveDirection(direction);
   if (normalizedDirection === "stop") {
     await stopLooiMotion("explicit-stop");
     return { ok: true, direction: normalizedDirection, continuous: false };
   }
+  assertNavigationControl();
+  const requestToken = motionSequenceAbortGeneration;
+  const robot = await getRobot();
   if (normalizedDirection === "left" || normalizedDirection === "right") {
     throw new Error("Continuous rotation is disabled; use turnLooi() for bounded turns.");
   }
@@ -882,16 +898,19 @@ export async function setLooiLight(enabled: boolean) {
   return { ok: true, enabled };
 }
 
-export async function setLooiHead(direction: string) {
+export async function setLooiHead(direction: string, navigationOwner?: string) {
+  assertNavigationControl(navigationOwner);
   const requestToken = motionSequenceAbortGeneration;
   const robot = await getRobot();
   assertPendingMotionCurrent(requestToken, robot);
+  assertNavigationControl(navigationOwner);
   await robot.setHead(direction);
   return { ok: true, direction };
 }
 
 /** Head-only conversational gestures: no wheel movement. */
 export async function performLooiHeadGesture(gesture: string, repetitions = 1) {
+  assertNavigationControl();
   const requestToken = motionSequenceAbortGeneration;
   const robot = await getRobot();
   assertPendingMotionCurrent(requestToken, robot);
@@ -974,6 +993,7 @@ function assertSequencePrimitiveCompleted(
  * interrupts any primitive.
  */
 export async function performLooiCharacterReaction(reaction: LooiCharacterReaction) {
+  assertNavigationControl();
   const sequenceToken = motionSequenceAbortGeneration;
   recordDiagnosticEvent("character", "physical-reaction-started", { reaction });
   try {
@@ -1047,6 +1067,7 @@ function pickDanceStyle(): LooiDanceStyle {
  * cancelled rather than re-starting the wheels.
  */
 export async function performLooiDance(requestedStyle: LooiDanceStyle | "random" = "random") {
+  assertNavigationControl();
   const requestedToken = motionSequenceAbortGeneration + 1;
   await stopLooiMotion("dance-start");
   if (requestedToken !== motionSequenceAbortGeneration) throw new Error("动作已取消，请重新发出指令");

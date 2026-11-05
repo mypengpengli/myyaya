@@ -1,6 +1,6 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
-import { AppState, Platform } from "react-native";
+import { Alert, AppState, Platform } from "react-native";
 import { router } from "expo-router";
 import { getLooiRobotRuntimeState } from "../device-tools/looi-robot";
 import { memoryService } from "../memory/memory-service";
@@ -22,6 +22,20 @@ const text = (value: unknown) => ({ content: [{ type: "text" as const, text: typ
 export const phoneTools: AgentTool[] = [
   ...createSkillTools(() => phoneTools.map((tool) => tool.name)),
   webSearchTool, connectRobotTool, robotActionTool, viewerControlTool,
+  { name: "list_taught_routes", label: "正在查看已教路线", description: "列出手机保存的人工教学路线。去客厅等请求先查真实路线，不能编造路线或声称已到达。",
+    parameters: Type.Object({}), execute: async () => {
+      const { listTaughtRoutes } = await import("../../modules/navigation-probe");return text(await listTaughtRoutes());
+    } },
+  { name: "open_taught_route", label: "正在打开指定路线", description: "用户明确要求去某地时，打开list_taught_routes返回的具体路线。第一版先在导航页确认定位、固定头部和短动作校验，再点开始复走；本工具只打开流程，不表示已经行驶或到达。无路线时请用户先教路线，禁止用robot_action循环盲走。",
+    parameters: Type.Object({ route_id: Type.String() }), execute: async (_id, params, signal) => {
+      if (signal?.aborted || AppState.currentState !== "active") throw new Error("请在应用前台打开路线");
+      const { listTaughtRoutes } = await import("../../modules/navigation-probe");
+      const route = (await listTaughtRoutes()).find((r) => r.id === (params as { route_id: string }).route_id);
+      if (!route) throw new Error("未找到该路线，请先查看已教路线");
+      setTimeout(() => { void import("../navigation/route-robot-session").then(({ openTaughtRouteSession }) => openTaughtRouteSession(route.id))
+        .catch((error) => Alert.alert("路线导航",error instanceof Error ? error.message : String(error))); }, 0);
+      return text({ route: route.name, status: "opening_route_setup", moving: false, notice: "正在打开指定路线，需在导航页完成定位与校验后开始复走。" });
+    } },
   { name: "phone_status", label: "正在检查手机和底座", description: "查询手机前台状态、LOOI 是否连接，不执行动作。",
     parameters: Type.Object({}), execute: async () => {
       const robot = getLooiRobotRuntimeState();

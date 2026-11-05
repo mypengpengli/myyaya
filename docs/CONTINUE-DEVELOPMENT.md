@@ -1,5 +1,17 @@
 # 换电脑继续开发
 
+## 开发中：2.1.178教路线与复走
+
+用户已授权按简化方案动手，并要求研究扫地机器人。新增[路线说明](TAUGHT-ROUTES.md)：Nav2分层思路、OpenBot手机/车体分工、Valetudo边界；没有把ROS2或OpenBot整套代码塞进APK，也未验证LOOI轮编码器。采用已教平整走廊先验+实时原始深度障碍停车，不再以实时完整绿格作为路线控制前提。普通地形诊断阈值保留。
+
+新增TaughtRoute/RouteTeacher/RouteFollower/Codec、RoutePerception、TaughtRoutePanel与RouteMotorGateway。重构原NavigationProbeActivity：共享渲染/相机逻辑在NavigationProbeScreen，独立Activity仍无motor；路线用宿主MainActivity内Dialog保持AppState active，复用既有BLE，暂停普通语音/表情动作，启用单独中文停止监听。导航独占令牌阻止普通动作抢占，STOP仍可用。Native动作有序号/回执，JS优先STOP并等待STOP完成后才发新动作。
+
+路线需固定安装、实际地面、后退/左转短动作校验，从起点8cm内及原朝向开始；每次90～180ms动作，偏离中心线8cm、定位跳变/丢失、断连/后台/姿态改变停车。深度短暂变旧等待新观测；障碍需手动继续。无参照图只可同Session，跨重启需同地图+参照图坐标指纹。社区SDK固定动作码，不假装具备可调连续车速。
+
+相机与IMU采用官方ARCore Recording/Playback，每份90秒/约100MB、保留3份；回放独立无电机。模型工具list_taught_routes/open_taught_route仅查真实路线、打开所属地图流程，首次仍需手机校验与启动。相机和普通语音由route-robot-session统一持有并释放，停止词不经过网络模型。
+
+96原生测试、navigation-robot与route-session行为测试已通过，tsc通过；其余源检查推进中，Windows下旧测试v2.1.122固定调用python3缺命令需由Linux CI验证，不要为此改无关业务。`.tools/build178-final.py`最终构建会同步到D:/mya；导出脚本`.tools/export-task178-apk.py`。需要最终源码提交后再导出/安装并核对手机hash。真实地面闭环尚未验收，此阶段没有发送履带或头部动作。
+
 ## 最新：2026-11-05，2.1.177已发布
 
 最终构建源码 `1bcfad60268b9cda01523f381b6b080064df845a`，84项原生测试与[CI](https://github.com/mypengpengli/myyaya/actions/runs/41986082518)成功。APK `mobile/output/android/myyaya-2.1.177-arm64.apk`，174361650字节，SHA256 `eb1c144ac192354c1fbbfd00a054127fe7d29ef8e9c0157b2cc999e79e79d721`，源快照 `8eda5cdd3ffcd6afb7ef17846aa3b0266b26837ccc073cff243d3eeef69c811d`。原签名/16KB/ARM64/中文模型/独立JS/凭据排除通过，最终覆盖安装且手机base.apk摘要一致。[177 Release](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.177)已公开设为最新，四附件摘要已核对，Release id434896495；不要继续发布176草稿，已由177替代。
