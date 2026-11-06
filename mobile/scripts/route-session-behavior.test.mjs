@@ -14,7 +14,7 @@ const chinese = load("src/voice/chinese-command.ts");
 const app = { currentState:"active", addEventListener:(_event,cb)=>{ lifecycle=cb;return {remove(){ lifecycle=undefined; }}; } };
 let event, token, close, lifecycle, voiceResult, voiceStops=0, releasedCamera=0, releasedMic=0;
 let deferredStop, connected=true;
-const pulses=[],acks=[],pending=[],nativeStops=[];
+const pulses=[],acks=[],pending=[],nativeStops=[],heads=[];
 const native = {
   subscribeRouteMotion(cb){event=cb;return {remove(){event=undefined;}};},
   publishRouteRobotState:async()=>{},
@@ -24,7 +24,7 @@ const native = {
 };
 const robot = {
   getLooiRobotRuntimeState:()=>({connected}), subscribeLooiRobotRuntimeState:()=>()=>{},
-  setLooiHead:async()=>{},
+  setLooiHead:async(direction)=>{heads.push(direction);},
   stopLooiMotion:async(reason)=>{ if(reason==="navigation-stop" && deferredStop) await new Promise(resolve=>{deferredStop=resolve;}); },
   moveLooiNavigationPulse:(dir,ms,owner)=>{lease.assertNavigationControl(owner);pulses.push({dir,ms});return new Promise(resolve=>pending.push(()=>resolve({completed:true})));},
 };
@@ -55,10 +55,11 @@ pending.shift()();await drain();assert.equal(acks.length,0,"cancelled request ca
 deferredStop();await drain();assert.equal(pulses.length,2);
 pending.shift()();await drain();assert.deepEqual(acks,[{id:3,ok:true}]);
 event({token,sequence:2,action:"head_center",durationMs:0});await drain();assert.equal(acks.length,1);
+event({token,sequence:4,action:"head_down",durationMs:0});await drain();assert.deepEqual(heads,["down"]);
 voiceResult({sessionId:44,text:"小丫小丫，停止导航",partial:true});await drain();assert.deepEqual(nativeStops,[token]);
 voiceResult({sessionId:45,text:"停止",partial:true});await drain();assert.equal(nativeStops.length,1);
 app.currentState="background";lifecycle("background");await drain();assert.ok(voiceStops>0);
-event({token,sequence:4,action:"back",durationMs:100});await drain();assert.equal(pulses.length,2,"background cannot drive");
+event({token,sequence:5,action:"back",durationMs:100});await drain();assert.equal(pulses.length,2,"background cannot drive");
 close(null);await task;assert.equal(lease.hasNavigationControl(),false);assert.equal(event,undefined);
 assert.equal(releasedCamera,1);assert.equal(releasedMic,1);
 console.log("Route session: ownership, STOP serialization, late ack, foreground, Chinese stop and cleanup: PASS");

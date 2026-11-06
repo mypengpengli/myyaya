@@ -114,7 +114,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     terrainState=label("开始扫描后点选平面并确认用途；灰未知、青平面、红障碍、橙落差、绿候选。").apply { textSize=12f }
     addView(terrainState)
     terrainView=TerrainView(activity); addView(terrainView,LinearLayout.LayoutParams(-1,(130*resources.displayMetrics.density).toInt()))
-    addView(label("绿色仅为候选，实际通行范围待验证；本页不会驱动底座。").apply { textSize=11f })
+    addView(label(if(taughtRoutes==null) "绿色仅为候选，实际通行范围待验证；本页不会驱动底座。"
+      else "路线试验仅在实际地面、姿态与方向校验通过后驱动；绿色仅为候选。").apply { textSize=11f })
     addView(state)
     mapView=SurfaceMapView(activity); addView(mapView,LinearLayout.LayoutParams(-1,(130*resources.displayMetrics.density).toInt()))
     places=label("尚无地点。扫描时可将当前位置命名为客厅、沙发旁等。"); addView(places)

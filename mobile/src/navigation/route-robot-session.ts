@@ -74,7 +74,7 @@ export async function openTaughtRouteSession(name = ""): Promise<string | null> 
                 const result = await forceReconnectSavedLooiRobot();
                 if (!result.ok) throw new Error("请先在连接页配对并保存 LOOI 底座");
               }
-              else if (event.action === "head_center") await setLooiHead("center", token);
+              else if (event.action === "head_down") await setLooiHead("down", token);
               else if (["back", "left", "right"].includes(event.action)) {
                 if (!getLooiRobotRuntimeState().connected) throw new Error("底座连接已断开");
                 const result = await moveLooiNavigationPulse(event.action as "back" | "left" | "right", event.durationMs, token);

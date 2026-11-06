@@ -21,9 +21,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   @Volatile private var observation: RouteObservation?=null
   @Volatile private var currentSession=""
   @Volatile private var headFixed=false
-  @Volatile private var fixedPitch=0f
-  @Volatile private var fixedRoll=0f
-  @Volatile private var headSettlesAt=0L
+  private val poseLock=NavigationPoseLock()
   @Volatile private var backChecked=false
   @Volatile private var turnChecked=false
   private var invertTurns=false
@@ -41,7 +39,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   private fun message(s: String) { notice=s;activity.runOnUiThread { if (::status.isInitialized) status.text=s } }
   private fun menu() {
     holdForUi()
-    val items=arrayOf("连接保存的底座","固定头部（回正）","设置镜头到底座偏移","开始教路线","完成并保存路线","选择已教路线",
+    val items=arrayOf("连接保存的底座","固定最低导航姿态（不回正）","设置镜头到底座偏移","开始教路线","完成并保存路线","选择已教路线",
       "短后退方向校验","短左转方向校验","开始复走","移开障碍后继续","停止")
     AlertDialog.Builder(activity).setTitle("已教路线导航 · 真实平整地面试验").setItems(items) { _,i->
       runCatching { when(i) {
@@ -69,12 +67,22 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   }
   private fun fixHead() {
     check(follower?.phase !in listOf("FOLLOWING","FACING_USER")) { "请先停止复走" }
-    motor.stop("固定头部前停止")
-    headFixed=false;backChecked=false;turnChecked=false
-    motor.request("head_center") { ok,s->
-      if (ok) { headSettlesAt=SystemClock.elapsedRealtime()+800;message("头部已回正，保持装稳，等待姿态稳定。") }
-      else message("头部回正失败：$s")
-    }
+    AlertDialog.Builder(activity).setTitle("保持最低导航姿态")
+      .setMessage("先将脖子放到最低，确认后摄平视前方且能看到近处地面。默认保持你手动调整的位置，不发送回正或抬头指令。也可尝试社区协议的降头动作，之后仍需核对实际画面。")
+      .setNegativeButton("取消",null).setPositiveButton("保持当前位置") { _,_->prepareHead(false) }
+      .setNeutralButton("降到最低") { _,_->prepareHead(true) }.show()
+  }
+  private fun prepareHead(lower: Boolean) {
+    runCatching {
+      check(current().tracking && motor.isConnected()) { "请先开始扫描、恢复定位并连接底座" }
+      motor.stop("固定导航姿态前停止")
+      headFixed=false;poseLock.reset();backChecked=false;turnChecked=false
+      if (!lower) { poseLock.begin(SystemClock.elapsedRealtime());message(poseLock.reason) }
+      else motor.request("head_down") { ok,s->
+        if(ok) { poseLock.begin(SystemClock.elapsedRealtime());message("已发送降头指令，确认后摄平视；保持最低位置，不自动回正。") }
+        else message("降头未完成：$s")
+      }
+    }.onFailure { message(it.message ?: "无法固定导航姿态") }
   }
   private fun editMount() {
     check(teacher==null && follower?.phase !in listOf("FOLLOWING","FACING_USER")) { "请先停止教路线或复走" }
@@ -145,7 +153,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     teacher=null;calibration=null;follower?.cancel();motor.stop(reason);message(reason)
   }
   @Synchronized fun pause() {
-    teacher?.observe(null,false);follower?.pause("界面或定位已暂停");calibration=null;headFixed=false;headSettlesAt=0
+    teacher?.observe(null,false);follower?.pause("界面或定位已暂停");calibration=null;headFixed=false;poseLock.reset()
     backChecked=false;turnChecked=false;motor.stop("扫描已暂停")
   }
   @Synchronized fun holdForUi() {
@@ -157,8 +165,9 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   @Synchronized fun frame(session: String,camera: RigidPose?,actualFloor: Boolean,clearance: RouteClearance) {
     val now=SystemClock.elapsedRealtime();currentSession=session
     val p=camera?.let { runCatching { RoutePose.fromCamera(it,mount.right,mount.alongView) }.getOrNull() }
-    if (headSettlesAt>0 && now>=headSettlesAt && p!=null) { headFixed=true;fixedPitch=p.pitch;fixedRoll=p.roll;headSettlesAt=0 }
-    val fixed=headFixed && p!=null && abs(wrapYaw(p.pitch-fixedPitch))<=.12f && abs(wrapYaw(p.roll-fixedRoll))<=.12f
+    val fixed=poseLock.observe(p,camera?.t?.get(1),now)
+    if(headFixed && !fixed && !poseLock.isLocked) { backChecked=false;turnChecked=false;notice=poseLock.reason }
+    headFixed=fixed
     val o=RouteObservation(p,now,p!=null,actualFloor,clearance,motor.isConnected(),fixed)
     observation=o;teacher?.observe(p,p!=null && fixed)
     calibration?.let { (direction,before,at)->if(now>=at) {
