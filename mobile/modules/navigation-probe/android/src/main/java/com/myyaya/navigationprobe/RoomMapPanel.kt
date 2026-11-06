@@ -32,6 +32,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private var lastOverlayNs=0L
   private var lastOutlineNs=0L
   @Volatile private var hybridReport: Map<String,Any?> = mapOf("status" to "WAITING")
+  @Volatile private var localAssessment=RouteAssessment(RouteClearance.DEPTH_UNKNOWN,"GROUND_REFERENCE_REQUIRED")
   @Volatile private var mapper: RoomMapper? = null
   private val taughtRoutes=motor?.let { TaughtRoutePanel(activity,it,{ mapper?.metadata() },{save(true)}) }
   @Volatile private var observedGround: GroundPlane?=null
@@ -177,6 +178,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     groundArmed=false; groundTap=null; pendingGround=null; pendingHeight=null;selectedGround=null;fittedGround=null;calibratedHeight=null;surfaceSource="NONE";terrain.reset()
     terrainSnapshot=TerrainSnapshot(false,status,envelope=readEnvelope())
     hybridReport=mapOf("status" to "WAITING")
+    localAssessment=RouteAssessment(RouteClearance.DEPTH_UNKNOWN,"GROUND_REFERENCE_REQUIRED")
     activity.runOnUiThread { depthOverlay?.let { it.dots=emptyList();it.outlines=emptyList();it.invalidate() } }
   }
   private fun editCameraHeight() {
@@ -214,7 +216,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       "GROUND_LOST" -> "所选平面跟踪已丢失，请重新点选实际地面。"
       "CAMERA_HEIGHT_INVALID" -> "相机不在所选地面上方的有效高度内，请重新确认实际地面。"
       "SELECT_GROUND","CLOCK_RESET" -> if (horizontalPlanes>0) "已检测水平面 $horizontalPlanes 个，请点击青色边界内的地板或台面并确认用途。" else "尚在检测水平面，请缓慢扫描后点选地板或台面。"
-      else -> "${if (s.floorConfirmed) "地面判断" else "台面试验（非地板）"} · ${when (surfaceSource) { "MEASURED_HEIGHT" -> "已测镜头高度参考面";"RAW_DEPTH_PATCH" -> "深度邻域拟合参考面";else -> "已选水平面" }}\n已测平面网格 ${r["groundCells"]} / 障碍 ${r["obstacleCells"]} / 候选 ${if (s.floorConfirmed) r["candidateCenterCells"] else r["benchCandidateCenterCells"]} · 相机高 ${s.cameraHeight?.let { "%.0f厘米".format(it*100) } ?: "待测"}"
+      else -> "${if (s.floorConfirmed) "地面判断" else "台面试验（非地板）"} · ${when (surfaceSource) { "MEASURED_HEIGHT" -> "已测镜头高度参考面";"RAW_DEPTH_PATCH" -> "深度邻域拟合参考面";else -> "已选水平面" }}\n已测地面格 ${r["groundCells"]} / 障碍 ${r["obstacleCells"]} / 整车覆盖中心 ${if (s.floorConfirmed) r["candidateCenterCells"] else r["benchCandidateCenterCells"]} · 相机高 ${s.cameraHeight?.let { "%.0f厘米".format(it*100) } ?: "待测"}"
     }
     val sampling=when (s.depthEvidence.blockingReason) {
       "DEPTH_UNAVAILABLE","DEPTH_STALE" -> "深度尚未更新，请缓慢左右平移。"
@@ -226,7 +228,18 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       else -> ""
     }
     val warmup=if (active && !depthState.ready) "深度准备中：请缓慢左右平移，等待近处观测。${if (!s.groundSelected) "就绪后再点选平面或标定高度。" else "当前参考面保留，旧观测会过期。"}\n" else ""
-    if (!groundArmed) terrainState.text=warmup+message+(if (s.groundSelected && sampling.isNotEmpty()) "\n$sampling" else "")+"\n灰未知 / 青地面 / 红障碍 / 橙落差 / 绿候选"
+    val local=when(localAssessment.clearance) {
+      RouteClearance.OBSTACLE -> "车前观测：有障碍/落差点"
+      RouteClearance.CLEAR -> "车前取样通过；仍需路线与动作校验"
+      else -> when(localAssessment.reason) {
+        "LOCAL_COVERAGE_INCOMPLETE" -> "车前缺观测："+localAssessment.sectorSamples.indices.filter { localAssessment.sectorSamples[it]<2 }.joinToString("、") { RouteAssessment.SECTORS[it] }
+        "FRESH_RAW_REQUIRED" -> "车前观测：等待新鲜原始深度"
+        "GROUND_REFERENCE_REQUIRED" -> "车前观测：先建立参考面"
+        "LOCALIZATION_REQUIRED" -> "车前观测：等待定位"
+        else -> "车前观测：原始深度不足"
+      }
+    }
+    if (!groundArmed) terrainState.text=warmup+message+(if (s.groundSelected && sampling.isNotEmpty()) "\n$sampling" else "")+"\n$local\n灰未知 / 青地面 / 红障碍 / 橙落差 / 绿整车覆盖（诊断）"
     terrainView.snapshot=s; terrainView.invalidate()
   }
   private fun newMap() {
@@ -513,7 +526,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     "configuredReferenceImages" to configuredReferenceImages,
     "knownReferenceImages" to knownReferenceImages,"stableReferenceSamples" to stableCount,
     "terrain" to (terrainSnapshot.report()+mapOf("trackedHorizontalPlanes" to horizontalPlanes,"surfaceSource" to surfaceSource,
-      "calibratedCameraHeightMeters" to calibratedHeight,"hybridDepth" to hybridReport,
+      "calibratedCameraHeightMeters" to calibratedHeight,"hybridDepth" to hybridReport,"localObservation" to localAssessment.report(),
       "surfaceAnchorTrackingState" to surfaceAnchorState,
       "depthReadiness" to depthState.report(),
       "depthCapture" to depthRecorder.report()))) }
@@ -592,7 +605,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     if (located) analyzeTerrain(session,current,frame,if (depthState.ready) sample else null,
       if (depthState.ready) depthNs else 0,token,dense,denseNs)
     else clearTerrain("LOCALIZATION_REQUIRED")
-    taughtRoutes?.let { panel->
+    run {
+      val panel=taughtRoutes
       val camera=if(located) current.poseInMap(sessionId,rigid(frame.camera.pose)) else null
       val points=ArrayList<FloatArray>()
       val fresh=sample!=null && depthNs>0 && depthNs<=frame.timestamp && frame.timestamp-depthNs<=250_000_000L
@@ -600,11 +614,12 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
         val k=frame.camera.textureIntrinsics;val f=k.focalLength;val c=k.principalPoint;val d=k.imageDimensions
         DepthProjection.points(sample,camera,f[0],f[1],c[0],c[1],d[0],d[1]) { points.add(it) }
       }
-      val pose=camera?.let { runCatching { panel.basePose(it) }.getOrNull() }
+      val pose=camera?.let { runCatching { panel?.basePose(it) ?: RoutePose.fromCamera(it) }.getOrNull() }
       val envelope=readEnvelope()
-      val clearance=if(envelope!=null) RoutePerception.evaluate(points,observedGround,pose,fresh,
-        envelope.width,envelope.length,envelope.height,max(.10f,envelope.margin),true) else RouteClearance.DEPTH_UNKNOWN
-      panel.frame(sessionId,camera,located && terrainSnapshot.groundSelected && terrainSnapshot.floorConfirmed,clearance)
+      localAssessment=if(envelope!=null) RoutePerception.assess(points,observedGround,pose,fresh,
+        envelope.width,envelope.length,envelope.height,max(.10f,envelope.margin),true)
+        else RouteAssessment(RouteClearance.DEPTH_UNKNOWN,"DIMENSIONS_REQUIRED")
+      panel?.frame(sessionId,camera,located && terrainSnapshot.groundSelected && terrainSnapshot.floorConfirmed,localAssessment.clearance)
     }
     // Depth/terrain run at up to 10 Hz; map copies and Android view updates stay at 2 Hz.
     if (lastTerrainUiNs>0 && frame.timestamp>=lastTerrainUiNs && frame.timestamp-lastTerrainUiNs<500_000_000L) return

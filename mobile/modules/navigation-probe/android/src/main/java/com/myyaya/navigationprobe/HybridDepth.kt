@@ -5,17 +5,19 @@ import kotlin.math.*
 /** Same-frame cross-validation; full depth never replaces a confident raw observation. */
 internal object HybridDepth {
   data class Result(val sample: DepthSamples.Result,val filled: BooleanArray,val status: String,
-    val anchors: Int=0,val overlap: Int=0,val medianError: Float?=null,val proposed: Int=0,val added: Int=0) {
+    val anchors: Int=0,val overlap: Int=0,val medianError: Float?=null,val proposed: Int=0,val added: Int=0,
+    val timing: DepthTimeAlignment.State?=null) {
     fun report(): Map<String,Any?> = mapOf("status" to status,"rawPlaneAnchors" to anchors,
       "overlapPixels" to overlap,"medianDifferenceMeters" to medianError,
-      "smoothPlaneProposals" to proposed,"validatedSmoothPoints" to added,"maxAnchorDistanceMeters" to .20f)
+      "smoothPlaneProposals" to proposed,"validatedSmoothPoints" to added,"maxAnchorDistanceMeters" to .20f,
+      "timeAlignment" to timing?.report())
   }
   fun fuse(raw: DepthSamples.Result,dense: DepthSamples.Result?,camera: RigidPose,plane: GroundPlane,
     fx: Float,fy: Float,cx: Float,cy: Float,tw: Int,th: Int,rawNs: Long,denseNs: Long,now: Long): Result {
-    fun unchanged(status: String)=Result(raw,BooleanArray(raw.millimeters.size),status)
+    val timing=DepthTimeAlignment.check(rawNs,denseNs,now)
+    fun unchanged(status: String)=Result(raw,BooleanArray(raw.millimeters.size),status,timing=timing)
     if (dense==null) return unchanged("RAW_ONLY_UNAVAILABLE")
-    if (rawNs<=0 || denseNs<=0 || rawNs>now || denseNs>now || now-rawNs>250_000_000L ||
-      now-denseNs>250_000_000L || abs(rawNs-denseNs)>250_000_000L) return unchanged("RAW_ONLY_STALE_PAIR")
+    if (!timing.accepted) return unchanged("RAW_ONLY_STALE_PAIR")
     if (raw.width!=dense.width || raw.height!=dense.height || raw.sourceWidth!=dense.sourceWidth ||
       raw.sourceHeight!=dense.sourceHeight || raw.step!=dense.step) return unchanged("RAW_ONLY_SIZE_MISMATCH")
     val errors=ArrayList<Float>(); val distances=ArrayList<Float>()
@@ -27,7 +29,7 @@ internal object HybridDepth {
     errors.sort();distances.sort()
     val median=errors[errors.size/2];val range=distances[distances.size/2]
     if (median>max(.04f,range*.05f) || errors[(errors.size*.9f).toInt().coerceAtMost(errors.lastIndex)]>max(.12f,range*.15f))
-      return Result(raw,BooleanArray(raw.millimeters.size),"RAW_ONLY_PAIR_DISAGREES",overlap=errors.size,medianError=median)
+      return Result(raw,BooleanArray(raw.millimeters.size),"RAW_ONLY_PAIR_DISAGREES",overlap=errors.size,medianError=median,timing=timing)
     val anchors=HashMap<Pair<Int,Int>,MutableList<FloatArray>>()
     val hazards=HashMap<Pair<Int,Int>,MutableList<FloatArray>>()
     fun key(p: FloatArray)=floor(p[0]/.2f).toInt() to floor(p[2]/.2f).toInt()
@@ -39,7 +41,7 @@ internal object HybridDepth {
         add(anchors,p);anchorCount++
       } else if (abs(h)>.03f) add(hazards,p)
     }
-    if (anchorCount<6) return Result(raw,BooleanArray(raw.millimeters.size),"RAW_ONLY_INSUFFICIENT_PLANE_ANCHORS",anchorCount,errors.size,median)
+    if (anchorCount<6) return Result(raw,BooleanArray(raw.millimeters.size),"RAW_ONLY_INSUFFICIENT_PLANE_ANCHORS",anchorCount,errors.size,median,timing=timing)
     fun near(map: HashMap<Pair<Int,Int>,MutableList<FloatArray>>,p: FloatArray,radius: Float): Boolean {
       val k=key(p)
       for (x in -1..1) for (z in -1..1) {
@@ -56,6 +58,6 @@ internal object HybridDepth {
         }
       }
     }
-    return Result(raw.copy(millimeters=values),filled,"RAW_AND_VALIDATED_SMOOTH",anchorCount,errors.size,median,proposed,added)
+    return Result(raw.copy(millimeters=values),filled,"RAW_AND_VALIDATED_SMOOTH",anchorCount,errors.size,median,proposed,added,timing)
   }
 }

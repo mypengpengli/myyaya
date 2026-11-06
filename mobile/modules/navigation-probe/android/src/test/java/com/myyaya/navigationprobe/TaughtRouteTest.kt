@@ -74,10 +74,10 @@ class TaughtRouteTest {
     val c=RigidPose(floatArrayOf(0f,.1f,0f),floatArrayOf(0f,0f,0f,1f));val p=RoutePose.fromCamera(c,.03f,.04f)
     assertEquals(.03f,p.x,.0001f);assertEquals(-.04f,p.z,.0001f)
   }
-  @Test fun confirmedFlatCorridorDoesNotRequireEveryGroundGridButObstaclesStillStop() {
+  @Test fun remotePointsCannotClearCorridorAndLocalObstaclesStillStop() {
     val plane=GroundPlane(floatArrayOf(0f,0f,0f),floatArrayOf(0f,1f,0f));val p=RoutePose(0f,0f,0f)
     val clear=List(40) { floatArrayOf(.4f,0f,-.8f) }
-    assertEquals(RouteClearance.CLEAR,RoutePerception.evaluate(clear,plane,p,true,.15f,.1f,.11f,.1f))
+    assertEquals(RouteClearance.DEPTH_UNKNOWN,RoutePerception.evaluate(clear,plane,p,true,.15f,.1f,.11f,.1f))
     val hazard=clear+List(3) { floatArrayOf(0f,.08f,-.25f) }
     assertEquals(RouteClearance.OBSTACLE,RoutePerception.evaluate(hazard,plane,p,true,.15f,.1f,.11f,.1f))
     assertEquals(RouteClearance.DEPTH_UNKNOWN,RoutePerception.evaluate(hazard,plane,p,false,.15f,.1f,.11f,.1f))

@@ -52,4 +52,11 @@ class HybridDepthTest {
     val r=fuse(raised,raised);assertEquals("RAW_ONLY_INSUFFICIENT_PLANE_ANCHORS",r.status)
     assertEquals(0,r.added)
   }
+  @Test fun boundedDenseLeadStillRequiresNumericalAndSpatialAgreement() {
+    val matched=fuse(denseNs=1_002_000_000L)
+    assertEquals("RAW_AND_VALIDATED_SMOOTH",matched.status);assertTrue(matched.added>100)
+    val wrong=sample(false).let { it.copy(millimeters=it.millimeters.map { mm -> if(mm>0) mm+400 else 0 }.toIntArray()) }
+    assertEquals("RAW_ONLY_PAIR_DISAGREES",fuse(dense=wrong,denseNs=1_002_000_000L).status)
+    assertEquals(0,fuse(denseNs=1_006_000_000L).added)
+  }
 }
