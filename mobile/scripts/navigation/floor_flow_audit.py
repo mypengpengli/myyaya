@@ -68,7 +68,7 @@ while True:
     good=inliers.ravel().astype(bool);scale=float(np.hypot(affine[0,0],affine[1,0]));angle=math.degrees(math.atan2(affine[1,0],affine[0,0]))
     residual=np.linalg.norm(a@affine[:,:2].T+affine[:,2]-b,axis=1)
     translation=-(affine[:,:2].T@affine[:,2])/(scale*scale)
-    accepted=int(good.sum())>=12 and good.mean()>=.65 and abs(scale-1)<.06 and abs(angle)<3
+    accepted=bool(int(good.sum())>=12 and good.mean()>=.65 and abs(scale-1)<.06 and abs(angle)<3)
     results.append(dict(seconds=t,inliers=int(good.sum()),tracks=len(a),inlierRatio=float(good.mean()),scale=scale,
       residualMedianMeters=float(np.median(residual[good])),xMeters=float(translation[0]),zMeters=float(translation[1]),
       orientationCorrectionDegrees=angle,accepted=accepted))
