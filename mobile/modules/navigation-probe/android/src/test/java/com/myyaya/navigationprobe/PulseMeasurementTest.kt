@@ -1,0 +1,57 @@
+package com.myyaya.navigationprobe
+
+import org.junit.Assert.*
+import org.junit.Test
+import kotlin.math.*
+
+class PulseMeasurementTest {
+  private val start=RoutePose(0f,0f,0f)
+  @Test fun measuredSevenRightFiveForwardUsesRearCameraAxes() {
+    val camera=RigidPose(floatArrayOf(0f,.1f,0f),floatArrayOf(0f,0f,0f,1f))
+    val base=RoutePose.fromCamera(camera,.07f,.05f)
+    assertEquals(.07f,base.x,1e-6f);assertEquals(-.05f,base.z,1e-6f)
+  }
+  @Test fun cameraOrbitIsNotMistakenForTrackCenterTranslation() {
+    for(yaw in listOf(0f,.5f,PI.toFloat()/2,2f)) {
+      val camera=RigidPose(floatArrayOf(-cos(yaw)*.07f-sin(yaw)*.05f,.1f,-sin(yaw)*.07f+cos(yaw)*.05f),
+        floatArrayOf(0f,-sin(yaw/2),0f,cos(yaw/2)))
+      val base=RoutePose.fromCamera(camera,.07f,.05f)
+      assertEquals(0f,base.x,1e-6f);assertEquals(0f,base.z,1e-6f)
+      assertEquals(yaw,base.yaw,1e-6f)
+    }
+  }
+  @Test fun backTrialWaitsForAckAndSettledFreshPose() {
+    val t=PulseMeasurementTrial("back",200,start,1000)
+    t.observe(start,1000);t.observe(start.copy(z=-.02f),1200);t.acknowledge(true,1250)
+    for(ms in 1300L..1900L step 100) t.observe(start.copy(z=-.024f),ms)
+    assertNull(t.result)
+    t.observe(start.copy(z=-.024f),2000)
+    val r=t.result!!;assertTrue(r.valid);assertEquals(.024f,r.displacementMeters,.0001f)
+    assertEquals(.004f,r.postAckResidualMeters,.0001f)
+    assertEquals(false,r.report()["stoppingDistanceValidated"])
+  }
+  @Test fun wrongDirectionAndNoMovementCannotPass() {
+    for(z in listOf(.03f,0f)) {
+      val t=PulseMeasurementTrial("back",200,start,1000)
+      t.observe(start,1000);t.acknowledge(true,1100)
+      for(ms in 1200L..1900L step 100) t.observe(start.copy(z=z),ms)
+      assertFalse(t.result!!.valid)
+    }
+  }
+  @Test fun discontinuousTrackingAndChangedMountAreRejected() {
+    val lost=PulseMeasurementTrial("left",120,start,1000)
+    lost.observe(start,1000);lost.observe(start,1500)
+    assertEquals("POSE_GAP",lost.result!!.reason)
+    val tilt=PulseMeasurementTrial("left",120,start,1000)
+    tilt.observe(start.copy(pitch=.2f),1100)
+    assertEquals("MOUNT_MOVED",tilt.result!!.reason)
+  }
+  @Test fun rotationRequiresCorrectedCenterToStayNearPivot() {
+    for(x in listOf(0f,.06f)) {
+      val t=PulseMeasurementTrial("right",120,start,1000)
+      t.observe(start,1000);t.acknowledge(true,1100)
+      for(ms in 1200L..1900L step 100) t.observe(start.copy(x=x,yaw=.12f),ms)
+      assertEquals(x==0f,t.result!!.valid)
+    }
+  }
+}

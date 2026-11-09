@@ -8,6 +8,7 @@ import kotlin.math.*
 /** Live camera-relative evidence only; a candidate cell is not a drivable route. */
 internal class TerrainView(context: Context): View(context) {
   var snapshot=TerrainSnapshot(false,"SELECT_GROUND")
+  var basePose: RoutePose?=null
   private val paint=Paint(Paint.ANTI_ALIAS_FLAG)
   override fun onDraw(canvas: Canvas) {
     canvas.drawColor(Color.rgb(16,24,34))
@@ -44,15 +45,16 @@ internal class TerrainView(context: Context): View(context) {
       }
       paint.style=Paint.Style.FILL; canvas.drawPath(path,paint)
     }
-    snapshot.envelope?.let {
+    val base=basePose?.let { view(it.x,it.z) }
+    snapshot.envelope?.takeIf { base!=null }?.let {
       paint.color=Color.WHITE; paint.style=Paint.Style.STROKE; paint.strokeWidth=2f
-      canvas.drawCircle(centerX,centerY,it.radius*scale,paint); paint.style=Paint.Style.FILL
+      canvas.drawCircle(base!!.first,base.second,it.radius*scale,paint); paint.style=Paint.Style.FILL
     }
-    paint.color=Color.WHITE; paint.strokeWidth=4f
+    paint.color=Color.CYAN; paint.strokeWidth=4f
     canvas.drawCircle(centerX,centerY,5f,paint)
-    canvas.drawLine(centerX,centerY,centerX,centerY-.2f*scale,paint)
+    base?.let { canvas.drawLine(it.first,it.second,it.first,it.second-.2f*scale,paint) }
     canvas.restore()
     paint.color=Color.LTGRAY; paint.textSize=17f
-    canvas.drawText("网格0.5m · 上方为后摄方向 · 白圈为占地+余量",8f,height-5f,paint)
+    canvas.drawText(if(base!=null) "网格0.5m · 蓝点镜头 / 白圈车身+余量" else "网格0.5m · 蓝点镜头 · 填安装偏移后显示车身",8f,height-5f,paint)
   }
 }

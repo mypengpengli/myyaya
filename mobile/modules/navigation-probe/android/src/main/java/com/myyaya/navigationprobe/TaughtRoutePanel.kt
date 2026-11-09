@@ -12,9 +12,9 @@ import kotlin.math.*
 
 /** Route UI and observation adapter. Motor requests go through the existing BLE owner. */
 internal class TaughtRoutePanel(private val activity: Activity,private val motor: RouteMotorGateway,
-  private val metadata: ()->RoomMapData?,private val saveMap: ()->Unit) {
+  private val metadata: ()->RoomMapData?,private val saveMap: ()->Unit,private val mountSettings: NavigationMountSettings) {
   private val directory=File(activity.filesDir,"taught-routes").apply { mkdirs() }
-  private var mount=RouteMount()
+  private val mount get()=mountSettings.value ?: RouteMount()
   @Volatile private var teacher: RouteTeacher?=null
   @Volatile private var follower: RouteFollower?=null
   @Volatile private var selected: TaughtRoute?=null
@@ -25,7 +25,8 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   @Volatile private var backChecked=false
   @Volatile private var turnChecked=false
   private var invertTurns=false
-  @Volatile private var calibration: Triple<String,RoutePose,Long>?=null
+  @Volatile private var calibration: PulseMeasurementTrial?=null
+  @Volatile private var lastMeasurement: Map<String,Any?>?=null
   private var lastStop=0L
   private var lastIssued=0L
   private var lastUi=0L
@@ -40,7 +41,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   private fun menu() {
     holdForUi()
     val items=arrayOf("连接保存的底座","固定最低导航姿态（不回正）","设置镜头到底座偏移","开始教路线","完成并保存路线","选择已教路线",
-      "短后退方向校验","短左转方向校验","开始复走","移开障碍后继续","停止")
+      "短后退方向校验","短左转方向校验","开始复走","移开障碍后继续","停止","短右转方向校验")
     AlertDialog.Builder(activity).setTitle("已教路线导航 · 真实平整地面试验").setItems(items) { _,i->
       runCatching { when(i) {
         0->motor.request("connect") { ok,s->message(if(ok && motor.isConnected()) "底座已连接" else "连接未完成：$s") }
@@ -54,6 +55,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
         8->startFollowing()
         9->resumeFollowing()
         10->stop("用户停止")
+        11->calibrate("right")
       } }.onFailure { message(it.message ?: "操作未完成") }
     }.setNegativeButton("返回",null).show()
   }
@@ -63,6 +65,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     val o=current();check(o.tracking && o.pose!=null) { "请先恢复当前地图定位" }
     check(o.actualFloor && !o.playback) { "需要在真实平整地面选择实际地面；台面/回放不允许驱动" }
     check(o.headFixed) { "请先固定头部，之后不要抬头或低头" }
+    check(mountSettings.value!=null) { "请先填写镜头到底座中心的实测水平偏移" }
     return o
   }
   private fun fixHead() {
@@ -86,14 +89,12 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   }
   private fun editMount() {
     check(teacher==null && follower?.phase !in listOf("FOLLOWING","FACING_USER")) { "请先停止教路线或复走" }
-    val box=LinearLayout(activity).apply { orientation=1 }
-    val x=EditText(activity).apply { hint="镜头到中心：沿屏幕右方向厘米，可负值";inputType=12290;setText("${mount.right*100}") }
-    val z=EditText(activity).apply { hint="镜头到中心：沿后摄观察方向厘米，可负值";inputType=12290;setText("${mount.alongView*100}") }
-    box.addView(x);box.addView(z)
-    AlertDialog.Builder(activity).setTitle("固定安装偏移").setMessage("填写镜头到履带底座中心的水平偏移。0表示近似共点；第一版另留10厘米余量，仍需在地面验证。").setView(box)
-      .setNegativeButton("取消",null).setPositiveButton("保存") { _,_->runCatching {
-        mount=RouteMount(x.text.toString().toFloat()/100,z.text.toString().toFloat()/100);backChecked=false;turnChecked=false
-      }.onFailure { message("偏移需为正负30厘米内的数字") } }.show()
+    mountSettings.edit { mountChanged() }
+  }
+  @Synchronized fun mountChanged() {
+    if(teacher!=null || follower?.phase in listOf("FOLLOWING","FACING_USER","PAUSED")) stop("安装偏移已改变，请重新教路线或恢复原安装")
+    backChecked=false;turnChecked=false;headFixed=false;poseLock.reset();calibration=null
+    message("实测偏移已保存，请重新固定最低姿态并做短动作校验。")
   }
   private fun beginTeaching() {
     requireFloor();check(follower?.phase !in listOf("FOLLOWING","FACING_USER")) { "请先停止复走" }
@@ -116,7 +117,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
         message("已保存${r.name}，${r.points.size}个路点。${if(r.referenceKey.isEmpty()) "仅本次定位会话可复走；重开需有固定参照图。" else "重新打开需先识别同一固定参照图。"}")
       }.onFailure { message(it.message ?: "保存失败") } }.show()
   }
-  fun selectInitial(route: TaughtRoute) { selected=route;mount=route.mount;message("已选${route.name}，请开始扫描并恢复原地图定位，然后固定头部和做短动作校验。") }
+  fun selectInitial(route: TaughtRoute) { selected=route;message("已选${route.name}，请开始扫描并恢复原地图定位，然后固定头部和做短动作校验。") }
   private fun chooseRoute() {
     check(teacher==null && follower?.phase !in listOf("FOLLOWING","FACING_USER")) { "请先停止当前操作" }
     val routes=directory.listFiles()?.filter { it.extension=="yayaroute" && it.length()<=64000 }
@@ -127,12 +128,22 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     }.show()
   }
   private fun calibrate(direction: String) {
-    val o=requireFloor();check(o.clearance==RouteClearance.CLEAR) { "请先恢复新鲜近处深度并移开障碍" }
+    val o=requireFloor();check(o.clearance!=RouteClearance.OBSTACLE) { "已看到车前障碍/落差，请先移开并重新观察" }
     check(motor.isConnected() && !motor.busy && teacher==null && follower?.phase !in listOf("FOLLOWING","FACING_USER")) { "请连接底座并停止当前操作" }
-    motor.request(direction,if(direction=="back") 200 else 120) { ok,s->
-      if (ok) { calibration=Triple(direction,o.pose!!,SystemClock.elapsedRealtime()+400);message("短动作结束，正在核对实际位姿。") }
-      else message("校验动作未完成：$s")
-    }
+    check(calibration==null) { "请等上一轮动作位姿测量完成" }
+    val ms=if(direction=="back") 200 else 120
+    AlertDialog.Builder(activity).setTitle("一次短动作标定")
+      .setMessage("${if(o.clearance==RouteClearance.DEPTH_UNKNOWN) "相机近处仍有盲区，这不是已测空地。" else "将测量实际车身位移和转角。"}请目视确认底座四周至少30厘米为平整空地、无物品和落差，USB线留有余量。此次只${if(direction=="back") "沿后摄方向短后退" else if(direction=="left") "短左转" else "短右转"}${ms}毫秒，自动停止并观察停稳；不启动自主行驶。")
+      .setNegativeButton("取消",null).setPositiveButton("空地已确认，做一次") { _,_->runCatching {
+        val current=requireFloor()
+        check(current.clearance!=RouteClearance.OBSTACLE && motor.isConnected() && !motor.busy && calibration==null) { "姿态、障碍或连接已变化，请重新确认" }
+        val trial=PulseMeasurementTrial(direction,ms,current.pose!!,SystemClock.elapsedRealtime())
+        calibration=trial
+        motor.request(direction,ms) { ok,s->
+          synchronized(this) { if(calibration===trial) trial.acknowledge(ok,SystemClock.elapsedRealtime()) }
+          message(if(ok) "动作已停止，正在等待位姿稳定并记录余移。" else "校验动作未完成：$s")
+        }
+      }.onFailure { message(it.message ?: "无法开始标定") } }.show()
   }
   private fun checkBinding(r: TaughtRoute) {
     val map=metadata() ?: error("当前地图不可用")
@@ -170,18 +181,29 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     headFixed=fixed
     val o=RouteObservation(p,now,p!=null,actualFloor,clearance,motor.isConnected(),fixed)
     observation=o;teacher?.observe(p,p!=null && fixed)
-    calibration?.let { (direction,before,at)->if(now>=at) {
-      calibration=null
-      if(p==null) message("校验时定位丢失")
-      else if(direction=="back") {
-        val distance=p.distance(before);val along=(p.x-before.x)*sin(before.yaw)-(p.z-before.z)*cos(before.yaw)
-        backChecked=distance in .008f.. .12f && along>distance*.7f && abs(wrapYaw(p.yaw-before.yaw))<.15f
-        message(if(backChecked) "后退方向已通过，位移约${(distance*100).roundToInt()}厘米" else "后退位移或方向不稳定，请核对安装和定位后重试")
-      } else {
-        val yaw=wrapYaw(p.yaw-before.yaw);turnChecked=abs(yaw) in .025f.. .65f;invertTurns=yaw>0
-        message(if(turnChecked) "转向已通过${if(invertTurns) "，已校正左右映射" else ""}" else "转向变化不足或定位异常，请重新校验")
+    calibration?.let { trial ->
+      if(!fixed || !actualFloor || !motor.isConnected()) trial.fail("PRECONDITION_CHANGED")
+      trial.observe(p,now)
+      trial.result?.let { result ->
+        calibration=null;lastMeasurement=result.report()+mapOf("mount" to mountSettings.report(),"atEpochMs" to System.currentTimeMillis(),"clearAreaSource" to "operator-confirmed-single-trial")
+        if(result.direction=="back") backChecked=result.valid
+        else if(result.direction=="left") { turnChecked=result.valid;if(result.valid) invertTurns=result.yawRadians>0 }
+        if(!result.valid) motor.stop("标定位姿检查失败")
+        val record=lastMeasurement!!
+        activity.getSharedPreferences("navigation-pulse-measurements",0).edit().putString("latest",org.json.JSONObject(record).toString()).apply()
+        val failure=when(result.reason) {
+          "LOCALIZATION_LOST","POSE_GAP"->"定位中断或位姿更新间隔过长"
+          "MOUNT_MOVED"->"手机倾斜或安装姿态发生变化"
+          "PRECONDITION_CHANGED"->"连接、固定姿态或地面状态发生变化"
+          "NOT_SETTLED"->"位姿尚未稳定"
+          "ACK_TIMEOUT","ACTION_FAILED"->"动作回执失败或超时"
+          "POSE_OR_MOTION_JUMP","CLOCK_RESET"->"定位跳变或时间异常"
+          else->"实际方向、位移或转向中心与预期不符"
+        }
+        message(if(result.valid) "已测：位移%.1f厘米 / 转角%.1f° / 回执后余移%.1f厘米；停车边界尚未验收。".format(result.displacementMeters*100,result.yawRadians*180/PI,result.postAckResidualMeters*100)
+          else "本轮测量未通过：$failure，请核对后再试。")
       }
-    } }
+    }
     val f=follower
     if (f!=null) {
       val decision=f.step(o,now)
@@ -204,7 +226,8 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   }
   fun report(): Map<String,Any?> = mapOf("phase" to (if(teacher!=null) "TEACHING" else follower?.phase ?: "IDLE"),
     "routeName" to (follower?.route?.name ?: selected?.name),"waypoint" to follower?.waypoint,"headFixed" to headFixed,
-    "backDirectionChecked" to backChecked,"turnDirectionChecked" to turnChecked,"connected" to motor.isConnected(),"reason" to (follower?.reason ?: notice))
+    "backDirectionChecked" to backChecked,"turnDirectionChecked" to turnChecked,"connected" to motor.isConnected(),
+    "mountMeasurement" to mountSettings.report(),"pulseMeasurementRunning" to (calibration!=null),"lastPulseMeasurement" to lastMeasurement,"reason" to (follower?.reason ?: notice))
   companion object {
     fun referenceKey(map: RoomMapData): String {
       if(map.referenceJpeg.isEmpty() || map.imageFromMap==null) return ""

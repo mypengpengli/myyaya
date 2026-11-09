@@ -47,7 +47,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private lateinit var localView: LocalNavigationView
   private lateinit var localState: TextView
   @Volatile private var mapper: RoomMapper? = null
-  private val taughtRoutes=motor?.let { TaughtRoutePanel(activity,it,{ mapper?.metadata() },{save(true)}) }
+  private val mountSettings=NavigationMountSettings(activity)
+  private val taughtRoutes=motor?.let { TaughtRoutePanel(activity,it,{ mapper?.metadata() },{save(true)},mountSettings) }
   @Volatile private var observedGround: GroundPlane?=null
   @Volatile private var freshMap = false
   @Volatile private var sessionId = ""
@@ -118,6 +119,11 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       else { groundArmed=true; terrainState.text="请点击左侧画面中的地板或测试台面，随后确认用途。" }
     }.apply { setOnLongClickListener { if (active) editCameraHeight() else toast("请先开始扫描");true } },LinearLayout.LayoutParams(0,-2,1f))
     terrainActions.addView(button("底座尺寸") { editEnvelope() },LinearLayout.LayoutParams(0,-2,1f))
+    terrainActions.addView(button("安装偏移") {
+      taughtRoutes?.holdForUi()
+      mountSettings.edit { taughtRoutes?.mountChanged();localPlan=LocalPlan("WAITING",reason="MOUNT_CHANGED")
+        localPlanSampleNs=0;lastLocalPlanNs=0;localSweeps=emptyMap() }
+    },LinearLayout.LayoutParams(0,-2,1f))
     terrainActions.addView(button("清除判断") { clearTerrain(); renderTerrain() },LinearLayout.LayoutParams(0,-2,1f))
     terrainActions.addView(Button(activity).apply {
       text="叠加：开";textSize=13f;isAllCaps=false
@@ -203,20 +209,20 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     activity.runOnUiThread { depthOverlay?.let { it.dots=emptyList();it.outlines=emptyList();it.invalidate() } }
   }
   private fun editCameraHeight() {
-    if (!depthState.ready) { toast("请先缓慢平移，等待近处深度就绪；再将底座放平，按实测姿态标定");return }
+    if (!active) { toast("请先开始扫描并恢复定位，再按实测高度建立参考面");return }
     val input=EditText(activity).apply {
       inputType=8194;setSingleLine();hint="主镜头中心距平面的垂直高度（厘米）"
       val value=activity.getSharedPreferences("terrain-camera",0).getFloat("height",0f)
       if (value>0) setText(java.lang.String.format(java.util.Locale.US,"%.1f",value*100))
     }
     val dialog=AlertDialog.Builder(activity).setTitle("镜头高度标定")
-      .setMessage("底座放平，在测量时的头部姿态填写镜头中心高度，不是整机高度。\n高度只用于建立初始参考面；之后抬头、低头或升降用实时相机位姿补偿，不强行保持同一镜头高度。跟踪丢失后需重新确认。")
+      .setMessage("底座放平，在测量时的头部姿态填写镜头中心高度，不是整机高度。\n这是人工实测参考，不代表已观察到地面或空地，不要求先取得深度。之后按实时相机位姿补偿；跟踪丢失后需重新确认。")
       .setView(input).setNegativeButton("取消",null).setNeutralButton("台面试验",null).setPositiveButton("实际地面",null).create()
     dialog.setOnShowListener {
       fun choose(actualFloor: Boolean) {
         val h=input.text.toString().toFloatOrNull()?.div(100)
         if (h==null || !h.isFinite() || h !in .03f..2.5f) { input.error="请填写3～250厘米的实测镜头高度";return }
-        if (!active || !depthState.ready) { toast("深度暂不可用，请恢复扫描后再确认标定");dialog.dismiss();return }
+        if (!active) { toast("定位暂不可用，请恢复扫描后再确认标定");dialog.dismiss();return }
         activity.getSharedPreferences("terrain-camera",0).edit().putFloat("height",h).apply()
         pendingHeight=HeightChoice(h,actualFloor);dialog.dismiss()
       }
@@ -248,7 +254,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       "FOOTPRINT_NOT_COVERED" -> "已看到局部平面，整车范围仍有未知或障碍。"
       else -> ""
     }
-    val warmup=if (active && !depthState.ready) "深度准备中：请缓慢左右平移，等待近处观测。${if (!s.groundSelected) "就绪后再点选平面或标定高度。" else "当前参考面保留，旧观测会过期。"}\n" else ""
+    val warmup=if (active && !depthState.ready) "深度准备中：等待近处观测。${if (!s.groundSelected) "就绪后可点选平面，也可先按实测高度建参考面。" else "人工参考面保留，不代表未知区域已测为空地。"}\n" else ""
     val local=when(localAssessment.clearance) {
       RouteClearance.OBSTACLE -> "车前观测：有障碍/落差点"
       RouteClearance.CLEAR -> "车前取样通过；仍需路线与动作校验"
@@ -261,7 +267,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       }
     }
     if (!groundArmed) terrainState.text=warmup+message+(if (s.groundSelected && sampling.isNotEmpty()) "\n$sampling" else "")+"\n$local\n灰未知 / 青地面 / 红障碍 / 橙落差 / 绿整车覆盖（诊断）"
-    terrainView.snapshot=s; terrainView.invalidate()
+    terrainView.snapshot=s;terrainView.basePose=if(mountSettings.value!=null) localPose else null;terrainView.invalidate()
     if(::localView.isInitialized) {
       val rLocal=localSnapshot.report()
       fun describe(result: LocalSweepResult?)=when(result?.state) {
@@ -282,10 +288,13 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
         "NO_REACHABLE_FREE_FRONTIER"->"周围暂时没有已验证的可达边界"
         "PLANNING","OBSERVATION_OR_POSE_CHANGED"->"正在更新路线"
         "GROUND_CHANGED","GROUND_REFERENCE_REQUIRED"->"请先确认地面参考"
+        "MOUNT_CHANGED"->"安装偏移已改变，正在更新车身位置"
         "PLANNING_FAILED"->"本次规划未完成，请重新选目标"
         else->"等待有效定位和地面观测"
       }
-      localState.text="局部分层：保留地面${rLocal["retainedFloorTiles"]} / 近期空地${rLocal["recentFreeTiles"]} / 障碍${rLocal["obstacleTiles"]} / 单帧告警${rLocal["weakObstacleTiles"]}\n"+
+      val mountText=mountSettings.value?.let { "实测偏移：向右%.1f厘米 / 向前%.1f厘米".format(it.right*100,it.alongView*100) }
+        ?: "未填安装偏移，暂以镜头位置预览；请点上方“安装偏移”填写"
+      localState.text=mountText+"\n局部分层：保留地面${rLocal["retainedFloorTiles"]} / 近期空地${rLocal["recentFreeTiles"]} / 障碍${rLocal["obstacleTiles"]} / 单帧告警${rLocal["weakObstacleTiles"]}\n"+
         "假设直行2厘米：${describe(localSweeps["straight2cm"])}；左/右转10°：${describe(localSweeps["left10deg"])}/${describe(localSweeps["right10deg"])}\n"+
         when(localPlan.state) {
           "PATH_TO_GOAL"->"已找到局部路线，仅预览；脉冲距离与安装偏移待实测"
@@ -583,7 +592,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     "terrain" to (terrainSnapshot.report()+mapOf("trackedHorizontalPlanes" to horizontalPlanes,"surfaceSource" to surfaceSource,
       "calibratedCameraHeightMeters" to calibratedHeight,"hybridDepth" to hybridReport,"localObservation" to localAssessment.report(),
       "layeredLocalMap" to (localSnapshot.report()+mapOf("source" to "confidence-filtered-raw-only",
-        "initialFootprintSeeded" to false,"mountCalibrated" to false,"hypotheticalStopDistanceMeters" to .01f,
+        "initialFootprintSeeded" to false,"mountCalibrated" to false,"mountMeasurement" to mountSettings.report(),
+        "basePoseMeters" to localPose?.let { listOf(it.x,it.z,it.yaw) },"hypotheticalStopDistanceMeters" to .01f,
         "poseUncertaintyMeters" to .01f,"shortSweeps" to localSweeps.mapValues { it.value.report() },
         "goal" to localGoal?.let { listOf(it.x,it.z) },"planSampleNs" to localPlanSampleNs,"plan" to localPlan.report())),
       "surfaceAnchorTrackingState" to surfaceAnchorState,
@@ -673,7 +683,9 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
         val k=frame.camera.textureIntrinsics;val f=k.focalLength;val c=k.principalPoint;val d=k.imageDimensions
         DepthProjection.points(sample,camera,f[0],f[1],c[0],c[1],d[0],d[1]) { points.add(it) }
       }
-      val pose=camera?.let { runCatching { panel?.basePose(it) ?: RoutePose.fromCamera(it) }.getOrNull() }
+      val mount=mountSettings.value ?: RouteMount()
+      val mountRevision=mountSettings.revision
+      val pose=camera?.let { runCatching { RoutePose.fromCamera(it,mount.right,mount.alongView) }.getOrNull() }
       val envelope=readEnvelope()
       localAssessment=if(envelope!=null) RoutePerception.assess(points,observedGround,pose,fresh,
         envelope.width,envelope.length,envelope.height,max(.10f,envelope.margin),true)
@@ -704,7 +716,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
                 val latest=localPose
                 // A planner result computed in a different datum, for another
                 // goal or before a camera movement must not become a live hint.
-                if(token==generation && localGoal==goal && localSnapshot.generation==snapshot.generation &&
+                if(token==generation && localGoal==goal && mountRevision==mountSettings.revision && localSnapshot.generation==snapshot.generation &&
                   localSnapshot.atNs-snapshot.atNs in 0..750_000_000L && latest!=null &&
                   latest.distance(pose)<.025f && abs(wrapYaw(latest.yaw-pose.yaw))<.1f) {
                   localPlan=result;localPlanSampleNs=snapshot.atNs
@@ -716,7 +728,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
           }
         }
       }
-      panel?.frame(sessionId,camera,located && terrainSnapshot.groundSelected && terrainSnapshot.floorConfirmed,localAssessment.clearance)
+      panel?.frame(sessionId,camera,located && terrainSnapshot.groundSelected && terrainSnapshot.floorConfirmed &&
+        terrainSnapshot.cameraHeight?.let { it in .03f..2.5f }==true,localAssessment.clearance)
     }
     // Depth/terrain run at up to 10 Hz; map copies and Android view updates stay at 2 Hz.
     if (lastTerrainUiNs>0 && frame.timestamp>=lastTerrainUiNs && frame.timestamp-lastTerrainUiNs<500_000_000L) return
@@ -737,9 +750,11 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   /** GL thread only: ARCore planes are proposals, never automatically declared floor. */
   private fun analyzeTerrain(session: Session,current: RoomMapper,frame: Frame,sample: DepthSamples.Result?,depthNs: Long,token: Int,
     dense: DepthSamples.Result?,denseNs: Long) {
-    // Do not establish a physical-height anchor before metric depth initializes.
-    // A later depth gap preserves an existing reference; terrain evidence still expires.
-    if (!depthState.ready) { groundArmed=false;groundTap=null;pendingGround=null;pendingHeight=null }
+    // Depth-derived selection requires initialized depth. A user-measured height
+    // is an independent reference in the tracked metric pose frame, not a depth
+    // observation or free-space seed; it also enables a single operator-confirmed
+    // calibration pulse to obtain parallax without a circular initialization gate.
+    if (!depthState.ready) { groundArmed=false;groundTap=null;pendingGround=null }
     val tap=groundTap; groundTap=null
     if (tap!=null) {
       val hits=frame.hitTest(tap[0],tap[1])
