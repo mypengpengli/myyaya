@@ -1,10 +1,12 @@
 # 换电脑继续开发
 
-## 最新开发：184头部只读诊断与倾角观测正在构建
+## 最新开发：184头部只读诊断与倾角观测已安装，等待解锁/手动连接后只读验证
 
-184 加入独立 robot-observation 重力模块，控制页参考倾角、聚焦保持亮屏，robot_head_status 只读 FED1 属性/回读/通知及最近观测。头部命令前后观察手机倾角，所有结果机械位置仍 unknown，未修改00/87/FF参数。联调请求15秒过期，STOP可阻止准备期后的头部写入。新行为测试（含回读超时/不写电机/倾角返回）和导航STOP准备期取消通过，TypeScript通过；Android构建中，尚未安装/实测/发布184。下一步先覆盖安装并查只读GATT；不要直接发送实体动作。
+184 加入独立 robot-observation 重力模块，控制页参考倾角、聚焦保持亮屏，robot_head_status 只读 FED1 属性/回读/通知及最近观测。头部命令前后观察手机倾角，所有结果机械位置仍 unknown，未修改00/87/FF参数。联调请求15秒过期，STOP可阻止准备期后的头部写入。新行为测试（含回读超时/不写电机/倾角返回）和导航STOP准备期取消、TypeScript、139项原生测试通过。源码`e3021b2cd994a5eb7820f7b7e62ef44f7488a958`已推送，[完整Linux CI42552212733](https://github.com/mypengpengli/myyaya/actions/runs/42552212733)成功，含本机缺zip的122测试。
 
-本机全量JS矩阵在旧Linux依赖测试处遇到环境差异；已通过Git Bash跑过120，其他已运行项目通过，122因缺zip留Linux CI，不能写本机全量CI均通过。临时USB保持亮屏已恢复。以下183段落为此前证据。
+原签名包`mobile/output/android/myyaya-2.1.184-arm64.apk`，174493214字节，SHA256 `48daf18f8be4064a53a21cd9add473fcac572bf351d7bb15a5fde37c75497d80`，快照`3818dfa18112f3e7fe2126b0b436ec7bf96b0b666c746871651f38cdf0f181ae`。APK完整性、签名、16KB对齐、中文模型、密钥排除通过。已install -r保留数据覆盖，手机base.apk摘要一致；安装后showing=true、mScreenOn=false，异步请用户解锁并手动连接底座。尚未读取本机FED1/手机倾角，也没有184实体动作结果，未发布184。解锁后先进入myyaya://robot，只读调用robot_head_status；不要直接发送实体动作。
+
+本机全量JS矩阵在旧Linux依赖测试处遇到环境差异；已通过Git Bash跑过120，其他已运行项目通过，122在完整Linux CI通过。临时USB保持亮屏已恢复；184控制页keep-awake仅在页面聚焦期间生效，不修改全局设置。以下183段落为此前证据。
 
 ## 最新：183头部上抬通过，低头未动，已查询社区反馈方案
 
