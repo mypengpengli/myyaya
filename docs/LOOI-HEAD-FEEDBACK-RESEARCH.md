@@ -23,7 +23,7 @@
 - `BluetoothChannel` 该写入路径设置value后使用 Android 旧写入接口，没有显式设writeType。**不能因此断言官方使用有响应写入。** [AOSP实现](https://android.googlesource.com/platform/packages/modules/Bluetooth/+/refs/heads/main/framework/java/android/bluetooth/BluetoothGattCharacteristic.java)在支持WRITE_NO_RESPONSE的特征上默认选无响应；本机支持该属性，官方默认可能与小丫一致。
 - FED9解析包含悬崖、evade左右数值、TOF、触摸、手机放置、电量、充电与序列回调；在检查的该分支没有机械头部角度字段。该版本把02解析为evade而非社区假设的IMU，0E解析为TOF；不要把社区低置信度解释当作实测机械反馈。
 
-185保留生产默认无响应和00/87/FF，只加入DUMP权限保护的ADB单条head_probe，限定up/down/center和response布尔值，用相同参数排除写入方式因素；不是声称修复已成立。新增只读电量FED8、信息2A27/2A28（按该客户端命名为firmware/hardware）原始回读与模式记录，尚待安装验收。不得以蓝牙ACK当成到位反馈。
+185保留生产默认无响应和00/87/FF，只加入DUMP权限保护的ADB单条head_probe，限定up/down/center和response布尔值，用相同参数排除写入方式因素；不是声称修复已成立。新增只读电量FED8、信息2A27/2A28（按该客户端命名为firmware/hardware）原始回读与模式记录。139项原生测试及完整CI42570713849通过，已覆盖安装且手机摘要一致。安装释放了蓝牙，已请求用户手动连接；185尚无新的实体动作结果或电量/信息读数。不得以蓝牙ACK当成到位反馈。
 
 ## 184 实现
 

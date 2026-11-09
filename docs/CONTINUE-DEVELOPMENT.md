@@ -1,6 +1,12 @@
 # 换电脑继续开发
 
-## 最新：185头部写入方式对照/电量信息诊断构建中，未发新动作
+## 最新：185已安装/CI通过，等待用户手动连接后读取电量与固件
+
+185已完成第二次增量构建，包含FED8/2A27/2A28只读。源码`e89dcf3db03ccfd94206a7aec31e8c540e5a2302`已推送，139原生测试、新head行为/导航/相机回归、TypeScript和[完整CI42570713849](https://github.com/mypengpengli/myyaya/actions/runs/42570713849)成功。原签名APK174496130字节，SHA256 `77d4cbb6a1d463f1785845871a9ee3db8c9f60035587c009332d58e4dc85be9e`，快照`905caeec0fa13450fbb8dddcb15224c353f0276a6870a5253587ac6e74e71b12`；签名/对齐/中文模型/密钥排除通过。已install -r覆盖且手机base.apk摘要一致，保留设置，未发布185。
+
+安装后手机仍解锁，已进入myyaya://robot。只读请求`2f940d0dd3564b2ba262ee9ec3604291`返回connected=false，重力模块正常，尚未读取电量/固件。已异步请用户手动连接并保持当前脖子位置；未自行反复重连，未发185实体动作。连接后先robot_head_status读电量/FED1/信息，安排相反端点的单次明显目标动作并说明预期，必要时用ADB-only head_probe对照response=true/false，不改变常用默认。
+
+`.tools/phone-command.py`现支持head_probe up/down/center --args中response布尔值；原生DUMP保护和15秒过期仍生效。不要在用户连接前排队动作，不要发angle_speed速度帧。`.tools/185-power-setting.json`已经恢复原USB亮屏设置，restored=true；控制页自身聚焦保持亮屏仍有效。以下为本次开发过程。
 
 用户确认184单次抬头变化太小不能辨认，不要叫用户量角度。184 head_up编号e9ea8d928cda4edf85e3b0f6fdba9b7c，峰值1.8645°、末态1.7160°；随后52f51cec1f4d438d9ee2bf2f073d3c10读FED1=00，之前FF。回读随命令改变但无位置证明。本轮未发低头、回正或履带。头部物理位置不明，最后命令up00；底座仍静止。
 
@@ -8,7 +14,7 @@
 
 185保留生产默认参数，新增ADB-only head_probe，up/down/center白名单+response布尔值，经原有控制器/STOP/导航租约；带15秒队列过期。head记录实际with/without response；手机观测保留前后向量。head_status补只读FED8/2A27/2A28数据，均原始字节，不编造机械位置。新行为/导航/相机回归与TypeScript正在复核，Android第二次增量构建包含新增设备信息读取（不要误导出第一次较早的185构建）。尚未导出、安装或发布185。
 
-`.tools/185-power-setting.json` 已临时将USB保持亮屏0改2（开始时用户已解锁），本轮调试完毕必须在仍等于applied时恢复old，不绕过锁屏。新版安装若断蓝牙直接请用户手动连接，不自动反复尝试。下一次动作先告知起始状态和目标，只单次明显头部对照，履带不动；不要连发微动作让用户猜。
+安装期间曾临时USB保持亮屏0改2，现已恢复，详情见最新状态。新版安装若断蓝牙直接请用户手动连接，不自动反复尝试。下一次动作先告知起始状态和目标，只单次明显头部对照，履带不动；不要连发微动作让用户猜。
 
 以下184段为此前结果。
 
