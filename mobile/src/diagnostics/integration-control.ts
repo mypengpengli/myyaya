@@ -4,6 +4,7 @@ import { phoneTools } from "../agent/phone-tools";
 import { replyToCompanion } from "../agent/companion-runtime";
 import { chineseVoice } from "../voice/chinese-voice-runtime";
 import { probeModelConnection } from "./model-connection-probe";
+import { assertIntegrationCommandFresh } from "./integration-command-age";
 
 /** Only the permission-protected native receiver can enqueue commands. */
 export function startIntegrationControl() {
@@ -15,6 +16,7 @@ export function startIntegrationControl() {
     busy = true; let id = "unknown";
     try {
       const command = JSON.parse(raw); id = command.id;
+      assertIntegrationCommandFresh(command);
       native.reportResult(JSON.stringify({ id, status: "running" }));
       let result;
       if (command.kind === "chat") result = await replyToCompanion(String(command.text).slice(0, 10000), new AbortController().signal);

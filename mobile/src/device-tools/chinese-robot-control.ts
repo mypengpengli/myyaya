@@ -27,12 +27,12 @@ export async function executeChineseRobotCommand(command: ChineseRobotCommand): 
     switch (command.kind) {
       case "move": result = await moveLooi(command.direction, 450); break;
       case "turn": result = await turnLooi(command.direction, command.degrees); break;
-      case "head": await setLooiHead(command.direction); break;
+      case "head": return (await setLooiHead(command.direction, undefined, true)).notice;
       case "nod": await performLooiHeadGesture("nod", 1); break;
       case "dance": await performLooiDance("bounded-wiggle-v1"); break;
       case "light": await setLooiLight(command.enabled); break;
     }
-    return result?.completed === false ? "动作已被停止或中断" : "指令执行结束";
+    return result?.completed === false ? "动作已被停止或中断" : command.kind === "nod" ? "已发送点头指令，尚未确认机械动作完成" : "指令执行结束";
   } catch (error) {
     const reason = getLooiRobotRuntimeState().safety.lastMotionBlockReason;
     if (reason) throw new Error(`传感器保护阻止动作：${reason}`);

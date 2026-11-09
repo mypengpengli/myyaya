@@ -13,6 +13,11 @@ import { holdAmbientMotionFor } from "@/src/core/ambient-motion";
 import { holdSocialAttentionMotionFor } from "@/src/core/social-attention";
 import { markRobotInteraction } from "@/src/core/robot-inactivity";
 import { useUserStore } from "@/src/store/user";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
+import { acquireRobotObservation, robotGravitySnapshot } from "@/modules/robot-observation";
+import { stableGravity, tiltDegrees, type GravityVector } from "@/src/device-tools/head-tilt";
+import { getLastHeadObservation } from "@/src/device-tools/head-observation";
+import { inspectLooiHeadChannel } from "@/src/device-tools/looi-robot";
 
 const actions: [string, ChineseRobotCommand][] = [
   ["前进 0.45 秒", { kind: "move", direction: "forward" }], ["后退 0.45 秒", { kind: "move", direction: "back" }],
@@ -27,17 +32,26 @@ export default function RobotScreen() {
   const [runtime, setRuntime] = useState(getLooiRobotRuntimeState);
   const [pairingBusy, setPairingBusy] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [gravity, setGravity] = useState<ReturnType<typeof stableGravity>>(null);
+  const [reference, setReference] = useState<GravityVector | null>(null);
+  const [headRead, setHeadRead] = useState("");
   const [notice, setNotice] = useState("每个动作都会自动停止。转向角度按时间估算，实际角度受地面和电量影响。");
   const operation = useRef(false);
   const active = useRef(false);
   const lease = useRef(0);
   useFocusEffect(useCallback(() => {
     active.current = true;
+    const awakeTag = "myyaya-robot-controls";
+    let focused = true;
+    void activateKeepAwakeAsync(awakeTag).then(() => { if (!focused) void deactivateKeepAwake(awakeTag); }).catch(() => {});
+    const releaseObservation = acquireRobotObservation();
+    const observationTimer = setInterval(() => { if (active.current) setGravity(stableGravity(robotGravitySnapshot())); }, 250);
     const hold = () => { holdAmbientMotionFor(6000, "robot-control-screen"); holdSocialAttentionMotionFor(6000, "robot-control-screen"); };
     hold(); const timer = setInterval(hold, 2000);
     const unsubscribe = subscribeLooiRobotRuntimeState(() => { if (active.current) setRuntime(getLooiRobotRuntimeState()); });
     setRuntime(getLooiRobotRuntimeState());
-    return () => { active.current = false; lease.current++; clearInterval(timer); unsubscribe(); void stopLooiMotion("robot-screen-blur").catch(() => {}); };
+    return () => { focused = false; active.current = false; lease.current++; clearInterval(timer); clearInterval(observationTimer);
+      releaseObservation(); void deactivateKeepAwake(awakeTag); unsubscribe(); void stopLooiMotion("robot-screen-blur").catch(() => {}); };
   }, []));
   const run = async (work: () => Promise<void>) => {
     if (operation.current) return;
@@ -65,6 +79,16 @@ export default function RobotScreen() {
       })} /></View>
       <View style={styles.grid}>{actions.map(([label, command]) => <Button key={label} label={label} disabled={busy || pairingBusy || !runtime.connected}
         onPress={() => void run(async () => { const message = await executeChineseRobotCommand(command); if (active.current) setNotice(message); })} />)}</View>
+      <Text style={styles.detail}>头部实际位置：未知 · 手机倾角：{gravity ? "稳定" : "等待稳定的新观测"}{gravity && reference ? ` · 相对参考 ${tiltDegrees(reference, gravity)?.toFixed(1) ?? "未知"}°` : ""}。倾角变化只表示手机姿态变化，不能证明脖子已最低。</Text>
+      <View style={styles.row}>
+        <Button label="记录当前倾角为参考" disabled={!gravity || busy} onPress={() => { setReference(gravity); setNotice("已记录当前手机倾角，不会驱动底座，也未标定最低位置"); }} />
+        <Button label="读取头部蓝牙状态（不动作）" disabled={busy || pairingBusy || !runtime.connected} onPress={() => void run(async () => {
+          const result = await inspectLooiHeadChannel();
+          if (active.current) { setHeadRead(JSON.stringify(result)); setNotice("读取完成：原始字节语义未确认，不能作为机械到位回执"); }
+        })} />
+      </View>
+      {getLastHeadObservation() ? <Text style={styles.detail}>{getLastHeadObservation()?.notice}</Text> : null}
+      {headRead ? <Text selectable style={styles.detail}>{headRead}</Text> : null}
       <Text style={styles.detail}>传感器：悬崖 {runtime.sensors.cliffSafe === null ? "未知" : runtime.sensors.cliffSafe ? "地面安全" : "检测到边缘"} · 前方距离 {runtime.sensors.tofDistanceMm === null ? "未知 / 无目标" : `${runtime.sensors.tofDistanceMm} mm`} · 驱动通道 {runtime.driveControlReady ? "已就绪" : "等待校验"}</Text>
       <Text selectable style={styles.detail}>保护状态：{runtime.safety.lastMotionBlockReason ?? runtime.safety.reason ?? "无阻断"} · 最近停止：{runtime.safety.lastSafetyStopReason ?? "无"}</Text>
       {runtime.lastError ? <Text selectable style={styles.notice}>{runtime.lastError}</Text> : null}

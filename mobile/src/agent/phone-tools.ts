@@ -44,6 +44,23 @@ export const phoneTools: AgentTool[] = [
         driveControlReady: robot.driveControlReady, safety: robot.safety,
         recording: getPhoneRecording().phase });
     } },
+  { name: "robot_head_status", label: "正在读取头部状态", description: "只读检查已连接底座的头部蓝牙属性、原始回读和手机倾角，不发运动命令，不会自动连接。原始字节语义未确认，倾角也不能证明脖子最低；physicalPosition 为 unknown 时须如实说明。",
+    parameters: Type.Object({}), execute: async (_id, _params, signal) => {
+      if (signal?.aborted || AppState.currentState !== "active") throw new Error("请在前台读取头部状态");
+      const [{ inspectLooiHeadChannel }, observation, sensors, tilt] = await Promise.all([
+        import("../device-tools/looi-robot"), import("../device-tools/head-observation"),
+        import("../../modules/robot-observation"), import("../device-tools/head-tilt"),
+      ]);
+      const release = sensors.acquireRobotObservation();
+      try {
+        const channel = await inspectLooiHeadChannel();
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const gravity = sensors.robotGravitySnapshot();
+        return text({ ...channel, gravity: { available: gravity.available, active: gravity.active,
+          stable: tilt.stableGravity(gravity), latest: gravity.samples.at(-1) ?? null },
+          lastCommandObservation: observation.getLastHeadObservation(), physicalPosition: "unknown" });
+      } finally { release(); }
+    } },
   photoTool, observeSceneTool,
   { name: "record_video", label: "正在准备录像", description: "用户明确要求录像时，使用手机相机开始有声录像。录像期间暂停语音识别，用户点击画面上的停止录像按钮结束，随后恢复对话。返回准备中不代表已保存。",
     parameters: Type.Object({ camera: Type.Union([Type.Literal("front"), Type.Literal("back")]) }), execute: async (_id, params, signal) => {

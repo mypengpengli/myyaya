@@ -43,7 +43,8 @@ export const robotActionTool: AgentTool = {
       if (signal?.aborted) throw new Error("动作已取消");
       const notice = await executeChineseRobotCommand(commands[action]);
       if (signal?.aborted) throw new Error("动作已停止");
-      return text({ action, notice, connected: getLooiRobotRuntimeState().connected });
+      return text({ action, notice, connected: getLooiRobotRuntimeState().connected,
+        ...(action.startsWith("head_") || action === "nod" ? { physicalPosition: "unknown", instruction: "指令返回不代表机械到位；不能声称已最低或已抬到位" } : {}) });
     } finally { signal?.removeEventListener("abort", stop); }
   },
 };

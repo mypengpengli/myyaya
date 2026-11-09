@@ -16,11 +16,17 @@ const sdk = load("packages/looi-sdk/src/index.ts");
 const fed9 = load("src/device-tools/fed9-sensors.ts");
 const writes = [];
 let notify;
+let headObservationEntered, finishHeadBaseline;
 const robot = load("src/device-tools/looi-robot.ts", {
   "@sourcebug/looi-sdk": sdk,
   "./fed9-sensors": fed9,
   "../core/navigation-control-lease": lease,
   "../diagnostics/diagnostic-log": { recordDiagnosticEvent() {} },
+  "./head-observation": { observeHeadCommand: async (_direction, send) => {
+    headObservationEntered?.();
+    await new Promise((resolve) => { finishHeadBaseline = resolve; });
+    await send(); return "observed";
+  } },
 });
 robot.configureLooiRobotTransport({
   connect: async () => {}, disconnect: async () => {},
@@ -54,5 +60,13 @@ lease.acquireNavigationControl("new-owner");
 await robot.startLooiMotion("stop");
 assert.equal(writes.at(-1).payload, "0000", "stop bypasses exclusive ownership");
 lease.releaseNavigationControl("new-owner");
+const entered = new Promise((resolve) => { headObservationEntered = resolve; });
+const delayedHead = robot.setLooiHead("down", undefined, true);
+await entered;
+const headWritesBefore = writes.filter((w) => w.key === "head").length;
+await robot.stopLooiMotion("cancel-during-head-sensor-baseline");
+finishHeadBaseline();
+await assert.rejects(delayedHead, /取消/);
+assert.equal(writes.filter((w) => w.key === "head").length, headWritesBefore, "STOP during the sensor baseline prevents a late head write");
 await robot.disconnectLooiRobot();
 console.log("Navigation motor ownership, real BLE pulse and cancellation tests passed");

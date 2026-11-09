@@ -494,6 +494,12 @@ export function getLooiRobotRuntimeState() {
   };
 }
 
+export async function inspectLooiHeadChannel() {
+  const transport = state.transport as (LooiTransport & { inspectHeadChannel?: () => Promise<unknown> }) | null;
+  if (!state.connected || !transport) return { connected: false, physicalPosition: "unknown" };
+  return { connected: true, channel: await transport.inspectHeadChannel?.() ?? { available: false, physicalPosition: "unknown" } };
+}
+
 async function getRobot(options: LooiConnectOptions = {}): Promise<LooiRobot> {
   if (!state.robot) {
     throw new Error("LOOI transport is not configured. Bind a LooiTransport before using robot tools.");
@@ -898,14 +904,23 @@ export async function setLooiLight(enabled: boolean) {
   return { ok: true, enabled };
 }
 
-export async function setLooiHead(direction: string, navigationOwner?: string) {
+export async function setLooiHead(direction: string, navigationOwner?: string, observe = false) {
   assertNavigationControl(navigationOwner);
   const requestToken = motionSequenceAbortGeneration;
   const robot = await getRobot();
   assertPendingMotionCurrent(requestToken, robot);
   assertNavigationControl(navigationOwner);
-  await robot.setHead(direction);
-  return { ok: true, direction };
+  const send = async () => {
+    assertPendingMotionCurrent(requestToken, robot);
+    assertNavigationControl(navigationOwner);
+    await robot.setHead(direction);
+  };
+  if (observe) {
+    const notice = await (await import("./head-observation")).observeHeadCommand(direction, send);
+    return { ok: true, direction, notice };
+  }
+  await send();
+  return { ok: true, direction, notice: "头部指令已发送，尚未确认机械到位" };
 }
 
 /** Head-only conversational gestures: no wheel movement. */
