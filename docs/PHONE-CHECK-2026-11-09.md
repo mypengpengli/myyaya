@@ -1,6 +1,8 @@
 # 181分层地图与路线预览实测
 
-## 同日继续：184头部观测版已安装，手机只读验收待解锁
+## 同日继续：184头部观测版已安装，只读属性/原始回读/手机倾角通过
+
+用户已解锁连接；只读两次FED1都返回FF，实际支持read/writeWithResponse/writeWithoutResponse/notify，不支持indicate。订阅后尚无FED1通知。手机重力传感器accuracy3、数据稳定。尚不能判断FF代表实际位置还是命令回显/默认值。未发送新的头部或履带指令；已询问起始头部位置，待用户确认后再做单次明显抬头对照。细节见[头部核查](LOOI-HEAD-FEEDBACK-RESEARCH.md)。
 
 源码`e3021b2cd994a5eb7820f7b7e62ef44f7488a958`，139项原生测试与[完整源码CI](https://github.com/mypengpengli/myyaya/actions/runs/42552212733)通过。APK174493214字节，SHA256 `48daf18f8be4064a53a21cd9add473fcac572bf351d7bb15a5fde37c75497d80`，源快照`3818dfa18112f3e7fe2126b0b436ec7bf96b0b666c746871651f38cdf0f181ae`；保留设置覆盖安装且手机base.apk摘要一致。原签名/对齐/中文模型/密钥排除核验通过。
 

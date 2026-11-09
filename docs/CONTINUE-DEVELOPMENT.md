@@ -1,6 +1,10 @@
 # 换电脑继续开发
 
-## 最新开发：184头部只读诊断与倾角观测已安装，等待解锁/手动连接后只读验证
+## 最新开发：184本机FED1只读与手机倾角已通过，等待单次抬头起始状态确认
+
+用户已解锁并手动连接。robot_head_status 两次成功（`820636466c2541eab7f45f4abcc2bf45`、`9ac7f4398e7a47a4a7cd505f22e07a03`）：FED1 read/writeWithResponse/writeWithoutResponse/notify 均 true，indicate=false；回读均FF，无FED1通知记录；重力模块可用/active、accuracy3且稳定，向量约[8.8775,.4616,4.1410]。原始FF不代表机械最低。未发头部/履带指令。已异步询问当前最低/稍抬/较高且手松开；待确认后只发一次head_up，期望明显抬高而底座不行驶，再立即只读对比FED1和lastCommandObservation，并让用户确认实际效果。严禁确认前连发上下或测试履带。控制页聚焦keep-awake已经正常显示。
+
+下面安装时的“等待解锁”等为过程记录，已被以上最新状态取代。
 
 184 加入独立 robot-observation 重力模块，控制页参考倾角、聚焦保持亮屏，robot_head_status 只读 FED1 属性/回读/通知及最近观测。头部命令前后观察手机倾角，所有结果机械位置仍 unknown，未修改00/87/FF参数。联调请求15秒过期，STOP可阻止准备期后的头部写入。新行为测试（含回读超时/不写电机/倾角返回）和导航STOP准备期取消、TypeScript、139项原生测试通过。源码`e3021b2cd994a5eb7820f7b7e62ef44f7488a958`已推送，[完整Linux CI42552212733](https://github.com/mypengpengli/myyaya/actions/runs/42552212733)成功，含本机缺zip的122测试。
 
