@@ -23,7 +23,7 @@ internal class PulseMeasurementTrial(val direction: String,val durationMs: Int,v
   private var ackMs: Long?=null
   private var ackPose: RoutePose?=null
   var result: PulseMeasurement?=null;private set
-  init { require(direction in listOf("back","left","right") && durationMs in 1..250) }
+  init { require(direction in listOf("back","left","right") && (durationMs in 1..250 || direction=="back" && durationMs==450)) }
   fun acknowledge(ok: Boolean,atMs: Long) {
     if(result!=null || ackMs!=null) return
     if(!ok || atMs<startedMs) { fail("ACTION_FAILED");return }

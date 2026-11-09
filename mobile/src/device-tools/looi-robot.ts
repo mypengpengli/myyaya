@@ -747,6 +747,13 @@ export async function moveLooiNavigationPulse(direction: "back" | "left" | "righ
   return runBoundedMotion(direction, Math.round(durationMs), "manual-bounded", { navigationOwner: owner });
 }
 
+/** Explicit operator calibration only. Autonomous/route pulses retain their 250ms limit. */
+export async function moveLooiOperatorBackCalibration(owner: string) {
+  assertNavigationControl(owner);
+  if (!owner) throw new Error("需要当前导航控制通道");
+  return runBoundedMotion("back", 450, "manual-bounded", { navigationOwner: owner });
+}
+
 /** Calibrated bounded turn. First build uses time estimates that must be tuned on the real robot. */
 export async function turnLooi(direction: "left" | "right", degrees: 90 | 180 = 90) {
   assertNavigationControl();

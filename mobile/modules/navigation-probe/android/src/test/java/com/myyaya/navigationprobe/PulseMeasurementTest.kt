@@ -6,6 +6,12 @@ import kotlin.math.*
 
 class PulseMeasurementTest {
   private val start=RoutePose(0f,0f,0f)
+  @Test fun explicit450msBackTrialDoesNotAllowLongTurnOrArbitraryDuration() {
+    PulseMeasurementTrial("back",450,start,1000)
+    for((direction,ms) in listOf("left" to 450,"right" to 450,"back" to 451)) {
+      try { PulseMeasurementTrial(direction,ms,start,1000);fail("invalid calibration duration") } catch(_:IllegalArgumentException) {}
+    }
+  }
   @Test fun measuredSevenRightFiveForwardUsesRearCameraAxes() {
     val camera=RigidPose(floatArrayOf(0f,.1f,0f),floatArrayOf(0f,0f,0f,1f))
     val base=RoutePose.fromCamera(camera,.07f,.05f)

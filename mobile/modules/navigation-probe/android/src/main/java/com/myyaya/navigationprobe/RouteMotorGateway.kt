@@ -19,8 +19,8 @@ internal class RouteMotorGateway(val token: String=UUID.randomUUID().toString(),
   fun state(connected: Boolean,voiceStop: Boolean) { this.connected=connected;voiceStopReady=voiceStop;stateAt=SystemClock.elapsedRealtime() }
   @Synchronized fun request(action: String,durationMs: Int=0,callback: (Boolean,String)->Unit={_,_->}) {
     if (!foreground || pending!=null) { callback(false,"控制通道未就绪");return }
-    require(action in setOf("connect","head_down","back","left","right"))
-    require(durationMs in 0..250)
+    require(action in setOf("connect","head_down","back","left","right","calibration_back"))
+    require(if(action=="calibration_back") durationMs==450 else durationMs in 0..250)
     val id=++sequence;pending=id to callback
     emit(mapOf("token" to token,"sequence" to id,"action" to action,"durationMs" to durationMs))
     handler.postDelayed({ if (pending?.first==id) {

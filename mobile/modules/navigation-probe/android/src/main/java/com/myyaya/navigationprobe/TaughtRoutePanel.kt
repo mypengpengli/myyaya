@@ -4,6 +4,10 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.graphics.Color
 import android.os.SystemClock
+import android.os.Handler
+import android.os.Looper
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.util.AtomicFile
 import android.widget.*
 import java.io.File
@@ -12,7 +16,11 @@ import kotlin.math.*
 
 /** Route UI and observation adapter. Motor requests go through the existing BLE owner. */
 internal class TaughtRoutePanel(private val activity: Activity,private val motor: RouteMotorGateway,
-  private val metadata: ()->RoomMapData?,private val saveMap: ()->Unit,private val mountSettings: NavigationMountSettings) {
+  private val metadata: ()->RoomMapData?,private val saveMap: ()->Unit,private val mountSettings: NavigationMountSettings,
+  private val floorFlow: ()->Map<String,Any?> = { emptyMap() }) {
+  private var countdown: CalibrationStartTimer?=null
+  private var countdownDialog: AlertDialog?=null
+  private var countdownTone: ToneGenerator?=null
   private val directory=File(activity.filesDir,"taught-routes").apply { mkdirs() }
   private val mount get()=mountSettings.value ?: RouteMount()
   @Volatile private var teacher: RouteTeacher?=null
@@ -26,6 +34,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   @Volatile private var turnChecked=false
   private var invertTurns=false
   @Volatile private var calibration: PulseMeasurementTrial?=null
+  @Volatile private var calibrationFlowStart: Map<String,Any?> = emptyMap()
   @Volatile private var lastMeasurement: Map<String,Any?>?=null
   private var lastStop=0L
   private var lastIssued=0L
@@ -128,22 +137,53 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     }.show()
   }
   private fun calibrate(direction: String) {
+    if(direction=="back") {
+      AlertDialog.Builder(activity).setTitle("后退标定时长")
+        .setMessage("可选更明显的一次后退。实际距离尚未校准，均会自动停止；开始前有三声提示音与倒计时。")
+        .setNegativeButton("取消",null).setNeutralButton("200毫秒") { _,_->confirmCalibration(direction,200) }
+        .setPositiveButton("450毫秒（更明显）") { _,_->confirmCalibration(direction,450) }.show()
+    } else confirmCalibration(direction,120)
+  }
+  private fun confirmCalibration(direction: String,ms: Int) {
     val o=requireFloor();check(o.clearance!=RouteClearance.OBSTACLE) { "已看到车前障碍/落差，请先移开并重新观察" }
     check(motor.isConnected() && !motor.busy && teacher==null && follower?.phase !in listOf("FOLLOWING","FACING_USER")) { "请连接底座并停止当前操作" }
     check(calibration==null) { "请等上一轮动作位姿测量完成" }
-    val ms=if(direction=="back") 200 else 120
     AlertDialog.Builder(activity).setTitle("一次短动作标定")
       .setMessage("${if(o.clearance==RouteClearance.DEPTH_UNKNOWN) "相机近处仍有盲区，这不是已测空地。" else "将测量实际车身位移和转角。"}请目视确认底座四周至少30厘米为平整空地、无物品和落差，USB线留有余量。此次只${if(direction=="back") "沿后摄方向短后退" else if(direction=="left") "短左转" else "短右转"}${ms}毫秒，自动停止并观察停稳；不启动自主行驶。")
       .setNegativeButton("取消",null).setPositiveButton("空地已确认，做一次") { _,_->runCatching {
+        beginCountdown(direction,ms)
+      }.onFailure { message(it.message ?: "无法准备标定") } }.show()
+  }
+  private fun cancelCountdown() {
+    countdown?.cancel();countdown=null
+    val dialog=countdownDialog;countdownDialog=null;dialog?.dismiss()
+    countdownTone?.release();countdownTone=null
+  }
+  private fun beginCountdown(direction: String,ms: Int) {
+    cancelCountdown()
+    val handler=Handler(Looper.getMainLooper())
+    countdownTone=runCatching { ToneGenerator(AudioManager.STREAM_MUSIC,75) }.getOrNull()
+    val dialog=AlertDialog.Builder(activity).setTitle("即将开始一次标定")
+      .setMessage("请看底座：3秒后短${if(direction=="back") "后退" else "转向"}，随后自动停止。")
+      .setNegativeButton("取消本次动作") { _,_->cancelCountdown() }.create()
+    countdownDialog=dialog;dialog.setOnCancelListener { cancelCountdown() };dialog.show()
+    countdown=CalibrationStartTimer({delay,work -> val task=Runnable { work() };handler.postDelayed(task,delay);{handler.removeCallbacks(task)} },{remaining->
+      dialog.setMessage("${remaining}秒后${if(direction=="back") "后退" else "转向"}${ms}毫秒，随后自动停止。\n请留意三声提示音；无需估计距离。")
+      runCatching { countdownTone?.startTone(ToneGenerator.TONE_PROP_BEEP,130) }
+    },{
+      cancelCountdown()
+      runCatching {
         val current=requireFloor()
         check(current.clearance!=RouteClearance.OBSTACLE && motor.isConnected() && !motor.busy && calibration==null) { "姿态、障碍或连接已变化，请重新确认" }
         val trial=PulseMeasurementTrial(direction,ms,current.pose!!,SystemClock.elapsedRealtime())
+        calibrationFlowStart=floorFlow()
         calibration=trial
-        motor.request(direction,ms) { ok,s->
+        motor.request(if(direction=="back" && ms==450) "calibration_back" else direction,ms) { ok,s->
           synchronized(this) { if(calibration===trial) trial.acknowledge(ok,SystemClock.elapsedRealtime()) }
           message(if(ok) "动作已停止，正在等待位姿稳定并记录余移。" else "校验动作未完成：$s")
         }
-      }.onFailure { message(it.message ?: "无法开始标定") } }.show()
+      }.onFailure { message(it.message ?: "倒计时后条件已变化，未开始动作") }
+    }).also { it.start() }
   }
   private fun checkBinding(r: TaughtRoute) {
     val map=metadata() ?: error("当前地图不可用")
@@ -161,9 +201,11 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     val f=follower ?: error("没有可继续的路线");checkBinding(f.route);f.resume(requireFloor());message("继续复走${f.route.name}")
   }
   @Synchronized fun stop(reason: String) {
+    activity.runOnUiThread { cancelCountdown() }
     teacher=null;calibration=null;follower?.cancel();motor.stop(reason);message(reason)
   }
   @Synchronized fun pause() {
+    activity.runOnUiThread { cancelCountdown() }
     teacher?.observe(null,false);follower?.pause("界面或定位已暂停");calibration=null;headFixed=false;poseLock.reset()
     backChecked=false;turnChecked=false;motor.stop("扫描已暂停")
   }
@@ -193,7 +235,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
       trial.result?.let { result ->
         calibration=null;lastMeasurement=result.report()+mapOf("mount" to mountSettings.report(),"atEpochMs" to System.currentTimeMillis(),
           "clearAreaSource" to "operator-confirmed-single-trial","poseLock" to poseLock.report(),"floorValid" to actualFloor,
-          "connected" to motor.isConnected(),"mapCameraY" to camera?.t?.get(1))
+          "connected" to motor.isConnected(),"mapCameraY" to camera?.t?.get(1),"floorFlowBefore" to calibrationFlowStart,"floorFlowDiagnostic" to floorFlow())
         if(result.direction=="back") backChecked=result.valid
         else if(result.direction=="left") { turnChecked=result.valid;if(result.valid) invertTurns=result.yawRadians>0 }
         if(!result.valid) motor.stop("标定位姿检查失败")

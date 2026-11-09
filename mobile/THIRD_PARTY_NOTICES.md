@@ -2,6 +2,12 @@
 
 My LOOI uses third-party open-source software and model assets. Their original licenses remain applicable.
 
+## OpenCV
+
+The Android navigation diagnostic uses OpenCV 4.13.0 for sparse optical flow. It runs locally and is distributed under Apache License 2.0; a copy is included in `licenses/APACHE-2.0.txt`.
+
+Source: https://github.com/opencv/opencv/tree/4.13.0
+
 ## Upstream project
 
 Portions of My LOOI originated from the MIT-licensed `GrinZero/super-looi` project. The historical MIT notice that accompanied the upstream source is preserved in `licenses/UPSTREAM_EXPO_MIT_NOTICE.txt`.

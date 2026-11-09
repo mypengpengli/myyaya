@@ -28,6 +28,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private val directory = File(activity.filesDir,"room-maps").apply { mkdirs() }
   private val io = Executors.newSingleThreadExecutor()
   private val depthRecorder=DepthEvidenceRecorder(activity.getExternalFilesDir("navigation-probe") ?: activity.filesDir,io)
+  private val floorFlow=FloorFlowDiagnostic()
   private var depthOverlay: DepthOverlayView?=null
   @Volatile private var overlayEnabled=true
   private var lastOverlayNs=0L
@@ -48,7 +49,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private lateinit var localState: TextView
   @Volatile private var mapper: RoomMapper? = null
   private val mountSettings=NavigationMountSettings(activity)
-  private val taughtRoutes=motor?.let { TaughtRoutePanel(activity,it,{ mapper?.metadata() },{save(true)},mountSettings) }
+  private val taughtRoutes=motor?.let { TaughtRoutePanel(activity,it,{ mapper?.metadata() },{save(true)},mountSettings,{floorFlow.report()}) }
   @Volatile private var observedGround: GroundPlane?=null
   @Volatile private var freshMap = false
   @Volatile private var sessionId = ""
@@ -202,6 +203,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     dialog.show()
   }
   private fun clearTerrain(status: String="SELECT_GROUND") {
+    floorFlow.reset()
     observedGround=null
     surfaceAnchor?.let { surfaceAnchorsToRelease.add(it) };surfaceAnchor=null;surfaceAnchorState="NONE"
     groundArmed=false; groundTap=null; pendingGround=null; pendingHeight=null;selectedGround=null;fittedGround=null;calibratedHeight=null;surfaceSource="NONE";terrain.reset()
@@ -270,7 +272,12 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
         else -> "车前观测：原始深度不足"
       }
     }
-    if (!groundArmed) terrainState.text=warmup+message+(if (s.groundSelected && sampling.isNotEmpty()) "\n$sampling" else "")+"\n$local\n灰未知 / 青地面 / 红障碍 / 橙落差 / 绿整车覆盖（诊断）"
+    val flow=floorFlow.report()
+    val flowText=if(flow["status"]=="FLOOR_FLOW_ESTIMATE") {
+      val dx=(flow["cameraDxMeters"] as Number).toDouble();val dz=(flow["cameraDzMeters"] as Number).toDouble()
+      "地板视觉：手机相对参考约%.1f厘米（诊断，不代表通行许可）".format(hypot(dx,dz)*100)
+    } else "地板视觉：等待实测高度和可跟踪地板纹理（诊断）"
+    if (!groundArmed) terrainState.text=warmup+message+(if (s.groundSelected && sampling.isNotEmpty()) "\n$sampling" else "")+"\n$local\n$flowText\n灰未知 / 青地面 / 红障碍 / 橙落差 / 绿整车覆盖（诊断）"
     terrainView.snapshot=s;terrainView.basePose=if(mountSettings.value!=null) localPose else null;terrainView.invalidate()
     if(::localView.isInitialized) {
       val rLocal=localSnapshot.report()
@@ -589,7 +596,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     }
   }
   fun pause() { taughtRoutes?.pause();generation++; active=false; depthReadiness.reset();depthState=LocalDepthReadiness.State();mapper?.invalidate(); clearTerrain(); renderTerrain(); if (::mapView.isInitialized) { mapView.position=null; mapView.forward=null; mapView.invalidate(); state.text="扫描已暂停，当前位置无效。地图可保存或重新打开。" } }
-  fun close() { runCatching { sessionOriginAnchor?.detach() };sessionOriginAnchor=null;io.shutdown();localPlannerWorker.shutdown() }
+  fun close() { runCatching { sessionOriginAnchor?.detach() };sessionOriginAnchor=null;floorFlow.close();io.shutdown();localPlannerWorker.shutdown() }
   fun report(): Map<String,Any?>? = mapper?.summary()?.let { it + mapOf("lastSavedAt" to if (it["mapId"]==savedId) savedAt else 0L,
     "taughtRoute" to taughtRoutes?.report(),
     "referenceTrackingState" to referenceState,"referenceTrackingMethod" to referenceMethod,
@@ -599,7 +606,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       "originAnchorState" to originAnchorState,"originAnchorTranslation" to originAnchorPose?.t?.toList(),
       "originAnchorQuaternion" to originAnchorPose?.q?.toList(),"usesCachedWorldOriginForTracking" to false),
     "terrain" to (terrainSnapshot.report()+mapOf("trackedHorizontalPlanes" to horizontalPlanes,"surfaceSource" to surfaceSource,
-      "calibratedCameraHeightMeters" to calibratedHeight,"hybridDepth" to hybridReport,"localObservation" to localAssessment.report(),
+      "calibratedCameraHeightMeters" to calibratedHeight,"floorFlowDiagnostic" to floorFlow.report(),"hybridDepth" to hybridReport,"localObservation" to localAssessment.report(),
       "layeredLocalMap" to (localSnapshot.report()+mapOf("source" to "confidence-filtered-raw-only",
         "initialFootprintSeeded" to false,"mountCalibrated" to false,"mountMeasurement" to mountSettings.report(),
         "basePoseMeters" to localPose?.let { listOf(it.x,it.z,it.yaw) },"hypotheticalStopDistanceMeters" to .01f,
@@ -751,6 +758,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
           }
         }
       }
+      floorFlow.offer(frame,calibratedHeight?.takeIf { surfaceSource=="MEASURED_HEIGHT" && terrainSnapshot.floorConfirmed })
       panel?.frame(sessionId,camera,located && terrainSnapshot.groundSelected && terrainSnapshot.floorConfirmed &&
         terrainSnapshot.cameraHeight?.let { it in .03f..2.5f }==true,localAssessment.clearance)
     }
@@ -832,6 +840,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     pendingHeight?.let { choice ->
       pendingHeight=null
       if (camera!=null) {
+        floorFlow.reset()
         calibratedHeight=choice.height;selectedGround=null;surfaceSource="MEASURED_HEIGHT"
         fittedGround=SurfaceReference.measuredHeight(camera,choice.height)
         surfaceAnchor?.let { surfaceAnchorsToRelease.add(it) }
