@@ -52,6 +52,9 @@ def main():
             elif row[0]=='CELL':f['cells'].append([int(row[2]),int(row[3]),row[4],row[5]=='true'])
             elif row[0]=='POINT':f['points'].append(list(map(float,row[2:])))
             elif row[0]=='ROUTE':f['routeClearance']=row[2]
+            elif row[0]=='LOCAL':f['localMap']=dict(zip(
+                ['retainedFloorTiles','recentFreeTiles','weakObstacleTiles','obstacleTiles','dropTiles'],map(int,row[2:7])),
+                stepState=row[7],unknown=int(row[8]),stale=int(row[9]),obstacles=int(row[10]),drops=int(row[11]),initialUnknown=int(row[12]))
     (a.output/'frames.json').write_text(json.dumps(frames,separators=(',',':')),encoding='utf-8')
     print(json.dumps({'frames':len(frames),'peakGround':max(sum(c[2]=='GROUND' for c in f['cells']) for f in frames),
       'peakCandidates':max(sum(c[3] for c in f['cells']) for f in frames),'points':sum(len(f['points']) for f in frames)}))

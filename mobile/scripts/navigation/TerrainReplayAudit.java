@@ -15,6 +15,8 @@ public class TerrainReplayAudit {
   }
   public static void main(String[] args) throws Exception {
     TerrainAnalysis terrain=new TerrainAnalysis();
+    LocalNavigationMap local=new LocalNavigationMap();
+    RobotEnvelope envelope=new RobotEnvelope(.15f,.10f,.11f,.05f);
     long slack=args.length>1?Long.parseLong(args[1]):0;
     if(slack<0 || slack>5_000_000L)throw new IllegalArgumentException("Offline slack must be 0..5ms");
     terrain.setEnvelope(new RobotEnvelope(.15f,.10f,.11f,.05f));
@@ -44,6 +46,14 @@ public class TerrainReplayAudit {
           boolean fresh=rawNs>0 && rawNs<=now && now-rawNs<=250_000_000L;
           RouteClearance clearance=RoutePerception.INSTANCE.evaluate(rawPoints,plane,pose,fresh,.15f,.10f,.11f,.10f,true);
           System.out.println("ROUTE,"+row+","+clearance);
+          LocalMapSnapshot lm=local.update(camera,plane,now,rawNs,rawPoints,.11f);
+          RoutePose end=new RoutePose(pose.getX()+(float)Math.sin(pose.getYaw())*.02f,
+            pose.getZ()-(float)Math.cos(pose.getYaw())*.02f,pose.getYaw(),pose.getPitch(),pose.getRoll());
+          LocalSweepResult step=LocalTrajectory.INSTANCE.check(lm,pose,end,envelope,.01f,0f,.01f);
+          Map<String,Object> lr=lm.report();
+          System.out.println("LOCAL,"+row+","+lr.get("retainedFloorTiles")+","+lr.get("recentFreeTiles")+
+            ","+lr.get("weakObstacleTiles")+","+lr.get("obstacleTiles")+","+lr.get("dropTiles")+
+            ","+step.getState()+","+step.getUnknown()+","+step.getStale()+","+step.getObstacles()+","+step.getDrops()+","+step.getInitialUnknown());
         } catch(IllegalArgumentException e) {System.out.println("ROUTE,"+row+",INVALID_POSE");}
         for(TerrainCell c:snap.getCells()) System.out.println("CELL,"+row+","+c.getX()+","+c.getZ()+","+c.getKind()+","+c.getCandidate());
         for(float[] p:points) System.out.println("POINT,"+row+","+p[0]+","+p[1]+","+p[2]+","+plane.distance(p));

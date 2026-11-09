@@ -17,6 +17,7 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicBoolean
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.*
@@ -33,6 +34,18 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private var lastOutlineNs=0L
   @Volatile private var hybridReport: Map<String,Any?> = mapOf("status" to "WAITING")
   @Volatile private var localAssessment=RouteAssessment(RouteClearance.DEPTH_UNKNOWN,"GROUND_REFERENCE_REQUIRED")
+  private val localMap=LocalNavigationMap()
+  private val localPlannerWorker=Executors.newSingleThreadExecutor()
+  private val localPlannerBusy=AtomicBoolean(false)
+  @Volatile private var localSnapshot=LocalMapSnapshot()
+  @Volatile private var localGoal: LocalGoal?=null
+  @Volatile private var localPose: RoutePose?=null
+  @Volatile private var localPlan=LocalPlan("WAITING",reason="GOAL_REQUIRED")
+  @Volatile private var localPlanSampleNs=0L
+  @Volatile private var localSweeps: Map<String,LocalSweepResult> = emptyMap()
+  @Volatile private var lastLocalPlanNs=0L
+  private lateinit var localView: LocalNavigationView
+  private lateinit var localState: TextView
   @Volatile private var mapper: RoomMapper? = null
   private val taughtRoutes=motor?.let { TaughtRoutePanel(activity,it,{ mapper?.metadata() },{save(true)}) }
   @Volatile private var observedGround: GroundPlane?=null
@@ -115,6 +128,11 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     terrainState=label("开始扫描后点选平面并确认用途；灰未知、青平面、红障碍、橙落差、绿候选。").apply { textSize=12f }
     addView(terrainState)
     terrainView=TerrainView(activity); addView(terrainView,LinearLayout.LayoutParams(-1,(130*resources.displayMetrics.density).toInt()))
+    localState=label("局部分层：点下图选目标，只预览路线，不驱动底座。").apply { textSize=12f };addView(localState)
+    localView=LocalNavigationView(activity) { goal -> localGoal=goal;localPlan=LocalPlan("WAITING",reason="PLANNING");localPlanSampleNs=0;lastLocalPlanNs=0L }.apply {
+      contentDescription="局部分层地图，点选诊断目标，不驱动底座"
+    }
+    addView(localView,LinearLayout.LayoutParams(-1,(160*resources.displayMetrics.density).toInt()))
     addView(label(if(taughtRoutes==null) "绿色仅为候选，实际通行范围待验证；本页不会驱动底座。"
       else "路线试验仅在实际地面、姿态与方向校验通过后驱动；绿色仅为候选。").apply { textSize=11f })
     addView(state)
@@ -166,7 +184,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
         if (value==null) { toast("请在提示范围内填写完整长、宽、高和余量"); return@setOnClickListener }
         activity.getSharedPreferences("terrain-envelope",0).edit().putFloat("width",value.width).putFloat("length",value.length)
           .putFloat("height",value.height).putFloat("margin",value.margin).apply()
-        terrain.setEnvelope(value); terrainSnapshot=terrainSnapshot.copy(status="OBSERVING",cells=emptyList(),envelope=value,depthEvidence=TerrainDepthEvidence())
+        terrain.setEnvelope(value);localMap.reset();localSnapshot=LocalMapSnapshot();localSweeps=emptyMap();localPlan=LocalPlan("WAITING")
+        terrainSnapshot=terrainSnapshot.copy(status="OBSERVING",cells=emptyList(),envelope=value,depthEvidence=TerrainDepthEvidence())
         renderTerrain(); dialog.dismiss()
       }
     }
@@ -179,6 +198,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     terrainSnapshot=TerrainSnapshot(false,status,envelope=readEnvelope())
     hybridReport=mapOf("status" to "WAITING")
     localAssessment=RouteAssessment(RouteClearance.DEPTH_UNKNOWN,"GROUND_REFERENCE_REQUIRED")
+    localMap.reset();localSnapshot=LocalMapSnapshot();localPose=null;localGoal=null;localSweeps=emptyMap()
+    localPlan=LocalPlan("WAITING",reason="GROUND_REFERENCE_REQUIRED");localPlanSampleNs=0;lastLocalPlanNs=0
     activity.runOnUiThread { depthOverlay?.let { it.dots=emptyList();it.outlines=emptyList();it.invalidate() } }
   }
   private fun editCameraHeight() {
@@ -241,6 +262,40 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     }
     if (!groundArmed) terrainState.text=warmup+message+(if (s.groundSelected && sampling.isNotEmpty()) "\n$sampling" else "")+"\n$local\n灰未知 / 青地面 / 红障碍 / 橙落差 / 绿整车覆盖（诊断）"
     terrainView.snapshot=s; terrainView.invalidate()
+    if(::localView.isInitialized) {
+      val rLocal=localSnapshot.report()
+      fun describe(result: LocalSweepResult?)=when(result?.state) {
+        "GEOMETRY_CLEAR"->"几何检查通过（仅预览）"
+        "OBSTACLE_IN_SWEEP"->"障碍阻挡"
+        "DROP_IN_SWEEP"->"落差阻挡"
+        "UNOBSERVED_SWEEP"->"缺观测${result.unknown}格（车下${result.initialUnknown}）"
+        "OBSERVATION_EXPIRED"->"需更新观测${result.stale}格"
+        else->"等待新鲜深度/参考面"
+      }
+      val waiting=when(localPlan.reason) {
+        "FRESH_RAW_REQUIRED"->"等待新鲜深度"
+        "UNOBSERVED_SWEEP"->"起步或下一段还有未观察范围"
+        "OBSTACLE_IN_SWEEP"->"这段范围有障碍"
+        "DROP_IN_SWEEP"->"这段范围有落差"
+        "OBSERVATION_EXPIRED"->"需要更新这段地面观测"
+        "SEARCH_BUDGET_NO_REACHABLE_FRONTIER"->"当前范围内暂未找到可达边界"
+        "NO_REACHABLE_FREE_FRONTIER"->"周围暂时没有已验证的可达边界"
+        "PLANNING","OBSERVATION_OR_POSE_CHANGED"->"正在更新路线"
+        "GROUND_CHANGED","GROUND_REFERENCE_REQUIRED"->"请先确认地面参考"
+        "PLANNING_FAILED"->"本次规划未完成，请重新选目标"
+        else->"等待有效定位和地面观测"
+      }
+      localState.text="局部分层：保留地面${rLocal["retainedFloorTiles"]} / 近期空地${rLocal["recentFreeTiles"]} / 障碍${rLocal["obstacleTiles"]} / 单帧告警${rLocal["weakObstacleTiles"]}\n"+
+        "假设直行2厘米：${describe(localSweeps["straight2cm"])}；左/右转10°：${describe(localSweeps["left10deg"])}/${describe(localSweeps["right10deg"])}\n"+
+        when(localPlan.state) {
+          "PATH_TO_GOAL"->"已找到局部路线，仅预览；脉冲距离与安装偏移待实测"
+          "PATH_TO_FRONTIER"->"先到已知空地边界再观察，仅预览"
+          "AT_GOAL"->"已在所选目标附近，仅预览"
+          else->if(localGoal==null) "点下图选目标，仅预览；黑色未知不当空地" else "路线等待：$waiting"
+        }
+      localView.snapshot=localSnapshot;localView.pose=localPose;localView.goal=localGoal;localView.plan=localPlan
+      localView.robot=s.envelope;localView.invalidate()
+    }
   }
   private fun newMap() {
     if (saving) { toast("正在保存地图，请稍后"); return }
@@ -519,7 +574,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     }
   }
   fun pause() { taughtRoutes?.pause();generation++; active=false; depthReadiness.reset();depthState=LocalDepthReadiness.State();mapper?.invalidate(); clearTerrain(); renderTerrain(); if (::mapView.isInitialized) { mapView.position=null; mapView.forward=null; mapView.invalidate(); state.text="扫描已暂停，当前位置无效。地图可保存或重新打开。" } }
-  fun close() { io.shutdown() }
+  fun close() { io.shutdown();localPlannerWorker.shutdown() }
   fun report(): Map<String,Any?>? = mapper?.summary()?.let { it + mapOf("lastSavedAt" to if (it["mapId"]==savedId) savedAt else 0L,
     "taughtRoute" to taughtRoutes?.report(),
     "referenceTrackingState" to referenceState,"referenceTrackingMethod" to referenceMethod,
@@ -527,6 +582,10 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     "knownReferenceImages" to knownReferenceImages,"stableReferenceSamples" to stableCount,
     "terrain" to (terrainSnapshot.report()+mapOf("trackedHorizontalPlanes" to horizontalPlanes,"surfaceSource" to surfaceSource,
       "calibratedCameraHeightMeters" to calibratedHeight,"hybridDepth" to hybridReport,"localObservation" to localAssessment.report(),
+      "layeredLocalMap" to (localSnapshot.report()+mapOf("source" to "confidence-filtered-raw-only",
+        "initialFootprintSeeded" to false,"mountCalibrated" to false,"hypotheticalStopDistanceMeters" to .01f,
+        "poseUncertaintyMeters" to .01f,"shortSweeps" to localSweeps.mapValues { it.value.report() },
+        "goal" to localGoal?.let { listOf(it.x,it.z) },"planSampleNs" to localPlanSampleNs,"plan" to localPlan.report())),
       "surfaceAnchorTrackingState" to surfaceAnchorState,
       "depthReadiness" to depthState.report(),
       "depthCapture" to depthRecorder.report()))) }
@@ -619,6 +678,44 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       localAssessment=if(envelope!=null) RoutePerception.assess(points,observedGround,pose,fresh,
         envelope.width,envelope.length,envelope.height,max(.10f,envelope.margin),true)
         else RouteAssessment(RouteClearance.DEPTH_UNKNOWN,"DIMENSIONS_REQUIRED")
+      localPose=pose
+      val plane=observedGround
+      if(camera!=null && plane!=null && envelope!=null) {
+        localSnapshot=localMap.update(camera,plane,frame.timestamp,depthNs,points,envelope.height)
+        val origin=localPlan.path.firstOrNull()
+        if(localPlanSampleNs>0 && (frame.timestamp-localPlanSampleNs !in 0..750_000_000L || pose==null ||
+          origin!=null && (origin.distance(pose)>.025f || abs(wrapYaw(origin.yaw-pose.yaw))>.1f))) {
+          localPlan=LocalPlan("WAITING",reason="OBSERVATION_OR_POSE_CHANGED");localPlanSampleNs=0
+        }
+        if(pose!=null && (lastLocalPlanNs==0L || frame.timestamp-lastLocalPlanNs>=500_000_000L)) {
+          lastLocalPlanNs=frame.timestamp
+          localSweeps=mapOf(
+            "straight2cm" to LocalTrajectory.check(localSnapshot,pose,
+              pose.copy(x=pose.x+sin(pose.yaw)*.02f,z=pose.z-cos(pose.yaw)*.02f),envelope),
+            "left10deg" to LocalTrajectory.check(localSnapshot,pose,pose.copy(yaw=pose.yaw-.174533f),envelope,0f,-.05f),
+            "right10deg" to LocalTrajectory.check(localSnapshot,pose,pose.copy(yaw=pose.yaw+.174533f),envelope,0f,.05f))
+          val goal=localGoal
+          if(goal==null) localPlan=LocalPlan("WAITING",reason="GOAL_REQUIRED")
+          else if(localPlannerBusy.compareAndSet(false,true)) {
+            val snapshot=localSnapshot
+            runCatching { localPlannerWorker.execute {
+              try {
+                val result=LocalPlanner.plan(snapshot,pose,goal,envelope)
+                val latest=localPose
+                // A planner result computed in a different datum, for another
+                // goal or before a camera movement must not become a live hint.
+                if(token==generation && localGoal==goal && localSnapshot.generation==snapshot.generation &&
+                  localSnapshot.atNs-snapshot.atNs in 0..750_000_000L && latest!=null &&
+                  latest.distance(pose)<.025f && abs(wrapYaw(latest.yaw-pose.yaw))<.1f) {
+                  localPlan=result;localPlanSampleNs=snapshot.atNs
+                }
+              } catch(e: Exception) {
+                if(token==generation && localGoal==goal) localPlan=LocalPlan("WAITING",reason="PLANNING_FAILED")
+              } finally { localPlannerBusy.set(false) }
+            } }.onFailure { localPlannerBusy.set(false) }
+          }
+        }
+      }
       panel?.frame(sessionId,camera,located && terrainSnapshot.groundSelected && terrainSnapshot.floorConfirmed,localAssessment.clearance)
     }
     // Depth/terrain run at up to 10 Hz; map copies and Android view updates stay at 2 Hz.
@@ -694,6 +791,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
           surfaceAnchorState=surfaceAnchor?.trackingState?.name ?: "LOCAL_REFERENCE"
         }
         surfaceSource=if (plane!=null) "ARCORE_PLANE" else "RAW_DEPTH_PATCH";terrain.selectGround(ground,choice.actualFloor)
+        localMap.reset();lastLocalPlanNs=0;localPlanSampleNs=0;localPlan=LocalPlan("WAITING",reason="GROUND_CHANGED")
       }
     }
     pendingHeight?.let { choice ->
@@ -706,6 +804,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
         surfaceAnchor=runCatching { session.createAnchor(Pose.makeTranslation(world)) }.getOrNull()
         surfaceAnchorState=surfaceAnchor?.trackingState?.name ?: "LOCAL_REFERENCE"
         terrain.selectGround(fittedGround!!,choice.actualFloor)
+        localMap.reset();lastLocalPlanNs=0;localPlanSampleNs=0;localPlan=LocalPlan("WAITING",reason="GROUND_CHANGED")
       }
     }
     var plane=selectedGround
