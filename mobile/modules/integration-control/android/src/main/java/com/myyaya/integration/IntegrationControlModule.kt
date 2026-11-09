@@ -19,7 +19,7 @@ class IntegrationReceiver : BroadcastReceiver() {
       val command = String(Base64.decode(encoded, Base64.DEFAULT), Charsets.UTF_8)
       val data = JSONObject(command)
       require(Regex("[A-Za-z0-9_-]{1,80}").matches(data.getString("id")))
-      require(data.getString("kind") in listOf("chat", "tool", "status", "probe"))
+      require(data.getString("kind") in listOf("chat", "tool", "status", "probe", "head_probe"))
       data.put("receivedAtEpochMs", System.currentTimeMillis())
       context.getSharedPreferences("myyaya-adb-integration", Context.MODE_PRIVATE).edit().putString("pending", data.toString()).commit()
       resultCode = 0

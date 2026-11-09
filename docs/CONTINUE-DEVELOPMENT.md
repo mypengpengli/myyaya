@@ -1,5 +1,17 @@
 # 换电脑继续开发
 
+## 最新：185头部写入方式对照/电量信息诊断构建中，未发新动作
+
+用户确认184单次抬头变化太小不能辨认，不要叫用户量角度。184 head_up编号e9ea8d928cda4edf85e3b0f6fdba9b7c，峰值1.8645°、末态1.7160°；随后52f51cec1f4d438d9ee2bf2f073d3c10读FED1=00，之前FF。回读随命令改变但无位置证明。本轮未发低头、回正或履带。头部物理位置不明，最后命令up00；底座仍静止。
+
+已私下读取手机官方LOOI 2.9.2 APK并检查TangibleBody：角度公式(1-angle)*255一致；另有FED1两字节angle_speed模式，尚未发送。官方BluetoothChannel未显式设置writeType；查AOSP确认支持NO_RESPONSE的特征默认可能就是无响应，不能宣称官方默认有响应或写入模式就是原因。FED9该客户端02是evade、0E是TOF，没有看到头部角度字段。详见[头部核查](LOOI-HEAD-FEEDBACK-RESEARCH.md)。第三方APK/代码只在忽略的.tools内。
+
+185保留生产默认参数，新增ADB-only head_probe，up/down/center白名单+response布尔值，经原有控制器/STOP/导航租约；带15秒队列过期。head记录实际with/without response；手机观测保留前后向量。head_status补只读FED8/2A27/2A28数据，均原始字节，不编造机械位置。新行为/导航/相机回归与TypeScript正在复核，Android第二次增量构建包含新增设备信息读取（不要误导出第一次较早的185构建）。尚未导出、安装或发布185。
+
+`.tools/185-power-setting.json` 已临时将USB保持亮屏0改2（开始时用户已解锁），本轮调试完毕必须在仍等于applied时恢复old，不绕过锁屏。新版安装若断蓝牙直接请用户手动连接，不自动反复尝试。下一次动作先告知起始状态和目标，只单次明显头部对照，履带不动；不要连发微动作让用户猜。
+
+以下184段为此前结果。
+
 ## 最新开发：184本机FED1只读与手机倾角已通过，等待单次抬头起始状态确认
 
 用户已解锁并手动连接。robot_head_status 两次成功（`820636466c2541eab7f45f4abcc2bf45`、`9ac7f4398e7a47a4a7cd505f22e07a03`）：FED1 read/writeWithResponse/writeWithoutResponse/notify 均 true，indicate=false；回读均FF，无FED1通知记录；重力模块可用/active、accuracy3且稳定，向量约[8.8775,.4616,4.1410]。原始FF不代表机械最低。未发头部/履带指令。已异步询问当前最低/稍抬/较高且手松开；待确认后只发一次head_up，期望明显抬高而底座不行驶，再立即只读对比FED1和lastCommandObservation，并让用户确认实际效果。严禁确认前连发上下或测试履带。控制页聚焦keep-awake已经正常显示。

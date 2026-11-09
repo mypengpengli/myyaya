@@ -95,7 +95,8 @@ export class ReactNativeBleLooiTransport implements LooiTransport {
   private disconnectSubscription: Subscription | null = null;
   private notificationSubscriptions = new Map<LooiCharacteristicKey, Subscription>();
   private resolvedCharacteristics = new Map<LooiCharacteristicKey, ResolvedCharacteristic>();
-  private headEvents: Array<{ atEpochMs: number; source: string; hex?: string; error?: string }> = [];
+  private headEvents: Array<{ atEpochMs: number; source: string; hex?: string; error?: string; writeType?: string }> = [];
+  private diagnosticReadSequence = 0;
   private gattSnapshot: LooiGattSnapshot = {
     deviceId: null,
     services: [],
@@ -222,38 +223,42 @@ export class ReactNativeBleLooiTransport implements LooiTransport {
 
   /** Read/subscribe on the existing connection only. Raw values have no verified position semantics. */
   async inspectHeadChannel() {
-    const deviceId = this.requireDeviceId();
+    this.requireDeviceId();
     const head = this.resolvedCharacteristics.get("head");
     if (!head) return { available: false, physicalPosition: "unknown", events: [...this.headEvents] };
     if ((head.notifiable || head.indicatable) && !this.notificationSubscriptions.has("head")) {
       await this.startNotifications("head", (event) => this.recordHeadEvent("notification", event.hex));
     }
-    let read: { status: string; hex?: string; error?: string } = { status: "unsupported" };
-    if (head.readable) {
-      const transaction = `head-read-${Date.now()}`;
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        const value = await Promise.race([
-          this.manager.readCharacteristicForDevice(deviceId, head.serviceUuid, head.characteristicUuid, transaction),
-          new Promise<never>((_, reject) => { timer = setTimeout(() => {
-            reject(new Error("头部回读超时"));
-            void this.manager.cancelTransaction(transaction).catch(() => {});
-          }, 1500); }),
-        ]);
-        const hex = value.value ? bytesToHex(base64ToBytes(value.value)) : "";
-        read = { status: "received", hex };
-        this.recordHeadEvent("read", hex);
-      } catch (error) { read = { status: "failed", error: error instanceof Error ? error.message : String(error) }; }
-      finally { if (timer) clearTimeout(timer); }
-    }
-    return { available: true, properties: { ...head }, read, physicalPosition: "unknown",
+    const read = await this.readDiagnosticValue("fed1");
+    if (read.status === "received") this.recordHeadEvent("read", read.hex);
+    const deviceInfo = { battery: await this.readDiagnosticValue("fed8"), firmware: await this.readDiagnosticValue("2a27"), hardware: await this.readDiagnosticValue("2a28") };
+    return { available: true, properties: { ...head }, read, deviceInfo, physicalPosition: "unknown",
       interpretation: "原始值语义未确认，不能当作实际位置或到位回执", events: this.headEvents.map((e) => ({ ...e })) };
   }
 
-  private recordHeadEvent(source: string, hex?: string, error?: string) {
-    this.headEvents.push({ atEpochMs: Date.now(), source, hex, error });
+  private async readDiagnosticValue(short: "fed1" | "fed8" | "2a27" | "2a28"): Promise<{ status: string; hex?: string; error?: string }> {
+    const deviceId = this.requireDeviceId();
+    const characteristic = this.gattSnapshot.characteristics.find((c) => c.uuid.toLowerCase() === `0000${short}-0000-1000-8000-00805f9b34fb`);
+    if (!characteristic?.readable) return { status: "unsupported" };
+    const transaction = `diagnostic-read-${short}-${++this.diagnosticReadSequence}`;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const value = await Promise.race([
+        this.manager.readCharacteristicForDevice(deviceId, characteristic.serviceUuid, characteristic.uuid, transaction),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => {
+          reject(new Error(`${short} 回读超时`));
+          void this.manager.cancelTransaction(transaction).catch(() => {});
+        }, 1500); }),
+      ]);
+      return { status: "received", hex: value.value ? bytesToHex(base64ToBytes(value.value)) : "" };
+    } catch (error) { return { status: "failed", error: error instanceof Error ? error.message : String(error) }; }
+    finally { if (timer) clearTimeout(timer); }
+  }
+
+  private recordHeadEvent(source: string, hex?: string, error?: string, writeType?: string) {
+    this.headEvents.push({ atEpochMs: Date.now(), source, hex, error, writeType });
     this.headEvents = this.headEvents.slice(-24);
-    recordDiagnosticEvent("robot", "head-ble-observation", { source, hex, error });
+    recordDiagnosticEvent("robot", "head-ble-observation", { source, hex, error, writeType });
   }
 
   async startNotifications(
@@ -307,7 +312,7 @@ export class ReactNativeBleLooiTransport implements LooiTransport {
         resolved.characteristicUuid,
         value,
       );
-      if (characteristicKey === "head") this.recordHeadEvent("write-returned", payloadHex);
+      if (characteristicKey === "head") this.recordHeadEvent("write-returned", payloadHex, undefined, "without-response");
       return;
     }
 
@@ -318,7 +323,7 @@ export class ReactNativeBleLooiTransport implements LooiTransport {
         resolved.characteristicUuid,
         value,
       );
-      if (characteristicKey === "head") this.recordHeadEvent("write-returned", payloadHex);
+      if (characteristicKey === "head") this.recordHeadEvent("write-returned", payloadHex, undefined, "with-response");
       return;
     }
 
@@ -329,7 +334,7 @@ export class ReactNativeBleLooiTransport implements LooiTransport {
         resolved.characteristicUuid,
         value,
       );
-      if (characteristicKey === "head") this.recordHeadEvent("write-returned", payloadHex);
+      if (characteristicKey === "head") this.recordHeadEvent("write-returned", payloadHex, undefined, "without-response");
       return;
     }
 

@@ -9,7 +9,7 @@ import { getLooiRobotRuntimeState, moveLooi, turnLooi, performLooiHeadGesture,
 
 let executing = false;
 export const isChineseRobotCommandExecuting = () => executing;
-export async function executeChineseRobotCommand(command: ChineseRobotCommand): Promise<string> {
+export async function executeChineseRobotCommand(command: ChineseRobotCommand, options?: { headWriteResponse?: boolean }): Promise<string> {
   markRobotInteraction("chinese-manual-control");
   holdAmbientMotionFor(15_000, "chinese-manual-control");
   holdSocialAttentionMotionFor(15_000, "chinese-manual-control");
@@ -27,7 +27,7 @@ export async function executeChineseRobotCommand(command: ChineseRobotCommand): 
     switch (command.kind) {
       case "move": result = await moveLooi(command.direction, 450); break;
       case "turn": result = await turnLooi(command.direction, command.degrees); break;
-      case "head": return (await setLooiHead(command.direction, undefined, true)).notice;
+      case "head": return (await setLooiHead(command.direction, undefined, true, options?.headWriteResponse)).notice;
       case "nod": await performLooiHeadGesture("nod", 1); break;
       case "dance": await performLooiDance("bounded-wiggle-v1"); break;
       case "light": await setLooiLight(command.enabled); break;

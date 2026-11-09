@@ -3,7 +3,9 @@ import { acquireRobotObservation, robotGravitySnapshot } from "../../modules/rob
 import { classifyHeadTilt, stableGravity } from "./head-tilt";
 import { recordDiagnosticEvent } from "../diagnostics/diagnostic-log";
 
-let lastObservation: ReturnType<typeof classifyHeadTilt> & { direction: string; atEpochMs: number; commandSent: boolean } | null = null;
+type StableGravity = ReturnType<typeof stableGravity>;
+let lastObservation: ReturnType<typeof classifyHeadTilt> & { direction: string; atEpochMs: number; commandSent: boolean;
+  beforeGravity: StableGravity; afterGravity: StableGravity; sampleCount: number } | null = null;
 export const getLastHeadObservation = () => lastObservation;
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 export async function observeHeadCommand(direction: string, send: () => Promise<unknown>) {
@@ -18,9 +20,11 @@ export async function observeHeadCommand(direction: string, send: () => Promise<
     await send();
     await delay(1800);
     const after = robotGravitySnapshot();
-    const result = classifyHeadTilt(interrupted ? null : before, after.samples.filter((s) => s.atMs >= start), stableGravity(after));
-    lastObservation = { ...result, direction, atEpochMs: Date.now(), commandSent: true };
-    recordDiagnosticEvent("robot", "head-phone-tilt-observation", { ...lastObservation });
+    const samples = after.samples.filter((s) => s.atMs >= start), final = stableGravity(after);
+    const result = classifyHeadTilt(interrupted ? null : before, samples, final);
+    lastObservation = { ...result, direction, atEpochMs: Date.now(), commandSent: true,
+      beforeGravity: interrupted ? null : before, afterGravity: final, sampleCount: samples.length };
+    recordDiagnosticEvent("robot", "head-phone-tilt-observation", { ...result, direction, sampleCount: samples.length });
     return `已发送${direction === "up" ? "抬头" : direction === "down" ? "低头" : "回正"}指令；${result.notice}`;
   } finally { listener.remove(); release(); }
 }

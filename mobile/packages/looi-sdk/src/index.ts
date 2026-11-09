@@ -323,13 +323,13 @@ export class LooiRobot {
   }
 
   /** Set head position using a high-level name, numeric value, or raw hex. */
-  async setHead(direction: LooiHeadDirection | number | string): Promise<void> {
+  async setHead(direction: LooiHeadDirection | number | string, options: Pick<LooiWriteOptions, "response"> = {}): Promise<void> {
     const payload = typeof direction === "string" && direction in HEAD_PAYLOADS
       ? HEAD_PAYLOADS[direction as LooiHeadDirection]
       : typeof direction === "number"
         ? direction.toString(16).padStart(2, "0")
         : direction;
-    await this.transport.write("head", payload, { response: false, expectedBytes: 1 });
+    await this.transport.write("head", payload, { response: options.response ?? false, expectedBytes: 1 });
   }
 
   /** Turn the robot light on or off. */

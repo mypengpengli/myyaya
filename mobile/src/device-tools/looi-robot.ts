@@ -904,7 +904,7 @@ export async function setLooiLight(enabled: boolean) {
   return { ok: true, enabled };
 }
 
-export async function setLooiHead(direction: string, navigationOwner?: string, observe = false) {
+export async function setLooiHead(direction: string, navigationOwner?: string, observe = false, writeResponse?: boolean) {
   assertNavigationControl(navigationOwner);
   const requestToken = motionSequenceAbortGeneration;
   const robot = await getRobot();
@@ -913,7 +913,7 @@ export async function setLooiHead(direction: string, navigationOwner?: string, o
   const send = async () => {
     assertPendingMotionCurrent(requestToken, robot);
     assertNavigationControl(navigationOwner);
-    await robot.setHead(direction);
+    await robot.setHead(direction, { response: writeResponse });
   };
   if (observe) {
     const notice = await (await import("./head-observation")).observeHeadCommand(direction, send);

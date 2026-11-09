@@ -34,18 +34,38 @@ assert.doesNotThrow(() => fresh({ kind: "tool", receivedAtEpochMs: 100 }, 15100)
 assert.throws(() => fresh({ kind: "tool", receivedAtEpochMs: 20000 }, 1), /过期/);
 
 const sdk = load("packages/looi-sdk/src/index.ts");
+const headFrames = [];
+const headSdk = new sdk.LooiRobot({ write: async (key, hex, options) => headFrames.push({ key, hex, options }) });
+await headSdk.setHead("down");
+await headSdk.setHead("down", { response: true });
+assert.deepEqual(headFrames, [
+  { key: "head", hex: "ff", options: { response: false, expectedBytes: 1 } },
+  { key: "head", hex: "ff", options: { response: true, expectedBytes: 1 } },
+], "head A/B uses identical bytes and preserves the production write default");
+let probeCalls = [];
+const probe = load("src/diagnostics/head-protocol-probe.ts", {
+  "../device-tools/chinese-robot-control": { executeChineseRobotCommand: async (...args) => { probeCalls.push(args); return "sent"; } },
+});
+await probe.runHeadProtocolProbe({ direction: "down", response: true });
+assert.deepEqual(probeCalls, [[{ kind: "head", direction: "down" }, { headWriteResponse: true }]]);
+for (const input of [{ direction: "forward", response: true }, { direction: "ff", response: true }, { direction: "up", response: "true" }]) {
+  await assert.rejects(probe.runHeadProtocolProbe(input), /参数/);
+}
+assert.equal(probeCalls.length, 1, "diagnostic cannot send raw bytes or wheels");
 const uuid = (short) => `0000${short}-0000-1000-8000-00805f9b34fb`;
 const device = { id: "test-base", name: "LOOI Robot" };
 let head = { uuid: uuid("fed1"), isReadable: true, isNotifiable: true, isWritableWithoutResponse: true };
+let infoCharacteristics = [];
 let writes = 0, reads = 0, monitors = 0, listener, disconnect;
 const manager = {
   state: async () => "PoweredOn", devices: async () => [device], connectedDevices: async () => [device], isDeviceConnected: async () => true,
   onDeviceDisconnected: (_id, callback) => { disconnect = callback; return { remove() {} }; },
   discoverAllServicesAndCharacteristicsForDevice: async () => device,
-  servicesForDevice: async () => [{ uuid: uuid("00ff") }], characteristicsForDevice: async () => [head], requestMTUForDevice: async () => {},
+  servicesForDevice: async () => [{ uuid: uuid("00ff") }], characteristicsForDevice: async () => [head, ...infoCharacteristics], requestMTUForDevice: async () => {},
   monitorCharacteristicForDevice: (_id, _service, _uuid, callback) => { monitors++; listener = callback; return { remove() {} }; },
   readCharacteristicForDevice: async () => { reads++; return { value: Buffer.from([0x87]).toString("base64") }; },
   writeCharacteristicWithoutResponseForDevice: async () => { writes++; },
+  writeCharacteristicWithResponseForDevice: async () => { writes++; },
   stopDeviceScan: async () => {}, cancelDeviceConnection: async () => {},
 };
 const transportModule = load("src/device-tools/react-native-ble-transport.ts", {
@@ -76,10 +96,25 @@ manager.readCharacteristicForDevice = normalRead;
 await transport.write("head", "ff", { response: false, expectedBytes: 1 });
 const third = await transport.inspectHeadChannel();
 assert.equal(writes, 1); assert.ok(third.events.some((e) => e.source === "write-returned" && e.hex === "ff"));
+head.isWritableWithResponse = true;
 disconnect(); await assert.rejects(transport.inspectHeadChannel(), /connect/i);
 head = { ...head, isReadable: false, isNotifiable: false };
 await transport.connect(); const readsBefore = reads;
 const unsupported = await transport.inspectHeadChannel();
 assert.equal(unsupported.read.status, "unsupported"); assert.equal(reads, readsBefore);
 assert.equal(writes, 1, "unsupported read does not trigger a fallback write");
+await transport.write("head", "ff", { response: true, expectedBytes: 1 });
+assert.ok((await transport.inspectHeadChannel()).events.some((e) => e.source === "write-returned" && e.writeType === "with-response"));
+await transport.disconnect();
+infoCharacteristics = ["fed8", "2a27", "2a28"].map((key) => ({ uuid: uuid(key), isReadable: true }));
+const readIds = [];
+manager.readCharacteristicForDevice = async (_id, _service, id) => {
+  readIds.push(id);
+  return { value: Buffer.from(id === uuid("fed8") ? [73, 0] : [49, 46, 50]).toString("base64") };
+};
+await transport.connect();
+const info = await transport.inspectHeadChannel();
+assert.equal(info.deviceInfo.battery.hex, "4900"); assert.equal(info.deviceInfo.firmware.hex, "312e32");
+assert.deepEqual(readIds, [uuid("fed8"), uuid("2a27"), uuid("2a28")], "device diagnostics only reads the allowlisted characteristics");
+assert.equal(writes, 2, "device information never emits actuator writes");
 console.log("Head observation: tilt/return/staleness, command expiry, read-only GATT and unknown physical position: PASS");

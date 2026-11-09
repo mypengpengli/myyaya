@@ -10,6 +10,21 @@
 
 准备做单次抬头前，已要求用户确认底座静止、手松开和当前头部位置；尚未发送新动作。需将动作后手机倾角与 FED1 回读/通知对比，不能因为初始读到 FF 就认定处于最低。
 
+## 184 单次抬头与官方客户端对照
+
+用户确认头稍抬、底座静止，并说明一直没有碰脖子。已发送一次 head_up（`e9ea8d928cda4edf85e3b0f6fdba9b7c`），峰值相对手机倾角约1.8645°，末态约1.7160°；用户反馈变化太小，无法辨认，因此**不算本次抬头物理验收通过**。随后只读（`52f51cec1f4d438d9ee2bf2f073d3c10`）FED1从FF变成00，记录只有00写入请求/返回与读00，没有其他头部写入或通知。这支持回读可能跟随命令值，尚不能证明是实际位置。
+
+在用户手机已安装的官方包 `com.TangibleFuture.looiRobot` 2.9.2 / versionCode54 上，用 Android SDK apkanalyzer 检查公开可读DEX，不启动官方App、不连接其蓝牙。APK907139087字节，SHA256 `bef5c630d12a53c85a4e9136e16b2571e6f473d4e6ac2ddc768c41a30ed593a3`。APK、反汇编和辅助脚本仅保存在忽略的 `.tools/`，不发布第三方代码。
+
+独立记录协议事实：
+
+- `TangibleBody.toAngle` 的单字节编码为截断整数 `(1 - angle) * 255`，写FED1；没有据此发现现有00/FF编码算错。
+- `TangibleBody.clamp` 是独立的 `angle_speed` 分支，FED1两字节 `[0, int(-speed * 127) 转为字节]`。它与角度模式不同，本轮**未发送速度帧**，不能假设可以直接替换已验收的角度模式。
+- `BluetoothChannel` 该写入路径设置value后使用 Android 旧写入接口，没有显式设writeType。**不能因此断言官方使用有响应写入。** [AOSP实现](https://android.googlesource.com/platform/packages/modules/Bluetooth/+/refs/heads/main/framework/java/android/bluetooth/BluetoothGattCharacteristic.java)在支持WRITE_NO_RESPONSE的特征上默认选无响应；本机支持该属性，官方默认可能与小丫一致。
+- FED9解析包含悬崖、evade左右数值、TOF、触摸、手机放置、电量、充电与序列回调；在检查的该分支没有机械头部角度字段。该版本把02解析为evade而非社区假设的IMU，0E解析为TOF；不要把社区低置信度解释当作实测机械反馈。
+
+185保留生产默认无响应和00/87/FF，只加入DUMP权限保护的ADB单条head_probe，限定up/down/center和response布尔值，用相同参数排除写入方式因素；不是声称修复已成立。新增只读电量FED8、信息2A27/2A28（按该客户端命名为firmware/hardware）原始回读与模式记录，尚待安装验收。不得以蓝牙ACK当成到位反馈。
+
 ## 184 实现
 
 - 新增独立 `robot-observation` Android 模块，只读取手机重力传感器，后台停采、清除旧样本；无相机和电机调用。
