@@ -57,6 +57,10 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   @Volatile private var pendingSave: RoomMapData? = null
   private val saveLock = Any()
   private var anchor: Anchor? = null
+  private var sessionOriginAnchor: Anchor?=null
+  private var originAnchorRetired=false
+  @Volatile private var originAnchorState="NOT_CREATED"
+  @Volatile private var originAnchorPose: RigidPose?=null
   private var stableImage: RigidPose? = null
   private var stableSince = 0L
   private var stableCount = 0
@@ -566,6 +570,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     referenceState="NOT_SEEN"; referenceMethod="NOT_SEEN"; knownReferenceImages=0
     configuredReferenceImages=0
     runCatching { anchor?.detach() }; anchor=null; stableImage=null; stableCount=0; stableSince=0
+    runCatching { sessionOriginAnchor?.detach() };sessionOriginAnchor=null;originAnchorRetired=false
+    originAnchorState="NOT_CREATED";originAnchorPose=null
     sessionId=id
     if (freshMap) {
       mapper=mapper?.snapshot()?.let { RoomMapper(it.copy(sessionId=id)) }; freshMap=false
@@ -583,12 +589,15 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     }
   }
   fun pause() { taughtRoutes?.pause();generation++; active=false; depthReadiness.reset();depthState=LocalDepthReadiness.State();mapper?.invalidate(); clearTerrain(); renderTerrain(); if (::mapView.isInitialized) { mapView.position=null; mapView.forward=null; mapView.invalidate(); state.text="扫描已暂停，当前位置无效。地图可保存或重新打开。" } }
-  fun close() { io.shutdown();localPlannerWorker.shutdown() }
+  fun close() { runCatching { sessionOriginAnchor?.detach() };sessionOriginAnchor=null;io.shutdown();localPlannerWorker.shutdown() }
   fun report(): Map<String,Any?>? = mapper?.summary()?.let { it + mapOf("lastSavedAt" to if (it["mapId"]==savedId) savedAt else 0L,
     "taughtRoute" to taughtRoutes?.report(),
     "referenceTrackingState" to referenceState,"referenceTrackingMethod" to referenceMethod,
     "configuredReferenceImages" to configuredReferenceImages,
     "knownReferenceImages" to knownReferenceImages,"stableReferenceSamples" to stableCount,
+    "coordinateBasis" to mapOf("kind" to if(mapper?.snapshotReference()==true) "live-image-anchor" else "live-session-origin-anchor",
+      "originAnchorState" to originAnchorState,"originAnchorTranslation" to originAnchorPose?.t?.toList(),
+      "originAnchorQuaternion" to originAnchorPose?.q?.toList(),"usesCachedWorldOriginForTracking" to false),
     "terrain" to (terrainSnapshot.report()+mapOf("trackedHorizontalPlanes" to horizontalPlanes,"surfaceSource" to surfaceSource,
       "calibratedCameraHeightMeters" to calibratedHeight,"hybridDepth" to hybridReport,"localObservation" to localAssessment.report(),
       "layeredLocalMap" to (localSnapshot.report()+mapOf("source" to "confidence-filtered-raw-only",
@@ -659,12 +668,26 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
         }
       }
     }
+    var basisReady=false
     if (hasReference) {
       val fixed=anchor
-      if (fixed!=null && fixed.trackingState==TrackingState.TRACKING && tracking) current.alignReference(sessionId,rigid(fixed.pose))
+      if (fixed!=null && fixed.trackingState==TrackingState.TRACKING && tracking) basisReady=current.alignReference(sessionId,rigid(fixed.pose))
       else current.invalidate()
+    } else {
+      val metadata=current.metadata()
+      // Only a genuinely new map gets a new origin. A stopped/lost anchor or a
+      // saved map's stale numeric origin cannot be silently reused as an anchor.
+      if(sessionOriginAnchor==null && !originAnchorRetired && tracking && metadata.sessionId==sessionId && metadata.origin==null) {
+        sessionOriginAnchor=runCatching { session.createAnchor(Pose.makeTranslation(frame.camera.pose.translation)) }.getOrNull()
+      }
+      val fixed=sessionOriginAnchor
+      originAnchorState=fixed?.trackingState?.name ?: if(metadata.origin!=null) "UNRESTORABLE_WITHOUT_REFERENCE" else "WAITING_FOR_TRACKING"
+      if(fixed?.trackingState==TrackingState.STOPPED) originAnchorRetired=true
+      originAnchorPose=if(fixed?.trackingState==TrackingState.TRACKING) rigid(fixed.pose) else null
+      if(tracking && originAnchorPose!=null) basisReady=current.alignSessionOrigin(sessionId,originAnchorPose!!)
+      if(!basisReady) current.invalidate()
     }
-    val located=current.observePose(sessionId,rigid(frame.camera.pose),tracking && (!hasReference || anchor?.trackingState==TrackingState.TRACKING))
+    val located=current.observePose(sessionId,rigid(frame.camera.pose),tracking && basisReady)
     active=located
     depthState=depthReadiness.update(frame.timestamp,depthNs,sample,located)
     if (located && depthState.ready && sample!=null) {
@@ -738,6 +761,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     val text=if (located) "定位有效 · ${if (hasReference) "固定参照图对齐" else "仅本次会话"}\n原始深度 ≥60% 置信度 · 0.2～4 米 · ${map.voxels.size}/${RoomMapper.MAX_CELLS} 表面点"
       else if (!tracking) "定位已中断，暂停融合；请缓慢移动恢复跟踪${if (hasReference) "，并对准参照图" else ""}。"
       else if (hasReference) "等待固定参照图：请让整张实物图像占画面至少四分之一，保持约两秒。\n检测：$referenceState / $referenceMethod · 稳定 $stableCount 次"
+      else if(originAnchorState=="WAITING_FOR_TRACKING" || originAnchorState=="PAUSED") "正在建立或恢复当前地图锚点，请保持画面稳定。"
+      else if(originAnchorRetired) "当前地图锚点已失效，请新建地图或使用固定参照图恢复坐标。"
       else "旧地图仅供查看：未登记固定参照图，不能在新会话中恢复坐标。"
     activity.runOnUiThread {
       if (!activity.isDestroyed && token==generation) {
@@ -799,12 +824,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       if ((plane==null || plane.trackingState==TrackingState.TRACKING) && ground!=null) {
         surfaceAnchor?.let { surfaceAnchorsToRelease.add(it) };surfaceAnchor=null;surfaceAnchorState="NONE"
         selectedGround=plane;fittedGround=if (plane==null) ground else null;calibratedHeight=null
-        if (plane==null && camera!=null) {
-          val worldFromMap=rigid(frame.camera.pose).compose(camera.inverse())
-          val world=worldFromMap.point(ground.origin)
-          surfaceAnchor=runCatching { session.createAnchor(Pose.makeTranslation(world)) }.getOrNull()
-          surfaceAnchorState=surfaceAnchor?.trackingState?.name ?: "LOCAL_REFERENCE"
-        }
+        surfaceAnchorState=if(plane==null) "SHARED_MAP_ANCHOR" else "ARCORE_PLANE"
         surfaceSource=if (plane!=null) "ARCORE_PLANE" else "RAW_DEPTH_PATCH";terrain.selectGround(ground,choice.actualFloor)
         localMap.reset();lastLocalPlanNs=0;localPlanSampleNs=0;localPlan=LocalPlan("WAITING",reason="GROUND_CHANGED")
       }
@@ -815,9 +835,10 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
         calibratedHeight=choice.height;selectedGround=null;surfaceSource="MEASURED_HEIGHT"
         fittedGround=SurfaceReference.measuredHeight(camera,choice.height)
         surfaceAnchor?.let { surfaceAnchorsToRelease.add(it) }
-        val world=frame.camera.pose.translation.clone().apply { this[1]-=choice.height }
-        surfaceAnchor=runCatching { session.createAnchor(Pose.makeTranslation(world)) }.getOrNull()
-        surfaceAnchorState=surfaceAnchor?.trackingState?.name ?: "LOCAL_REFERENCE"
+        surfaceAnchor=null
+        // One live map anchor carries all user-measured local references. Do not
+        // let independent anchor refinements move the map and floor separately.
+        surfaceAnchorState="SHARED_MAP_ANCHOR"
         terrain.selectGround(fittedGround!!,choice.actualFloor)
         localMap.reset();lastLocalPlanNs=0;localPlanSampleNs=0;localPlan=LocalPlan("WAITING",reason="GROUND_CHANGED")
       }

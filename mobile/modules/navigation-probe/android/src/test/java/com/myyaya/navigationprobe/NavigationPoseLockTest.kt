@@ -38,4 +38,10 @@ class NavigationPoseLockTest {
     val d=f.step(RouteObservation(p,3000,true,true,RouteClearance.CLEAR,true,lock.observe(p,.14f,3000)),3000)
     assertTrue(d.stop);assertNull(d.pulse);assertEquals("PAUSED",f.phase)
   }
+  @Test fun heightFailureReportsTheMapDeltaWithoutClaimingMechanicalCause() {
+    val lock=locked();assertFalse(lock.observe(p,.154f,3000))
+    assertEquals("MAP_HEIGHT_CHANGED",lock.report()["state"])
+    assertEquals(.054f,lock.report()["heightDeltaMeters"] as Float,.00001f)
+    assertFalse(lock.isLocked)
+  }
 }

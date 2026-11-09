@@ -54,4 +54,14 @@ class PulseMeasurementTest {
       assertEquals(x==0f,t.result!!.valid)
     }
   }
+  @Test fun failedMeasurementKeepsObservedMotionAndTraceForDiagnosis() {
+    val t=PulseMeasurementTrial("back",200,start,1000)
+    t.observe(start,1000);t.observe(start.copy(z=-.02f),1100);t.acknowledge(true,1150)
+    t.observe(start.copy(z=-.03f),1200);t.fail("MOUNT_CHECK_INVALID")
+    val r=t.result!!;assertFalse(r.valid)
+    assertEquals(.03f,r.displacementMeters,.00001f)
+    assertEquals(.03f,r.peakDisplacementMeters,.00001f)
+    assertEquals(1150L,r.ackAtMs)
+    assertTrue(r.trace.size>=3);assertEquals(false,r.report()["stoppingDistanceValidated"])
+  }
 }

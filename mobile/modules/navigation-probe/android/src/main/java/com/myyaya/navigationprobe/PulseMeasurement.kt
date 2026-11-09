@@ -4,11 +4,13 @@ import kotlin.math.*
 
 internal data class PulseMeasurement(val valid: Boolean,val reason: String,val direction: String,val durationMs: Int,
   val displacementMeters: Float=0f,val alongViewMeters: Float=0f,val yawRadians: Float=0f,
-  val peakDisplacementMeters: Float=0f,val postAckResidualMeters: Float=0f,val samples: Int=0) {
+  val peakDisplacementMeters: Float=0f,val postAckResidualMeters: Float=0f,val samples: Int=0,
+  val ackAtMs: Long?=null,val trace: List<Map<String,Any?>> = emptyList()) {
   fun report(): Map<String,Any?> = mapOf("valid" to valid,"reason" to reason,"direction" to direction,"durationMs" to durationMs,
     "displacementMeters" to displacementMeters,"alongViewMeters" to alongViewMeters,"yawRadians" to yawRadians,
     "peakDisplacementMeters" to peakDisplacementMeters,"postAckResidualMeters" to postAckResidualMeters,
-    "samples" to samples,"stoppingDistanceValidated" to false,"autonomousMotionAuthorized" to false)
+    "samples" to samples,"ackAtMs" to ackAtMs,"trace" to trace,"traceClock" to "elapsedRealtime",
+    "stoppingDistanceValidated" to false,"autonomousMotionAuthorized" to false)
 }
 
 /** Observe an already-authorized calibration pulse. No BLE or Android dependencies.
@@ -27,7 +29,19 @@ internal class PulseMeasurementTrial(val direction: String,val durationMs: Int,v
     if(!ok || atMs<startedMs) { fail("ACTION_FAILED");return }
     ackMs=atMs;ackPose=samples.lastOrNull()?.pose ?: before
   }
-  fun fail(reason: String) { if(result==null) result=PulseMeasurement(false,reason,direction,durationMs,samples=samples.size) }
+  private fun measured(valid: Boolean,reason: String,pose: RoutePose): PulseMeasurement {
+    val distance=before.distance(pose)
+    val along=(pose.x-before.x)*sin(before.yaw)-(pose.z-before.z)*cos(before.yaw)
+    val yaw=wrapYaw(pose.yaw-before.yaw);val anchor=ackPose ?: before;val ack=ackMs
+    val trace=(listOf(Sample(before,startedMs))+samples.takeLast(64)).map {
+      mapOf<String,Any?>("atMs" to it.atMs,"x" to it.pose.x,"z" to it.pose.z,"yaw" to it.pose.yaw,"pitch" to it.pose.pitch,"roll" to it.pose.roll)
+    }
+    return PulseMeasurement(valid,reason,direction,durationMs,distance,along,yaw,
+      samples.maxOfOrNull { before.distance(it.pose) } ?: 0f,
+      if(ack!=null) samples.filter { it.atMs>=ack }.maxOfOrNull { anchor.distance(it.pose) } ?: 0f else 0f,
+      samples.size,ack,trace)
+  }
+  fun fail(reason: String) { if(result==null) result=measured(false,reason,samples.lastOrNull()?.pose ?: before) }
   fun observe(pose: RoutePose?,atMs: Long) {
     if(result!=null) return
     if(pose==null) { fail("LOCALIZATION_LOST");return }
@@ -50,8 +64,6 @@ internal class PulseMeasurementTrial(val direction: String,val durationMs: Int,v
     val valid=if(direction=="back") distance in .008f.. .12f && along>distance*.7f && abs(yaw)<.15f
       else abs(yaw) in .025f.. .65f && distance<=.035f
     val reason=if(valid) "MEASURED_AND_SETTLED" else "DIRECTION_OR_DISPLACEMENT_INVALID"
-    val anchor=ackPose ?: before
-    result=PulseMeasurement(valid,reason,direction,durationMs,distance,along,yaw,
-      samples.maxOf { before.distance(it.pose) },samples.filter { it.atMs>=ack }.maxOfOrNull { anchor.distance(it.pose) } ?: 0f,samples.size)
+    result=measured(valid,reason,pose)
   }
 }

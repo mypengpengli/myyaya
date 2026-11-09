@@ -177,15 +177,23 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     val now=SystemClock.elapsedRealtime();currentSession=session
     val p=camera?.let { runCatching { RoutePose.fromCamera(it,mount.right,mount.alongView) }.getOrNull() }
     val fixed=poseLock.observe(p,camera?.t?.get(1),now)
+    if(!headFixed && fixed) notice=poseLock.reason
     if(headFixed && !fixed && !poseLock.isLocked) { backChecked=false;turnChecked=false;notice=poseLock.reason }
     headFixed=fixed
     val o=RouteObservation(p,now,p!=null,actualFloor,clearance,motor.isConnected(),fixed)
     observation=o;teacher?.observe(p,p!=null && fixed)
     calibration?.let { trial ->
-      if(!fixed || !actualFloor || !motor.isConnected()) trial.fail("PRECONDITION_CHANGED")
+      when {
+        p==null->trial.fail("LOCALIZATION_LOST")
+        !motor.isConnected()->trial.fail("DISCONNECTED")
+        !actualFloor->trial.fail("GROUND_REFERENCE_INVALID")
+        !fixed->trial.fail("MOUNT_CHECK_INVALID")
+      }
       trial.observe(p,now)
       trial.result?.let { result ->
-        calibration=null;lastMeasurement=result.report()+mapOf("mount" to mountSettings.report(),"atEpochMs" to System.currentTimeMillis(),"clearAreaSource" to "operator-confirmed-single-trial")
+        calibration=null;lastMeasurement=result.report()+mapOf("mount" to mountSettings.report(),"atEpochMs" to System.currentTimeMillis(),
+          "clearAreaSource" to "operator-confirmed-single-trial","poseLock" to poseLock.report(),"floorValid" to actualFloor,
+          "connected" to motor.isConnected(),"mapCameraY" to camera?.t?.get(1))
         if(result.direction=="back") backChecked=result.valid
         else if(result.direction=="left") { turnChecked=result.valid;if(result.valid) invertTurns=result.yawRadians>0 }
         if(!result.valid) motor.stop("标定位姿检查失败")
@@ -193,7 +201,9 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
         activity.getSharedPreferences("navigation-pulse-measurements",0).edit().putString("latest",org.json.JSONObject(record).toString()).apply()
         val failure=when(result.reason) {
           "LOCALIZATION_LOST","POSE_GAP"->"定位中断或位姿更新间隔过长"
-          "MOUNT_MOVED"->"手机倾斜或安装姿态发生变化"
+          "MOUNT_MOVED","MOUNT_CHECK_INVALID"->"固定姿态检查失效，请核对定位与手机安装"
+          "DISCONNECTED"->"底座连接已中断"
+          "GROUND_REFERENCE_INVALID"->"地面参考或定位已失效"
           "PRECONDITION_CHANGED"->"连接、固定姿态或地面状态发生变化"
           "NOT_SETTLED"->"位姿尚未稳定"
           "ACK_TIMEOUT","ACTION_FAILED"->"动作回执失败或超时"
@@ -227,7 +237,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   fun report(): Map<String,Any?> = mapOf("phase" to (if(teacher!=null) "TEACHING" else follower?.phase ?: "IDLE"),
     "routeName" to (follower?.route?.name ?: selected?.name),"waypoint" to follower?.waypoint,"headFixed" to headFixed,
     "backDirectionChecked" to backChecked,"turnDirectionChecked" to turnChecked,"connected" to motor.isConnected(),
-    "mountMeasurement" to mountSettings.report(),"pulseMeasurementRunning" to (calibration!=null),"lastPulseMeasurement" to lastMeasurement,"reason" to (follower?.reason ?: notice))
+    "mountMeasurement" to mountSettings.report(),"poseLock" to poseLock.report(),"pulseMeasurementRunning" to (calibration!=null),"lastPulseMeasurement" to lastMeasurement,"reason" to (follower?.reason ?: notice))
   companion object {
     fun referenceKey(map: RoomMapData): String {
       if(map.referenceJpeg.isEmpty() || map.imageFromMap==null) return ""

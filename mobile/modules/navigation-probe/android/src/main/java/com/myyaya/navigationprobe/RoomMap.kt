@@ -77,6 +77,21 @@ internal class RoomMapper(initial: RoomMapData) {
   @Synchronized fun invalidate() { if (livePosition != null) segment++; livePosition = null; liveForward = null }
   @Synchronized fun poseInMap(session: String, pose: RigidPose): RigidPose? =
     if (session==currentSession && livePosition!=null) worldFromMap?.inverse()?.compose(pose) else null
+  /** Call with this frame's live ARCore anchor pose before observing its camera.
+   * Numeric world poses from an older frame are not a persistent coordinate frame.
+   * The first translation/yaw is diagnostic metadata, never a restore transform.
+   */
+  @Synchronized fun alignSessionOrigin(session: String,worldFromAnchor: RigidPose): Boolean {
+    if(session!=currentSession || session!=data.sessionId || data.referenceJpeg.isNotEmpty()) return false
+    val right=worldFromAnchor.point(floatArrayOf(1f,0f,0f))
+    val dx=right[0]-worldFromAnchor.t[0];val dz=right[2]-worldFromAnchor.t[2]
+    if(hypot(dx,dz)<.5f) { invalidate();return false }
+    val yaw=atan2(-dz,dx)
+    val aligned=RigidPose(worldFromAnchor.t.clone(),floatArrayOf(0f,sin(yaw/2),0f,cos(yaw/2)))
+    worldFromMap=aligned
+    if(data.origin==null) data=data.copy(origin=aligned)
+    return true
+  }
   /** Called only for a fully tracked, stable, physically fixed reference image. */
   @Synchronized fun alignReference(session: String, worldFromImage: RigidPose): Boolean {
     if (session != currentSession || data.referenceJpeg.isEmpty()) return false
@@ -94,10 +109,6 @@ internal class RoomMapper(initial: RoomMapData) {
   }
   @Synchronized fun observePose(session: String, pose: RigidPose, tracking: Boolean): Boolean {
     if (!tracking || session != currentSession) { invalidate(); return false }
-    if (worldFromMap == null && data.referenceJpeg.isEmpty() && session == data.sessionId) {
-      val origin = data.origin ?: RigidPose(pose.t.clone(), RigidPose.IDENTITY.q)
-      data = data.copy(origin = origin); worldFromMap = origin
-    }
     val transform = worldFromMap?.inverse() ?: return false
     val local = transform.compose(pose)
     if (local.t.any { abs(it) > 25f }) { invalidate(); return false }

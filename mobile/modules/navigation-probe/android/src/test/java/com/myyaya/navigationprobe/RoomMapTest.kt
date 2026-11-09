@@ -8,7 +8,9 @@ import kotlin.math.sqrt
 class RoomMapTest {
   private fun pose(x: Float=0f,y: Float=0f,z: Float=0f) = RigidPose(floatArrayOf(x,y,z),floatArrayOf(0f,0f,0f,1f))
   private fun mapper(reference: Boolean=false): RoomMapper = RoomMapper(RoomMapData(name="room",sessionId="a",
-    referenceJpeg=if (reference) byteArrayOf(1,2,3) else byteArrayOf(),referenceWidth=if (reference) .2f else 0f)).apply { bindSession("a") }
+    referenceJpeg=if (reference) byteArrayOf(1,2,3) else byteArrayOf(),referenceWidth=if (reference) .2f else 0f)).apply {
+      bindSession("a");if(!reference) alignSessionOrigin("a",RigidPose.IDENTITY)
+    }
   private fun sample(vararg depth: Int) = DepthSamples.Result(depth.size,1,depth,1.0,null,null)
   private fun fuse(m: RoomMapper,s: DepthSamples.Result=sample(1000),stamp: Long=1_000_000_000L,frame: Long=stamp) =
     m.fuse("a",pose(),s,1f,1f,0f,0f,s.sourceWidth,s.sourceHeight,frame,stamp)
@@ -117,5 +119,40 @@ class RoomMapTest {
     m.invalidate()
     assertEquals(false,m.summary()["referenceAligned"])
     assertEquals(true,m.summary()["savedReferenceTransform"])
+  }
+  @Test fun cachedNumericOriginCannotBootstrapTracking() {
+    val m=RoomMapper(RoomMapData(name="old",sessionId="a",origin=pose(1f)))
+    m.bindSession("a")
+    assertFalse(m.observePose("a",pose(1f,.1f),true))
+    assertNull(m.livePosition)
+  }
+  @Test fun commonWorldTranslationDoesNotBecomeCameraOrNeckMotion() {
+    val m=mapper();assertTrue(m.observePose("a",pose(y=.1f),true))
+    val lock=NavigationPoseLock();lock.begin(1000)
+    val p=RoutePose.fromCamera(m.poseInMap("a",pose(y=.1f))!!)
+    lock.observe(p,.1f,1800);assertTrue(lock.observe(p,.1f,2400))
+    val worldUpdate=pose(1f,.054f,2f)
+    assertTrue(m.alignSessionOrigin("a",worldUpdate))
+    val worldCamera=worldUpdate.compose(pose(y=.1f))
+    assertTrue(m.observePose("a",worldCamera,true))
+    val camera=m.poseInMap("a",worldCamera)!!
+    assertArrayEquals(floatArrayOf(0f,.1f,0f),camera.t,.00001f)
+    assertTrue(lock.observe(RoutePose.fromCamera(camera),camera.t[1],3000))
+  }
+  @Test fun liveAnchorCancelsWorldYawAndPreservesRealShortMotion() {
+    val m=mapper();m.observePose("a",pose(y=.1f),true)
+    val yaw=.3f
+    val worldUpdate=RigidPose(floatArrayOf(2f,.05f,-3f),floatArrayOf(0f,kotlin.math.sin(yaw/2),0f,kotlin.math.cos(yaw/2)))
+    assertTrue(m.alignSessionOrigin("a",worldUpdate))
+    val localCamera=pose(.02f,.1f,-.03f)
+    val camera=worldUpdate.compose(localCamera)
+    m.observePose("a",camera,true)
+    assertArrayEquals(localCamera.t,m.livePosition,.00001f)
+    val local=m.poseInMap("a",camera)!!
+    assertEquals(0f,RoutePose.fromCamera(local).yaw,.00001f)
+  }
+  @Test fun sessionOriginCannotOverrideAnImageReferenceOrAnotherSession() {
+    assertFalse(mapper(true).alignSessionOrigin("a",pose()))
+    assertFalse(mapper().alignSessionOrigin("b",pose()))
   }
 }
