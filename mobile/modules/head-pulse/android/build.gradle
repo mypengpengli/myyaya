@@ -1,0 +1,11 @@
+apply plugin: 'com.android.library'
+apply plugin: 'expo-module-gradle-plugin'
+group = 'com.myyaya.headpulse'
+version = '1.0.0'
+expoModule { canBePublished false }
+android { namespace 'com.myyaya.headpulse'; defaultConfig { minSdkVersion 24 } }
+dependencies {
+  implementation 'com.facebook.react:react-android'
+  implementation project(':react-native-ble-plx')
+  testImplementation 'junit:junit:4.13.2'
+}

@@ -97,6 +97,8 @@ export class ReactNativeBleLooiTransport implements LooiTransport {
   private resolvedCharacteristics = new Map<LooiCharacteristicKey, ResolvedCharacteristic>();
   private headEvents: Array<{ atEpochMs: number; source: string; hex?: string; error?: string; writeType?: string }> = [];
   private diagnosticReadSequence = 0;
+  private headPulseRunning = false;
+  private headPulseStopUnconfirmed = false;
   private gattSnapshot: LooiGattSnapshot = {
     deviceId: null,
     services: [],
@@ -232,8 +234,29 @@ export class ReactNativeBleLooiTransport implements LooiTransport {
     const read = await this.readDiagnosticValue("fed1");
     if (read.status === "received") this.recordHeadEvent("read", read.hex);
     const deviceInfo = { battery: await this.readDiagnosticValue("fed8"), firmware: await this.readDiagnosticValue("2a27"), hardware: await this.readDiagnosticValue("2a28") };
-    return { available: true, properties: { ...head }, read, deviceInfo, physicalPosition: "unknown",
+    const nativePulse = (await import("../../modules/head-pulse")).headPulseStatus();
+    if (nativePulse?.stopAcknowledged && !nativePulse.active) this.headPulseStopUnconfirmed = false;
+    return { available: true, properties: { ...head }, read, deviceInfo, nativePulse, physicalPosition: "unknown",
       interpretation: "原始值语义未确认，不能当作实际位置或到位回执", events: this.headEvents.map((e) => ({ ...e })) };
+  }
+
+  async pulseHeadForDiagnostics(direction: "up" | "down", durationMs: number, ensureCurrent: () => void) {
+    const deviceId = this.requireDeviceId(), head = this.requireResolvedCharacteristic("head");
+    if (!head.writableWithResponse || this.headPulseRunning || this.headPulseStopUnconfirmed) throw new Error("头部短时控制未就绪或停止尚未确认");
+    if ((direction !== "up" && direction !== "down") || !Number.isInteger(durationMs) || durationMs < 100 || durationMs > 500) throw new Error("头部短时控制参数无效");
+    const { pulseHeadNative } = await import("../../modules/head-pulse");
+    ensureCurrent();
+    // Official angle_speed encoding: [0, -speed*127]. Direction remains a hardware trial.
+    const signedSpeed = direction === "down" ? 40 : -40;
+    this.headPulseRunning = true;
+    this.recordHeadEvent("native-pulse-request", direction === "down" ? "0028" : "00d8", undefined, "with-response");
+    try {
+      const report = await pulseHeadNative(deviceId, signedSpeed, durationMs);
+      this.headPulseStopUnconfirmed = !report.stopAcknowledged;
+      if (report.stopAcknowledged) this.recordHeadEvent("native-pulse-stop-confirmed", "0000", undefined, "with-response");
+      if (!report.startAcknowledged || !report.stopAcknowledged) throw new Error(`头部速度测试未确认完成：${report.reason}`);
+      return report;
+    } finally { this.headPulseRunning = false; }
   }
 
   private async readDiagnosticValue(short: "fed1" | "fed8" | "2a27" | "2a28"): Promise<{ status: string; hex?: string; error?: string }> {
@@ -298,6 +321,7 @@ export class ReactNativeBleLooiTransport implements LooiTransport {
     payloadHex: string,
     options: LooiWriteOptions = {},
   ): Promise<void> {
+    if ((this.headPulseRunning || this.headPulseStopUnconfirmed) && (characteristicKey === "head" || characteristicKey === "drive" && payloadHex !== "0000")) throw new Error("头部短时控制期间或停止未确认，已阻止其他电机动作");
     const deviceId = this.requireDeviceId();
     const resolved = this.requireResolvedCharacteristic(characteristicKey);
     const value = bytesToBase64(hexToBytes(payloadHex, options.expectedBytes ?? null));

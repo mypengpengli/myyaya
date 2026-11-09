@@ -45,6 +45,9 @@ assert.deepEqual(headFrames, [
 let probeCalls = [];
 const probe = load("src/diagnostics/head-protocol-probe.ts", {
   "../device-tools/chinese-robot-control": { executeChineseRobotCommand: async (...args) => { probeCalls.push(args); return "sent"; } },
+  "react-native": { AppState: { currentState: "active" } }, "../setup/setup-storage": { getAppMode: () => "local" },
+  "../core/ambient-motion": { holdAmbientMotionFor() {} }, "../core/social-attention": { holdSocialAttentionMotionFor() {} },
+  "../device-tools/looi-robot": { pulseLooiHeadForDiagnostics: async (...args) => ({ pulse: args }) },
 });
 await probe.runHeadProtocolProbe({ direction: "down", response: true });
 assert.deepEqual(probeCalls, [[{ kind: "head", direction: "down" }, { headWriteResponse: true }]]);
@@ -52,8 +55,12 @@ for (const input of [{ direction: "forward", response: true }, { direction: "ff"
   await assert.rejects(probe.runHeadProtocolProbe(input), /参数/);
 }
 assert.equal(probeCalls.length, 1, "diagnostic cannot send raw bytes or wheels");
+assert.deepEqual(await probe.runHeadProtocolProbe({ mode: "velocity", direction: "down", durationMs: 350 }), { pulse: ["down", 350] });
+for (const input of [{ mode: "velocity", direction: "forward", durationMs: 350 }, { mode: "velocity", direction: "down", durationMs: 10000 }, { mode: "velocity", direction: "down", durationMs: 150.5 }]) await assert.rejects(probe.runHeadProtocolProbe(input), /参数/);
 const uuid = (short) => `0000${short}-0000-1000-8000-00805f9b34fb`;
 const device = { id: "test-base", name: "LOOI Robot" };
+const pulseRequests = [];
+let nativePulseReport = { active: false, startAcknowledged: true, stopAcknowledged: true, reason: "duration", requestedDurationMs: 350, nativeWatchdog: true };
 let head = { uuid: uuid("fed1"), isReadable: true, isNotifiable: true, isWritableWithoutResponse: true };
 let infoCharacteristics = [];
 let writes = 0, reads = 0, monitors = 0, listener, disconnect;
@@ -73,6 +80,8 @@ const transportModule = load("src/device-tools/react-native-ble-transport.ts", {
   "./looi-discovery": load("src/device-tools/looi-discovery.ts"),
   "react-native-ble-plx": { BleManager: class {}, State: { PoweredOn: "PoweredOn" } },
   "@sourcebug/looi-sdk": sdk, "../diagnostics/diagnostic-log": { recordDiagnosticEvent() {} },
+  "../../modules/head-pulse": { headPulseStatus: () => nativePulseReport,
+    pulseHeadNative: async (...args) => { pulseRequests.push(args); return nativePulseReport; } },
 });
 const transport = new transportModule.ReactNativeBleLooiTransport({ manager, deviceId: device.id });
 await transport.connect();
@@ -105,6 +114,17 @@ assert.equal(unsupported.read.status, "unsupported"); assert.equal(reads, readsB
 assert.equal(writes, 1, "unsupported read does not trigger a fallback write");
 await transport.write("head", "ff", { response: true, expectedBytes: 1 });
 assert.ok((await transport.inspectHeadChannel()).events.some((e) => e.source === "write-returned" && e.writeType === "with-response"));
+await transport.pulseHeadForDiagnostics("down", 350, () => {});
+assert.deepEqual(pulseRequests, [[device.id, 40, 350]]);
+await assert.rejects(transport.pulseHeadForDiagnostics("down", 501, () => {}), /参数/);
+await assert.rejects(transport.pulseHeadForDiagnostics("up", 350, () => { throw new Error("cancelled"); }), /cancelled/);
+assert.equal(pulseRequests.length, 1, "cancelled preparation never reaches the native motor module");
+nativePulseReport = { ...nativePulseReport, stopAcknowledged: false, reason: "stop-write-failed" };
+await assert.rejects(transport.pulseHeadForDiagnostics("down", 350, () => {}), /未确认/);
+await assert.rejects(transport.write("head", "ff"), /停止未确认/);
+await assert.rejects(transport.pulseHeadForDiagnostics("down", 350, () => {}), /停止尚未确认/);
+nativePulseReport = { ...nativePulseReport, stopAcknowledged: true };
+await transport.inspectHeadChannel();
 await transport.disconnect();
 infoCharacteristics = ["fed8", "2a27", "2a28"].map((key) => ({ uuid: uuid(key), isReadable: true }));
 const readIds = [];

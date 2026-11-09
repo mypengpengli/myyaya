@@ -36,6 +36,7 @@ let continuousMotionDeadmanTimer: ReturnType<typeof setTimeout> | null = null;
 let frontNearEdgeClearTimer: ReturnType<typeof setTimeout> | null = null;
 let rearNearEdgeClearTimer: ReturnType<typeof setTimeout> | null = null;
 let motionSequenceAbortGeneration = 0;
+let stopNativeHeadPulse: (() => void) | null = null;
 
 type LooiSensorSnapshot = {
   lastFed9Hex: string | null;
@@ -864,6 +865,7 @@ export async function startLooiMotion(direction: string) {
 /** Immediate best-effort motor stop. Safe to call repeatedly. */
 export async function stopLooiMotion(reason = "explicit"): Promise<void> {
   motionSequenceAbortGeneration += 1;
+  stopNativeHeadPulse?.();
   clearContinuousMotionDeadman();
   clearNearEdgeEscapeTimers();
   state.motionGeneration += 1;
@@ -921,6 +923,25 @@ export async function setLooiHead(direction: string, navigationOwner?: string, o
   }
   await send();
   return { ok: true, direction, notice: "头部指令已发送，尚未确认机械到位" };
+}
+
+export async function pulseLooiHeadForDiagnostics(direction: "up" | "down", durationMs: number) {
+  assertNavigationControl();
+  const requestToken = motionSequenceAbortGeneration;
+  const robot = state.robot;
+  if (!state.connected || !robot || state.motionActive) throw new Error("请先连接底座并保持履带静止");
+  const transport = state.transport as (LooiTransport & { pulseHeadForDiagnostics?: (direction: "up" | "down", durationMs: number, ensureCurrent: () => void) => Promise<unknown> }) | null;
+  if (!transport?.pulseHeadForDiagnostics) throw new Error("当前传输不支持头部短时控制");
+  const native = await import("../../modules/head-pulse");
+  stopNativeHeadPulse = () => { native.stopHeadPulseNative(); };
+  const observation = await import("./head-observation");
+  const ensureCurrent = () => { assertPendingMotionCurrent(requestToken, robot); assertNavigationControl(); };
+  let report: unknown;
+  const notice = await observation.observeHeadCommand(direction, async () => {
+    ensureCurrent();
+    report = await transport.pulseHeadForDiagnostics!(direction, durationMs, ensureCurrent);
+  });
+  return { notice, nativePulse: report, physicalPosition: "unknown" };
 }
 
 /** Head-only conversational gestures: no wheel movement. */
