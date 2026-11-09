@@ -1,6 +1,10 @@
 package com.myyaya.navigationprobe
 
 import com.google.ar.core.Frame
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import org.opencv.android.OpenCVLoader
 import org.opencv.core.*
 import org.opencv.imgproc.Imgproc
@@ -28,9 +32,12 @@ internal class FloorFlowDiagnostic {
   private var previousTime=0L
   private var initialized=false
   @Volatile private var latestFrameNs=0L
+  @Volatile private var preview: Bitmap?=null
+  private var previewAt=0L
+  fun previewSnapshot(): Bitmap?=preview
   @Volatile var region=FloorFlowRegion();private set
   @Synchronized fun selectRegion(value: FloorFlowRegion) { region=value;reset() }
-  fun reset() { epoch.incrementAndGet();sampleAt=0;state=mapOf("status" to "RESET","region" to region.report(),"autonomousMotionAuthorized" to false) }
+  fun reset() { epoch.incrementAndGet();sampleAt=0;preview=null;state=mapOf("status" to "RESET","region" to region.report(),"autonomousMotionAuthorized" to false) }
   fun close() { if(closed) return;closed=true;reset();worker.execute { clear() };worker.shutdown() }
   fun report(): Map<String,Any?> {
     val snapshot=state;val sampled=(snapshot["sampleTimestampNs"] as? Number)?.toLong()
@@ -56,6 +63,11 @@ internal class FloorFlowDiagnostic {
       try {
         if(workerEpoch!=generation) { clear();workerEpoch=generation }
         if(!initialized) { check(OpenCVLoader.initLocal()) { "OpenCV load failed" };initialized=true }
+        if(input.time-previewAt>=1_000_000_000L) {
+          val snapshot=createPreview(input)
+          if(!closed && epoch.get()==generation) preview=snapshot
+          previewAt=input.time
+        }
         val result=process(input)
         if(!closed && epoch.get()==generation) state=result+mapOf("sampleTimestampNs" to input.time,"referenceTimestampNs" to referenceTime,
           "measuredHeightMeters" to height,"region" to input.region.report(),"source" to "manual-floor-roi-fixed-height","autonomousMotionAuthorized" to false)
@@ -65,7 +77,18 @@ internal class FloorFlowDiagnostic {
       } finally { busy.set(false) }
     } }.onFailure { busy.set(false) }
   }
-  private fun clear() { previous?.release();previous=null;points=emptyArray();reference=emptyList();previousTime=0;referenceTime=0 }
+  private fun clear() { previous?.release();previous=null;points=emptyArray();reference=emptyList();previousTime=0;referenceTime=0;previewAt=0 }
+  private fun createPreview(i: Input): Bitmap {
+    val width=320;val height=(width*i.height/i.width).coerceAtLeast(1)
+    val pixels=IntArray(width*height) { n ->
+      val x=(n%width)*i.width/width;val y=(n/width)*i.height/height
+      val gray=i.gray[y*i.width+x].toInt() and 255;Color.rgb(gray,gray,gray)
+    }
+    return Bitmap.createBitmap(pixels,width,height,Bitmap.Config.ARGB_8888).copy(Bitmap.Config.ARGB_8888,true).also { bitmap ->
+      val paint=Paint().apply { color=Color.YELLOW;style=Paint.Style.STROKE;strokeWidth=2f }
+      Canvas(bitmap).drawRect(i.region.left*width,i.region.top*height,i.region.right*width,i.region.bottom*height,paint)
+    }
+  }
   private fun project(p: Point,i: Input)=FloorFlowGeometry.project(p.x,p.y,i.fx.toDouble(),i.fy.toDouble(),i.cx.toDouble(),i.cy.toDouble(),i.q,i.measuredHeight)
   private fun seed(gray: Mat,i: Input): Map<String,Any?> {
     clear()

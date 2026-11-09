@@ -171,13 +171,24 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private fun chooseFloorFlowRegion() {
     taughtRoutes?.holdForUi()
     AlertDialog.Builder(activity).setTitle("地板视觉取样区")
-      .setItems(arrayOf("画面下部（原范围）","靠下中央（避开边缘物品）","自定义黄框")) { _,i ->
+      .setItems(arrayOf("画面下部（原范围）","靠下中央（避开边缘物品）","自定义黄框","查看完整取样画面")) { _,i ->
         when(i) {
           0->applyFloorFlowRegion(FloorFlowRegion())
           1->applyFloorFlowRegion(FloorFlowRegion.LOWER_CENTER)
           2->editFloorFlowRegion()
+          3->showFloorFlowPreview()
         }
       }.setNegativeButton("取消",null).show()
+  }
+  private fun showFloorFlowPreview() {
+    val bitmap=floorFlow.previewSnapshot()
+    if(bitmap==null) { toast("请先开始扫描、按实测高度建立实际地面参考，再等待取样画面");return }
+    val image=ImageView(activity).apply { setImageBitmap(bitmap);adjustViewBounds=true;scaleType=ImageView.ScaleType.FIT_CENTER }
+    val dialog=AlertDialog.Builder(activity).setTitle("完整地板取样画面")
+      .setMessage("这是刚才的一帧，不是实时画面。实时预览可能裁剪，黄框实际范围以此图核对；框内应只有平整地板。")
+      .setView(image).setPositiveButton("关闭",null).create()
+    dialog.setOnShowListener { image.layoutParams=android.widget.FrameLayout.LayoutParams(-1,(activity.resources.displayMetrics.heightPixels*.4f).toInt()) }
+    dialog.show()
   }
   private fun applyFloorFlowRegion(value: FloorFlowRegion) {
     taughtRoutes?.stop("地板取样区已更改，原视觉参考已清除")
