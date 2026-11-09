@@ -136,6 +136,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
         depthOverlay?.let { it.enabledOverlay=overlayEnabled;it.invalidate() } }
     },LinearLayout.LayoutParams(0,-2,1f))
     addView(terrainActions)
+    addView(button("选择地板取样区（黄框）") { chooseFloorFlowRegion() })
     terrainState=label("开始扫描后点选平面并确认用途；灰未知、青平面、红障碍、橙落差、绿候选。").apply { textSize=12f }
     addView(terrainState)
     terrainView=TerrainView(activity); addView(terrainView,LinearLayout.LayoutParams(-1,(130*resources.displayMetrics.density).toInt()))
@@ -167,6 +168,42 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   }
 
   private fun toast(message: String) { Toast.makeText(activity,message,Toast.LENGTH_LONG).show() }
+  private fun chooseFloorFlowRegion() {
+    taughtRoutes?.holdForUi()
+    AlertDialog.Builder(activity).setTitle("地板视觉取样区")
+      .setItems(arrayOf("画面下部（原范围）","靠下中央（避开边缘物品）","自定义黄框")) { _,i ->
+        when(i) {
+          0->applyFloorFlowRegion(FloorFlowRegion())
+          1->applyFloorFlowRegion(FloorFlowRegion.LOWER_CENTER)
+          2->editFloorFlowRegion()
+        }
+      }.setNegativeButton("取消",null).show()
+  }
+  private fun applyFloorFlowRegion(value: FloorFlowRegion) {
+    taughtRoutes?.stop("地板取样区已更改，原视觉参考已清除")
+    floorFlow.selectRegion(value)
+    toast("请核对黄框只含平整地板，避开鞋、罐子和纸张翘起处。取样区不代表空地。")
+    renderTerrain()
+  }
+  private fun editFloorFlowRegion() {
+    val selected=floorFlow.region
+    val content=LinearLayout(activity).apply { orientation=LinearLayout.HORIZONTAL;setPadding(20,4,20,4) }
+    val values=listOf(selected.left,selected.top,selected.right,selected.bottom)
+    val fields=listOf("左%","上%","右%","下%").mapIndexed { i,hint ->
+      EditText(activity).apply { this.hint=hint;inputType=8194;setSingleLine()
+        setText(java.lang.String.format(java.util.Locale.US,"%.1f",values[i]*100))
+        content.addView(this,LinearLayout.LayoutParams(0,-2,1f)) }
+    }
+    val dialog=AlertDialog.Builder(activity).setTitle("调整地板黄框")
+      .setMessage("依次填写左、上、右、下边界（0～100%），保存后在画面核对。宽至少10%、高至少8%；只用于视觉诊断，修改会停止当前路线操作。")
+      .setView(content).setNegativeButton("取消",null).setPositiveButton("应用黄框",null).create()
+    dialog.setOnShowListener { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+      val region=runCatching { val v=fields.map { it.text.toString().toFloat()/100 };FloorFlowRegion(v[0],v[1],v[2],v[3]) }.getOrNull()
+      if(region==null) toast("请填写有效边界，左小于右、上小于下，并留足取样面积")
+      else { applyFloorFlowRegion(region);dialog.dismiss() }
+    } }
+    dialog.show()
+  }
   private fun readEnvelope(): RobotEnvelope? = runCatching {
     val prefs=activity.getSharedPreferences("terrain-envelope",0)
     RobotEnvelope(prefs.getFloat("width",0f),prefs.getFloat("length",0f),prefs.getFloat("height",0f),prefs.getFloat("margin",.05f))
@@ -212,7 +249,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     localAssessment=RouteAssessment(RouteClearance.DEPTH_UNKNOWN,"GROUND_REFERENCE_REQUIRED")
     localMap.reset();localSnapshot=LocalMapSnapshot();localPose=null;localGoal=null;localSweeps=emptyMap()
     localPlan=LocalPlan("WAITING",reason="GROUND_REFERENCE_REQUIRED");localPlanSampleNs=0;lastLocalPlanNs=0
-    activity.runOnUiThread { depthOverlay?.let { it.dots=emptyList();it.outlines=emptyList();it.invalidate() } }
+    activity.runOnUiThread { depthOverlay?.let { it.dots=emptyList();it.outlines=emptyList();it.floorRegion=null;it.invalidate() } }
   }
   private fun editCameraHeight() {
     if (!active) { toast("请先开始扫描并恢复定位，再按实测高度建立参考面");return }
@@ -276,6 +313,17 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     val flowText=if(flow["status"]=="FLOOR_FLOW_ESTIMATE") {
       val dx=(flow["cameraDxMeters"] as Number).toDouble();val dz=(flow["cameraDzMeters"] as Number).toDouble()
       "地板视觉：手机相对参考约%.1f厘米（诊断，不代表通行许可）".format(hypot(dx,dz)*100)
+    } else if(flow["status"]=="FLOOR_FLOW_REJECTED") {
+      val reason=when(flow["fitReason"]) {
+        "LOW_INLIER_RATIO"->"地板一致特征比例不足"
+        "INSUFFICIENT_CORRESPONDENCES","NO_CONSENSUS"->"一致特征太少"
+        "SCALE_OUT_OF_RANGE"->"画面尺度变化过大"
+        "ROTATION_OUT_OF_RANGE"->"画面旋转变化过大"
+        "DEGENERATE_GEOMETRY"->"特征分布不足"
+        else->"对应点无效"
+      }
+      val ratio=(flow["inlierRatio"] as? Number)?.toDouble() ?: 0.0
+      "地板视觉：$reason（一致特征%.0f%%，需65%%）；请核对黄框内是否只有地板。".format(ratio*100)
     } else "地板视觉：等待实测高度和可跟踪地板纹理（诊断）"
     if (!groundArmed) terrainState.text=warmup+message+(if (s.groundSelected && sampling.isNotEmpty()) "\n$sampling" else "")+"\n$local\n$flowText\n灰未知 / 青地面 / 红障碍 / 橙落差 / 绿整车覆盖（诊断）"
     terrainView.snapshot=s;terrainView.basePose=if(mountSettings.value!=null) localPose else null;terrainView.invalidate()
@@ -646,6 +694,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     if (tracking && frame.timestamp-lastOutlineNs>=500_000_000L) {
       lastOutlineNs=frame.timestamp
       drawPlaneOutlines(session,frame,token)
+      drawFloorFlowRegion(frame,token)
     }
     val hasReference=current.snapshotReference()
     if (!tracking) { anchor?.detach(); anchor=null; stableImage=null; stableCount=0 }
@@ -925,6 +974,18 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     }
     activity.runOnUiThread { if (token==generation) depthOverlay?.let {
       it.outlines=outlines;it.outlinesUpdatedAt=android.os.SystemClock.elapsedRealtime();it.invalidate()
+    } }
+  }
+  private fun drawFloorFlowRegion(frame: Frame,token: Int) {
+    if(!overlayEnabled) return
+    val dims=frame.camera.imageIntrinsics.imageDimensions
+    val vertices=floorFlow.region.corners(dims[0],dims[1])
+    val input=ByteBuffer.allocateDirect(32).order(ByteOrder.nativeOrder()).asFloatBuffer().apply { put(vertices);position(0) }
+    val output=ByteBuffer.allocateDirect(32).order(ByteOrder.nativeOrder()).asFloatBuffer()
+    frame.transformCoordinates2d(Coordinates2d.IMAGE_PIXELS,input,Coordinates2d.VIEW_NORMALIZED,output)
+    val view=FloatArray(8).also { output.position(0);output.get(it) }
+    activity.runOnUiThread { if(token==generation) depthOverlay?.let {
+      it.floorRegion=view;it.floorRegionUpdatedAt=android.os.SystemClock.elapsedRealtime();it.invalidate()
     } }
   }
   private fun RoomMapper.snapshotReference() = referenceEnabled()

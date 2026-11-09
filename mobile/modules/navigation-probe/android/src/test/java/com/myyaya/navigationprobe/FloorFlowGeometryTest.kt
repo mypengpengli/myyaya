@@ -38,4 +38,21 @@ class FloorFlowGeometryTest {
     val a=grid();val angle=.2;val b=a.map { FloorFlowGeometry.Point(cos(angle)*it.x-sin(angle)*it.z,sin(angle)*it.x+cos(angle)*it.z) }
     assertNull(FloorFlowGeometry.estimate(a,b))
   }
+  @Test fun rejectedScaleExplainsFailureWithoutPublishingTranslation() {
+    val a=grid();val assessment=FloorFlowGeometry.assess(a,a.map { FloorFlowGeometry.Point(it.x*1.3,it.z*1.3) })
+    assertEquals("SCALE_OUT_OF_RANGE",assessment.reason);assertNull(assessment.estimate)
+    assertEquals(1.3,assessment.scale!!,1e-7);assertEquals(a.size,assessment.inliers)
+    assertFalse(assessment.report().containsKey("cameraDxMeters"))
+  }
+  @Test fun mixedSurfacesFailTheOriginalConsensusThreshold() {
+    val a=grid();val b=a.mapIndexed { i,p->FloorFlowGeometry.Point(p.x+if(i%2==0) .01 else .08,p.z+.03) }
+    val assessment=FloorFlowGeometry.assess(a,b)
+    assertEquals("LOW_INLIER_RATIO",assessment.reason);assertNull(assessment.estimate)
+    assertTrue(assessment.inliers.toDouble()/assessment.correspondences<.65)
+  }
+  @Test fun rotationAndSparseFailuresRemainDistinct() {
+    val a=grid();val b=a.map { FloorFlowGeometry.Point(cos(.2)*it.x-sin(.2)*it.z,sin(.2)*it.x+cos(.2)*it.z) }
+    assertEquals("ROTATION_OUT_OF_RANGE",FloorFlowGeometry.assess(a,b).reason)
+    assertEquals("INSUFFICIENT_CORRESPONDENCES",FloorFlowGeometry.assess(a.take(4),a.take(4)).reason)
+  }
 }

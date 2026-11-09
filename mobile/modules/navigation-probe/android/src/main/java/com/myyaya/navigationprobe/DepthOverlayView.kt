@@ -13,10 +13,17 @@ internal class DepthOverlayView(context: Context): View(context) {
   var outlines: List<FloatArray> = emptyList()
   var outlinesUpdatedAt=0L
   var enabledOverlay=true
+  var floorRegion: FloatArray?=null
+  var floorRegionUpdatedAt=0L
   private val paint=Paint(Paint.ANTI_ALIAS_FLAG)
   override fun onDraw(canvas: Canvas) {
     if (!enabledOverlay) return
     val now=SystemClock.elapsedRealtime()
+    floorRegion?.takeIf { it.size==8 && it.all { coordinate->coordinate.isFinite() } && now-floorRegionUpdatedAt<=1000 }?.let { uv->
+      val path=Path().apply { moveTo(uv[0]*width,uv[1]*height)
+        for(i in 2 until 8 step 2) lineTo(uv[i]*width,uv[i+1]*height);close() }
+      paint.color=Color.YELLOW;paint.style=Paint.Style.STROKE;paint.strokeWidth=4f;canvas.drawPath(path,paint)
+    }
     if (now-outlinesUpdatedAt<=1000) for (uv in outlines) {
       if (uv.size<6) continue
       val path=Path().apply { moveTo(uv[0]*width,uv[1]*height)
@@ -31,6 +38,6 @@ internal class DepthOverlayView(context: Context): View(context) {
     paint.style=Paint.Style.FILL;paint.color=0xbb000000.toInt()
     canvas.drawRect(0f,height-40f,width.toFloat(),height.toFloat(),paint)
     paint.color=Color.WHITE;paint.textSize=23f
-    canvas.drawText("青线：已检测水平面 · 青点平面 / 红高处 / 橙低处",10f,height-12f,paint)
+    canvas.drawText("黄框：地板取样假设 · 青线：水平面 · 红高处 / 橙低处",10f,height-12f,paint)
   }
 }

@@ -13,7 +13,7 @@ import kotlin.math.*
 /** Read-only sparse flow worker. Manual lower-image floor ROI is an assumption, not segmentation/free space. */
 internal class FloorFlowDiagnostic {
   private data class Input(val gray: ByteArray,val width: Int,val height: Int,val time: Long,val q: FloatArray,
-    val fx: Float,val fy: Float,val cx: Float,val cy: Float,val measuredHeight: Float)
+    val fx: Float,val fy: Float,val cx: Float,val cy: Float,val measuredHeight: Float,val region: FloorFlowRegion)
   private val worker=Executors.newSingleThreadExecutor()
   private val busy=AtomicBoolean(false)
   private val epoch=AtomicInteger(0)
@@ -28,7 +28,9 @@ internal class FloorFlowDiagnostic {
   private var previousTime=0L
   private var initialized=false
   @Volatile private var latestFrameNs=0L
-  fun reset() { epoch.incrementAndGet();sampleAt=0;state=mapOf("status" to "RESET","autonomousMotionAuthorized" to false) }
+  @Volatile var region=FloorFlowRegion();private set
+  @Synchronized fun selectRegion(value: FloorFlowRegion) { region=value;reset() }
+  fun reset() { epoch.incrementAndGet();sampleAt=0;state=mapOf("status" to "RESET","region" to region.report(),"autonomousMotionAuthorized" to false) }
   fun close() { if(closed) return;closed=true;reset();worker.execute { clear() };worker.shutdown() }
   fun report(): Map<String,Any?> {
     val snapshot=state;val sampled=(snapshot["sampleTimestampNs"] as? Number)?.toLong()
@@ -37,7 +39,7 @@ internal class FloorFlowDiagnostic {
   fun offer(frame: Frame,height: Float?) {
     latestFrameNs=frame.timestamp
     if(closed || height==null || frame.timestamp-sampleAt<100_000_000L || !busy.compareAndSet(false,true)) return
-    sampleAt=frame.timestamp;val generation=epoch.get()
+    sampleAt=frame.timestamp;val (generation,selectedRegion)=synchronized(this) { epoch.get() to region }
     val input=try {
       frame.acquireCameraImage().use { image ->
         require(abs(frame.timestamp-image.timestamp)<=100_000_000L)
@@ -46,7 +48,8 @@ internal class FloorFlowDiagnostic {
         val base=buffer.position()
         for(y in 0 until image.height) for(x in 0 until image.width) bytes[y*image.width+x]=buffer.get(base+y*plane.rowStride+x*plane.pixelStride)
         val k=frame.camera.imageIntrinsics;val f=k.focalLength;val c=k.principalPoint
-        Input(bytes,image.width,image.height,image.timestamp,frame.camera.pose.rotationQuaternion,f[0],f[1],c[0],c[1],height)
+        check(k.imageDimensions.contentEquals(intArrayOf(image.width,image.height)))
+        Input(bytes,image.width,image.height,image.timestamp,frame.camera.pose.rotationQuaternion,f[0],f[1],c[0],c[1],height,selectedRegion)
       }
     } catch(_: Exception) { busy.set(false);return }
     runCatching { worker.execute {
@@ -55,7 +58,7 @@ internal class FloorFlowDiagnostic {
         if(!initialized) { check(OpenCVLoader.initLocal()) { "OpenCV load failed" };initialized=true }
         val result=process(input)
         if(!closed && epoch.get()==generation) state=result+mapOf("sampleTimestampNs" to input.time,"referenceTimestampNs" to referenceTime,
-          "measuredHeightMeters" to height,"source" to "manual-floor-roi-fixed-height","autonomousMotionAuthorized" to false)
+          "measuredHeightMeters" to height,"region" to input.region.report(),"source" to "manual-floor-roi-fixed-height","autonomousMotionAuthorized" to false)
       } catch(error: Throwable) {
         clear()
         if(!closed && epoch.get()==generation) state=mapOf("status" to "FLOW_UNAVAILABLE","error" to error.javaClass.simpleName,"autonomousMotionAuthorized" to false)
@@ -68,7 +71,8 @@ internal class FloorFlowDiagnostic {
     clear()
     val mask=Mat.zeros(i.height,i.width,CvType.CV_8UC1);val corners=MatOfPoint()
     try {
-      Imgproc.rectangle(mask,Point(.05*i.width,.67*i.height),Point(.88*i.width,.95*i.height),Scalar(255.0),-1)
+      Imgproc.rectangle(mask,Point(i.region.left*i.width.toDouble(),i.region.top*i.height.toDouble()),
+        Point(i.region.right*i.width.toDouble(),i.region.bottom*i.height.toDouble()),Scalar(255.0),-1)
       Imgproc.goodFeaturesToTrack(gray,corners,600,.004,5.0,mask)
       val pairs=corners.toArray().mapNotNull { p->project(p,i)?.let { p to it } }
       points=pairs.map { it.first }.toTypedArray();reference=pairs.map { it.second }
@@ -90,10 +94,10 @@ internal class FloorFlowDiagnostic {
       val oldReference=reference;points=keep.map { next[it] }.toTypedArray();reference=keep.map { oldReference[it] }
       val projected=points.indices.mapNotNull { n->project(points[n],i)?.let { reference[n] to it } }
       prev.release();previous=gray;previousTime=i.time
-      val estimate=FloorFlowGeometry.estimate(projected.map { it.first },projected.map { it.second })
-      return if(estimate==null) mapOf("status" to "FLOOR_FLOW_REJECTED","tracks" to points.size)
+      val assessment=FloorFlowGeometry.assess(projected.map { it.first },projected.map { it.second });val estimate=assessment.estimate
+      return if(estimate==null) assessment.report()+mapOf("status" to "FLOOR_FLOW_REJECTED","tracks" to points.size)
       else mapOf("status" to "FLOOR_FLOW_ESTIMATE","cameraDxMeters" to estimate.dx,"cameraDzMeters" to estimate.dz,
-        "scale" to estimate.scale,"orientationCorrectionRadians" to estimate.angle,"inliers" to estimate.inliers,
+        "fitReason" to "ACCEPTED","correspondences" to projected.size,"scale" to estimate.scale,"orientationCorrectionRadians" to estimate.angle,"inliers" to estimate.inliers,
         "inlierRatio" to estimate.ratio,"medianResidualMeters" to estimate.residual,"tracks" to points.size)
     } catch(error: Throwable) { gray.release();throw error }
     finally { from.release();to.release();back.release();ok.release();err.release();backOk.release();backErr.release() }
