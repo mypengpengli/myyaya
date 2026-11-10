@@ -83,6 +83,7 @@ class NavigationProbeModule : Module() {
         "availability" to availability.name,
         "serviceInstalled" to (service != null),
         "serviceVersion" to service?.versionName,
+        "dataDirectory" to last.parentFile!!.absolutePath,
         "lastReport" to last.takeIf { it.isFile && it.length() <= 32_000 }?.readText()
       )
     }

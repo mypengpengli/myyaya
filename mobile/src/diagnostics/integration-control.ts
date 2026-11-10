@@ -21,8 +21,9 @@ export function startIntegrationControl() {
       let result;
       if (command.kind === "head_probe") result = await (await import("./head-protocol-probe")).runHeadProtocolProbe(command);
       else if (command.kind === "chat") result = await replyToCompanion(String(command.text).slice(0, 10000), new AbortController().signal);
-      else if (command.kind === "probe") result = command.mode === "media"
-        ? await (await import("../artifacts/media-jobs")).probeMediaJobs() : await probeModelConnection(String(command.mode));
+      else if (command.kind === "probe") result = command.mode === "monocular_depth"
+        ? await (await import("./monocular-depth-benchmark")).runMonocularDepthBenchmark()
+        : command.mode === "media" ? await (await import("../artifacts/media-jobs")).probeMediaJobs() : await probeModelConnection(String(command.mode));
       else if (command.kind === "status") result = chineseVoice.getSnapshot();
       else {
         const tool = phoneTools.find((entry) => entry.name === command.tool);

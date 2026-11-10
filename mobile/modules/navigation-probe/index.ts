@@ -7,6 +7,7 @@ export type NavigationProbeStatus = {
   serviceInstalled: boolean;
   serviceVersion: string | null;
   lastReport: string | null;
+  dataDirectory: string;
 };
 
 type Native = {
