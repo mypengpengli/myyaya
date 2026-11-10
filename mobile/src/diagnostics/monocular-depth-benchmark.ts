@@ -48,10 +48,10 @@ export async function runMonocularDepthBenchmark() {
       for (const value of values) { min = Math.min(min, value); max = Math.max(max, value); }
       if (max <= min) throw new Error("模型返回常量深度，不能作为有效对照");
       await FileSystem.writeAsStringAsync(`${outputRoot}${name}.depth`, output.data, { encoding: FileSystem.EncodingType.Base64 });
-      const digest = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, new Uint8Array(values).buffer);
-      const sha256 = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, "0")).join("");
+      // String hashing already works in the app; avoid Expo's unsupported ArrayBuffer conversion.
+      const sha256Base64 = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, output.data);
       const sampledValues = Array.from({ length: 256 }, (_, i) => values[Math.floor(i / 16) * 16 * 252 + (i % 16) * 16]);
-      samples.push({ name, bridgeInferenceMs, min, max, outputBytes: values.length, sha256, sampledValues });
+      samples.push({ name, bridgeInferenceMs, min, max, outputBytes: values.length, sha256Base64, sampledValues });
     }
     return { model: "DepthAnythingV2-small-int8-256", loadMs, threads: 4, samples,
       relativeDepthOnly: true, metricDepthValidated: false, autonomousMotionAuthorized: false };

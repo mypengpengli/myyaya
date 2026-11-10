@@ -27,3 +27,5 @@
 模型与四份RGB输入已通过主机和手机SHA256核验，保存在手机自身外部文件目录`navigation-probe/monocular-benchmark`。首轮运行记录`.tools/phone/command-6b41461e5b7c47c7ab928676284f3239.json`保留实际存储错误。192临时USB常亮已恢复原0；锁屏安装修订包没有再次改全局设置。解锁后通过`probe monocular_depth`继续；不要重复让用户连接或压脖子，也不要把文件存储失败当成模型加载/推理失败。
 
 若通过，再开发实时图像取样、地板校正与障碍观测，不把PC结果当成手机完成。
+
+后续解锁复测确认缓存写入已通过，下一步在`Crypto.digest(ArrayBuffer)`遇到Expo/Kotlin转换错误。改用本App已有成熟调用的`digestStringAsync`，对输出的标准Base64文本计算SHA256，字段明确命名`sha256Base64`；这与原始字节SHA不同，电脑核对时也必须先作相同Base64编码。新的整轮手机结果仍待复测，不能把已取得首张输出写成四张性能验收成功。

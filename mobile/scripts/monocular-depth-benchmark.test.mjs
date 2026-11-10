@@ -16,7 +16,7 @@ function rig(mode = "ok") {
       readAsStringAsync: async () => "fixed-input",
       writeAsStringAsync: async (uri) => { assert.ok(uri.startsWith("file:///cache/monocular-benchmark/")); state.writes++; },
     },
-    "expo-crypto": { CryptoDigestAlgorithm: { SHA256: "sha256" }, digest: async (_algorithm, bytes) => Uint8Array.from(createHash("sha256").update(new Uint8Array(bytes)).digest()).buffer },
+    "expo-crypto": { CryptoDigestAlgorithm: { SHA256: "sha256" }, digestStringAsync: async (_algorithm, text) => { assert.equal(typeof text, "string"); return createHash("sha256").update(text, "utf8").digest("hex"); } },
     "@siteed/sherpa-onnx.rn": {
       base64ToTypedArray: (value) => new Uint8Array(Buffer.from(value, "base64")),
       OnnxInference: {
@@ -39,7 +39,7 @@ function rig(mode = "ok") {
 }
 const good = rig(); const result = await good.run();
 assert.equal(result.samples.length, 4); assert.equal(result.autonomousMotionAuthorized, false); assert.equal(result.metricDepthValidated, false);
-assert.equal(result.samples[0].sha256, createHash("sha256").update(Buffer.from(data, "base64")).digest("hex"));
+assert.equal(result.samples[0].sha256Base64, createHash("sha256").update(data, "utf8").digest("hex"));
 assert.equal(result.samples[0].sampledValues.length, 256);
 assert.deepEqual(good.state, { created: 1, released: 1, writes: 4, runs: 4 });
 const invalid = rig("bad-input"); await assert.rejects(invalid.run(), /图像不完整/); assert.equal(invalid.state.created, 0);
