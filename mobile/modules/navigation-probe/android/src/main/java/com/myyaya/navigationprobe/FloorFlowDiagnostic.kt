@@ -50,7 +50,7 @@ internal class FloorFlowDiagnostic {
   }
   fun offer(frame: Frame,height: Float?) {
     latestFrameNs=frame.timestamp
-    if(closed || height==null || frame.timestamp-sampleAt<100_000_000L || !busy.compareAndSet(false,true)) return
+    if(closed || height==null || frame.timestamp-sampleAt<66_000_000L || !busy.compareAndSet(false,true)) return
     sampleAt=frame.timestamp;val (generation,selectedRegion)=synchronized(this) { epoch.get() to region }
     val input=try {
       frame.acquireCameraImage().use { image ->

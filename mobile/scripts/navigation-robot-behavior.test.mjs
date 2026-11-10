@@ -3,6 +3,11 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
+const probeScreen=fs.readFileSync("modules/navigation-probe/android/src/main/java/com/myyaya/navigationprobe/NavigationProbeScreen.kt","utf8");
+const drawFrame=probeScreen.slice(probeScreen.indexOf("override fun onDrawFrame"));
+assert.ok(drawFrame.indexOf("roomMap?.offerVisualFrame(frame)")>=0 &&
+  drawFrame.indexOf("roomMap?.offerVisualFrame(frame)")<drawFrame.indexOf("cadence.poll(now)"),
+  "visual image acquisition must remain independent of the slower depth/report cadence");
 function load(file, overrides = {}) {
   const module = { exports: {} };
   const output = ts.transpileModule(fs.readFileSync(file, "utf8"), {

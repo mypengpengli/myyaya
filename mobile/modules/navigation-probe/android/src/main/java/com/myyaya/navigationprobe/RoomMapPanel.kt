@@ -693,6 +693,11 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     mapper=RoomMapper(RoomMapData(name="录制回放",sessionId="pending"));freshMap=true
     mapper?.snapshot()?.let { render(it,"录制回放，不驱动底座。点击开始扫描后可分析已录场景。") }
   }
+  /** Feed camera images independently of raw-depth polling; two cadence gates halve visual throughput. */
+  fun offerVisualFrame(frame: Frame) {
+    if(!active || frame.camera.trackingState!=TrackingState.TRACKING) return
+    floorFlow.offer(frame,calibratedHeight?.takeIf { surfaceSource=="MEASURED_HEIGHT" && terrainSnapshot.floorConfirmed })
+  }
   /** GL thread, depth sampled at up to 10 Hz; view snapshots limited to 2 Hz. */
   fun frame(session: Session, frame: Frame, sample: DepthSamples.Result?, depthNs: Long,
     dense: DepthSamples.Result?=null,denseNs: Long=0) {
@@ -822,7 +827,6 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
           }
         }
       }
-      floorFlow.offer(frame,calibratedHeight?.takeIf { surfaceSource=="MEASURED_HEIGHT" && terrainSnapshot.floorConfirmed })
       panel?.frame(sessionId,camera,located && terrainSnapshot.groundSelected && terrainSnapshot.floorConfirmed &&
         terrainSnapshot.cameraHeight?.let { it in .03f..2.5f }==true,localAssessment.clearance)
     }

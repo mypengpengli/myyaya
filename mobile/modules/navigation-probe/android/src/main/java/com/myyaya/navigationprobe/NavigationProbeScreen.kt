@@ -618,6 +618,7 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         GLES20.glDisableVertexAttribArray(p); GLES20.glDisableVertexAttribArray(t)
         if (lastFrameNs != frame.timestamp) { frames++; intervalFrames++; lastFrameNs = frame.timestamp }
+        if (mapping) roomMap?.offerVisualFrame(frame)
         val now = SystemClock.elapsedRealtime()
         val tick = cadence.poll(now) ?: return
         val tracking = frame.camera.trackingState == TrackingState.TRACKING
