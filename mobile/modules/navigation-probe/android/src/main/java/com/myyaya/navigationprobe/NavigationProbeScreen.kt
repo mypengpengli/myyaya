@@ -164,7 +164,9 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
       if(!running || playbackName!=null) Toast.makeText(this,"请先开始实时扫描；回放不能录制",Toast.LENGTH_SHORT).show()
       else surface.queueEvent {
         val current=session ?: return@queueEvent
-        val result=runCatching { if(datasets.recording()) datasets.stop(current) else datasets.start(current) }
+        val result=runCatching { if(datasets.recording()) datasets.stop(current) else {
+          datasets.start(current);roomMap?.beginDepthCapture()
+        } }
         runOnUiThread { datasetButton.text=if(datasets.recording()) "停止录制" else "录制相机与IMU（本机）"
           Toast.makeText(this,result.exceptionOrNull()?.message ?: if(datasets.recording()) "正在录制相机与IMU，仅本机，最多90秒" else "录制已保存，可选择回放",Toast.LENGTH_LONG).show() }
       }

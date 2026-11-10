@@ -43,6 +43,18 @@ class NavigationPoseLockTest {
     assertEquals("MAP_HEIGHT_CHANGED",lock.report()["state"])
     assertEquals(.054f,lock.report()["heightDeltaMeters"] as Float,.00001f)
     assertFalse(lock.isLocked)
+    assertEquals("MAP_HEIGHT_CHANGED",lock.failureReason())
+    assertTrue(lock.reason.contains("不能判断脖子"))
+  }
+  @Test fun recordedFieldHeightDriftIsDistinctFromTiltAndDisconnect() {
+    val lock=NavigationPoseLock();val pose=p.copy(pitch=.014391891f,roll=-.0063089826f)
+    lock.begin(1000);assertFalse(lock.observe(pose,-.20585288f,1800));assertTrue(lock.observe(pose,-.20585288f,2400))
+    assertFalse(lock.observe(pose.copy(pitch=pose.pitch-.01612986f,roll=pose.roll-.0013214356f),-.23280925f,3000))
+    assertEquals("MAP_HEIGHT_CHANGED",lock.failureReason())
+    val tilted=locked();assertFalse(tilted.observe(p.copy(pitch=.2f),.1f,3000))
+    assertEquals("MOUNT_TILT_CHANGED",tilted.failureReason())
+    val disconnected=locked();assertFalse(disconnected.observe(p,.1f,3000,false,1))
+    assertEquals("CONNECTION_CHANGED",disconnected.failureReason())
   }
   @Test fun disconnectionInvalidatesTheMinimumEvenWithoutVisiblePoseChange() {
     val lock=locked()

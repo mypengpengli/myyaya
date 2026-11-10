@@ -230,7 +230,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
         p==null->trial.fail("LOCALIZATION_LOST")
         !motor.isConnected()->trial.fail("DISCONNECTED")
         !actualFloor->trial.fail("GROUND_REFERENCE_INVALID")
-        !fixed->trial.fail("MOUNT_CHECK_INVALID")
+        !fixed->trial.fail(poseLock.failureReason())
       }
       trial.observe(p,now)
       trial.result?.let { result ->
@@ -245,6 +245,9 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
         val failure=when(result.reason) {
           "LOCALIZATION_LOST","POSE_GAP"->"定位中断或位姿更新间隔过长"
           "MOUNT_MOVED","MOUNT_CHECK_INVALID"->"固定姿态检查失效，请核对定位与手机安装"
+          "MAP_HEIGHT_CHANGED"->"地图定位高度变化；这不代表脖子抬起，请先核对定位"
+          "MOUNT_TILT_CHANGED"->"相机倾角发生变化，请核对手机安装与头部姿态"
+          "CONNECTION_CHANGED"->"底座连接发生变化，请重新确认连接与最低姿态"
           "DISCONNECTED"->"底座连接已中断"
           "GROUND_REFERENCE_INVALID"->"地面参考或定位已失效"
           "PRECONDITION_CHANGED"->"连接、固定姿态或地面状态发生变化"
@@ -274,7 +277,8 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
         f!=null -> "${f.route.name} · ${f.phase} · ${f.waypoint.coerceAtMost(f.route.points.size)}/${f.route.points.size}\n${f.reason}"
         else -> notice
       }
-      activity.runOnUiThread { if(::status.isInitialized) status.text="$text\n底座${if(motor.isConnected()) "已连接" else "未连接"} · 头部${if(fixed) "固定" else "待固定"} · 语音停止${if(motor.voiceStopReady) "已开" else "未开，请用停止按钮"}" }
+      val poseStatus=if(fixed) "姿态已确认" else if(poseLock.failureReason()=="MAP_HEIGHT_CHANGED") "定位高度待核对" else "姿态待确认"
+      activity.runOnUiThread { if(::status.isInitialized) status.text="$text\n底座${if(motor.isConnected()) "已连接" else "未连接"} · $poseStatus · 语音停止${if(motor.voiceStopReady) "已开" else "未开，请用停止按钮"}" }
     }
   }
   fun report(): Map<String,Any?> = mapOf("phase" to (if(teacher!=null) "TEACHING" else follower?.phase ?: "IDLE"),

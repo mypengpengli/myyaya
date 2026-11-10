@@ -16,6 +16,13 @@ internal class NavigationPoseLock {
   val isLocked get()=locked!=null
   @Synchronized fun reset() { readyAt=0;stableAt=0;candidate=null;locked=null;boundConnection=null;diagnostics=mapOf("state" to "WAITING") }
   fun report()=diagnostics
+  fun failureReason(): String = when(diagnostics["state"]) {
+    "MAP_HEIGHT_CHANGED"->"MAP_HEIGHT_CHANGED"
+    "TILT_CHANGED"->"MOUNT_TILT_CHANGED"
+    "CONNECTION_CHANGED"->"CONNECTION_CHANGED"
+    "TRACKING_MISSING"->"LOCALIZATION_LOST"
+    else->"MOUNT_CHECK_INVALID"
+  }
   @Synchronized fun begin(now: Long,connectionRevision: Long=0) { reset();boundConnection=connectionRevision;readyAt=now+800;reason="保持当前最低姿态，等待稳定；不会自动回正或抬头" }
   @Synchronized fun observe(pose: RoutePose?,height: Float?,now: Long,connected: Boolean=true,connectionRevision: Long=0): Boolean {
     if(boundConnection?.let { !connected || it!=connectionRevision }==true) {
@@ -32,7 +39,7 @@ internal class NavigationPoseLock {
         "heightLimitMeters" to .025f,"tiltLimitRadians" to .12f)
       if(state!="LOCKED") {
         reset();diagnostics=check
-        reason=if(state=="MAP_HEIGHT_CHANGED") "地图中的相机高度变化，请核对定位与最低脖子姿态后重新确认" else "相机倾斜变化，请核对定位与固定安装后重新确认"
+        reason=if(state=="MAP_HEIGHT_CHANGED") "地图定位高度发生变化，测量已中断；这不能判断脖子是否移动，请先核对定位" else "相机倾斜变化，请核对定位与固定安装后重新确认"
         return false
       }
       diagnostics=check

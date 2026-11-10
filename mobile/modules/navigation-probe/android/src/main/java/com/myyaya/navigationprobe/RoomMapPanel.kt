@@ -27,7 +27,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private val pauseOnly: () -> Unit, motor: RouteMotorGateway?=null) {
   private val directory = File(activity.filesDir,"room-maps").apply { mkdirs() }
   private val io = Executors.newSingleThreadExecutor()
-  private val depthRecorder=DepthEvidenceRecorder(activity.getExternalFilesDir("navigation-probe") ?: activity.filesDir,io)
+  @Volatile private var depthRecorder=DepthEvidenceRecorder(activity.getExternalFilesDir("navigation-probe") ?: activity.filesDir,io)
   private val floorFlow=FloorFlowDiagnostic(File(activity.getExternalFilesDir("navigation-probe") ?: activity.filesDir,"floor-flow-evidence"))
   private var depthOverlay: DepthOverlayView?=null
   @Volatile private var overlayEnabled=true
@@ -171,7 +171,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private fun chooseFloorFlowRegion() {
     taughtRoutes?.holdForUi()
     AlertDialog.Builder(activity).setTitle("地板视觉取样区")
-      .setItems(arrayOf("中下部（行驶试验建议）","画面下部（原范围）","靠下中央（避开边缘物品）","自定义黄框","查看完整取样画面","重设视觉起点（不接续原位置）","记录一次失跟诊断（仅本机）")) { _,i ->
+      .setItems(arrayOf("中下部（行驶试验建议）","画面下部（原范围）","靠下中央（避开边缘物品）","自定义黄框","查看完整取样画面","重设视觉起点（不接续原位置）","记录一次失跟诊断（仅本机）","重新录制双路深度诊断（仅本机）")) { _,i ->
         when(i) {
           0->applyFloorFlowRegion(FloorFlowRegion.TRAVEL_CENTER)
           1->applyFloorFlowRegion(FloorFlowRegion())
@@ -180,8 +180,12 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
           4->showFloorFlowPreview()
           5->{ taughtRoutes?.stop("重新设定视觉起点");floorFlow.reset();toast("下一有效帧作为新的视觉起点，原位置不接续；不会行驶。") }
           6->{ if(floorFlow.armEvidence()) toast("已准备记录下一次失跟的灰度图与匹配点，仅存本机，不上传。") }
+          7->{ beginDepthCapture();toast("已新建双路深度记录，最多360帧；缺失或未就绪也会记录，不会行驶。") }
         }
       }.setNegativeButton("取消",null).show()
+  }
+  fun beginDepthCapture() {
+    depthRecorder=DepthEvidenceRecorder(activity.getExternalFilesDir("navigation-probe") ?: activity.filesDir,io,360)
   }
   private fun showFloorFlowPreview() {
     val bitmap=floorFlow.previewSnapshot()
@@ -771,9 +775,17 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       val intrinsics=frame.camera.textureIntrinsics; val f=intrinsics.focalLength; val c=intrinsics.principalPoint; val dim=intrinsics.imageDimensions
       current.fuse(sessionId,rigid(frame.camera.pose),sample,f[0],f[1],c[0],c[1],dim[0],dim[1],frame.timestamp,depthNs)
     }
-    if (located) analyzeTerrain(session,current,frame,if (depthState.ready) sample else null,
-      if (depthState.ready) depthNs else 0,token,dense,denseNs)
+    hybridReport=mapOf("status" to if(located) "GROUND_REFERENCE_REQUIRED" else "LOCALIZATION_REQUIRED")
+    if (located) analyzeTerrain(session,current,frame,sample,depthNs,token,dense,denseNs)
     else clearTerrain("LOCALIZATION_REQUIRED")
+    // Record inputs before initialization succeeds; do not feed unready data into navigation.
+    if(located) current.poseInMap(sessionId,rigid(frame.camera.pose))?.let { camera ->
+      val k=frame.camera.textureIntrinsics;val f=k.focalLength;val c=k.principalPoint;val d=k.imageDimensions
+      val diagnostic=DepthPairDiagnostic.report(frame.timestamp,depthNs,denseNs,sample,dense,depthState.ready,depthState.reason)
+      hybridReport=hybridReport+diagnostic
+      depthRecorder.record(frame.timestamp,depthNs,denseNs,sample,dense,camera,observedGround,
+        floatArrayOf(f[0],f[1],c[0],c[1]),d,hybridReport)
+    }
     run {
       val panel=taughtRoutes
       val camera=if(located) current.poseInMap(sessionId,rigid(frame.camera.pose)) else null
@@ -940,20 +952,20 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     }
     observedGround=ground
     val points=ArrayList<FloatArray>()
+    hybridReport=mapOf("status" to if(sample==null) "RAW_UNAVAILABLE" else "RAW_STALE_OR_FUTURE")
     if (sample!=null && depthNs>0 && depthNs<=frame.timestamp && frame.timestamp-depthNs<=250_000_000L) {
       val k=frame.camera.textureIntrinsics; val f=k.focalLength; val c=k.principalPoint; val d=k.imageDimensions
       val fusion=HybridDepth.fuse(sample,dense,camera,ground,f[0],f[1],c[0],c[1],d[0],d[1],depthNs,denseNs,frame.timestamp)
       hybridReport=fusion.report()
-      DepthProjection.points(fusion.sample,camera,f[0],f[1],c[0],c[1],d[0],d[1]) { points.add(it) }
-      depthRecorder.record(frame.timestamp,depthNs,denseNs,sample,dense,camera,ground,floatArrayOf(f[0],f[1],c[0],c[1]),d,hybridReport)
-      if (frame.timestamp-lastOverlayNs>=500_000_000L) {
+      if(depthState.ready) DepthProjection.points(fusion.sample,camera,f[0],f[1],c[0],c[1],d[0],d[1]) { points.add(it) }
+      if (depthState.ready && frame.timestamp-lastOverlayNs>=500_000_000L) {
         lastOverlayNs=frame.timestamp
         drawDepthOverlay(frame,camera,ground,fusion.sample,fusion.filled,f,c,d,token)
       }
     } else if (frame.timestamp-lastOverlayNs>1_000_000_000L) {
       activity.runOnUiThread { if (token==generation) depthOverlay?.let { it.dots=emptyList();it.invalidate() } }
     }
-    terrainSnapshot=terrain.update(camera,ground,frame.timestamp,depthNs,points)
+    terrainSnapshot=terrain.update(camera,ground,frame.timestamp,if(depthState.ready) depthNs else 0,points)
   }
   private fun drawDepthOverlay(frame: Frame,camera: RigidPose,ground: GroundPlane,sample: DepthSamples.Result,
     filled: BooleanArray,f: FloatArray,c: FloatArray,d: IntArray,token: Int) {

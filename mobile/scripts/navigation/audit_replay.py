@@ -33,8 +33,13 @@ def main():
     p.add_argument('--fusion-slack-ms',type=float,default=0,help='OFFLINE ONLY: fuse gate counterfactual; does not change recorded timestamps')
     a=p.parse_args();a.output.mkdir(parents=True,exist_ok=True)
     rows=[json.loads(x) for x in a.input.read_text(encoding='utf-8').splitlines() if x.strip()]
-    if not 1<=len(rows)<=120 or any(r.get('schemaVersion')!=1 for r in rows):
-        raise ValueError('Expected 1..120 bounded schemaVersion 1 depth records')
+    if not 1<=len(rows)<=360 or any(r.get('schemaVersion') not in (1,2) for r in rows):
+        raise ValueError('Expected 1..360 bounded schemaVersion 1 or 2 depth records')
+    # Missing inputs/planes remain useful diagnostics but cannot enter metric replay.
+    original_count=len(rows)
+    rows=[r for r in rows if r.get('raw') is not None and r.get('planeOrigin') is not None and r.get('planeNormal') is not None]
+    if not rows:
+        raise ValueError('No raw+plane records for metric replay; use summarize_depth_capture.py for availability diagnostics')
     binary=a.output/'replay.bin';convert(rows,binary)
     import os
     cp=os.pathsep.join([str(a.classes.resolve()),str(a.stdlib.resolve())])
@@ -56,7 +61,7 @@ def main():
                 ['retainedFloorTiles','recentFreeTiles','weakObstacleTiles','obstacleTiles','dropTiles'],map(int,row[2:7])),
                 stepState=row[7],unknown=int(row[8]),stale=int(row[9]),obstacles=int(row[10]),drops=int(row[11]),initialUnknown=int(row[12]))
     (a.output/'frames.json').write_text(json.dumps(frames,separators=(',',':')),encoding='utf-8')
-    print(json.dumps({'frames':len(frames),'peakGround':max(sum(c[2]=='GROUND' for c in f['cells']) for f in frames),
+    print(json.dumps({'frames':len(frames),'diagnosticRecordsSkipped':original_count-len(rows),'peakGround':max(sum(c[2]=='GROUND' for c in f['cells']) for f in frames),
       'peakCandidates':max(sum(c[3] for c in f['cells']) for f in frames),'points':sum(len(f['points']) for f in frames)}))
 
 if __name__=='__main__':main()

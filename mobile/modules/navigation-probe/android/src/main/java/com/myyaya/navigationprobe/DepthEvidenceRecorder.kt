@@ -8,18 +8,15 @@ import java.util.UUID
 import java.util.concurrent.Executor
 
 /** Bounded local replay data. No camera photographs, network requests or credentials. */
-internal class DepthEvidenceRecorder(private val directory: File,private val io: Executor) {
+internal class DepthEvidenceRecorder(private val directory: File,private val io: Executor,private val limit: Int=120) {
   private val file=File(directory,"depth-evidence-${UUID.randomUUID()}.ndjson")
-  private var lastNs=0L
-  private var lastDepth=0L
-  private var scheduled=0
+  private val schedule=DepthCaptureSchedule(limit)
   @Volatile private var written=0
   @Volatile private var failed=false
-  fun report(): Map<String,Any?> = mapOf("file" to file.name,"frames" to written,"limit" to 120,"writeFailed" to failed)
-  fun record(now: Long,rawNs: Long,denseNs: Long,raw: DepthSamples.Result,dense: DepthSamples.Result?,
-    camera: RigidPose,plane: GroundPlane,intrinsics: FloatArray,dimensions: IntArray,fusion: Map<String,Any?>) {
-    if (scheduled>=120 || rawNs<=lastDepth || rawNs>now || now-rawNs>250_000_000L || now-lastNs<250_000_000L) return
-    lastNs=now;lastDepth=rawNs;scheduled++
+  fun report(): Map<String,Any?> = mapOf("file" to file.name,"frames" to written,"limit" to limit,"writeFailed" to failed)
+  fun record(now: Long,rawNs: Long,denseNs: Long,raw: DepthSamples.Result?,dense: DepthSamples.Result?,
+    camera: RigidPose,plane: GroundPlane?,intrinsics: FloatArray,dimensions: IntArray,fusion: Map<String,Any?>) {
+    if (!schedule.accept(now)) return
     io.execute {
       try {
         directory.mkdirs()
@@ -31,11 +28,12 @@ internal class DepthEvidenceRecorder(private val directory: File,private val io:
           return JSONObject().put("width",s.width).put("height",s.height).put("sourceWidth",s.sourceWidth)
             .put("sourceHeight",s.sourceHeight).put("step",s.step).put("u16leBase64",Base64.encodeToString(bytes,Base64.NO_WRAP))
         }
-        val row=JSONObject().put("schemaVersion",1).put("frameNs",now).put("rawNs",rawNs).put("denseNs",denseNs)
+        val row=JSONObject().put("schemaVersion",2).put("frameNs",now).put("rawNs",rawNs).put("denseNs",denseNs)
           .put("cameraTranslation",JSONArray(camera.t.toList())).put("cameraQuaternion",JSONArray(camera.q.toList()))
-          .put("planeOrigin",JSONArray(plane.origin.toList())).put("planeNormal",JSONArray(plane.normal.toList()))
+          .put("planeOrigin",plane?.let { JSONArray(it.origin.toList()) } ?: JSONObject.NULL)
+          .put("planeNormal",plane?.let { JSONArray(it.normal.toList()) } ?: JSONObject.NULL)
           .put("intrinsics",JSONArray(intrinsics.toList())).put("textureDimensions",JSONArray(dimensions.toList()))
-          .put("raw",image(raw)).put("dense",dense?.let { image(it) } ?: JSONObject.NULL).put("fusion",JSONObject(fusion))
+          .put("raw",raw?.let { image(it) } ?: JSONObject.NULL).put("dense",dense?.let { image(it) } ?: JSONObject.NULL).put("fusion",JSONObject(fusion))
         file.appendText(row.toString()+"\n");written++
       } catch (_: Exception) { failed=true }
     }
