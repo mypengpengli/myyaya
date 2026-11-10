@@ -12,6 +12,17 @@ class PulseMeasurementTest {
       try { PulseMeasurementTrial(direction,ms,start,1000);fail("invalid calibration duration") } catch(_:IllegalArgumentException) {}
     }
   }
+  @Test fun largerTurnIsAnExactOperatorDurationAndStillNeedsSettling() {
+    for(direction in listOf("left","right")) {
+      val trial=PulseMeasurementTrial(direction,350,start,1000)
+      trial.observe(start,1000);trial.observe(start.copy(yaw=.2f),1300);trial.acknowledge(true,1400)
+      for(ms in 1500L..2100L step 100) trial.observe(start.copy(yaw=.2f),ms)
+      assertTrue(trial.result!!.valid)
+    }
+    for((direction,ms) in listOf("back" to 350,"left" to 351,"right" to 600)) {
+      try { PulseMeasurementTrial(direction,ms,start,1000);fail("arbitrary larger pulse") } catch(_:IllegalArgumentException) {}
+    }
+  }
   @Test fun measuredSevenRightFiveForwardUsesRearCameraAxes() {
     val camera=RigidPose(floatArrayOf(0f,.1f,0f),floatArrayOf(0f,0f,0f,1f))
     val base=RoutePose.fromCamera(camera,.07f,.05f)

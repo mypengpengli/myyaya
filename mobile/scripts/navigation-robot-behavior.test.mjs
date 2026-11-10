@@ -55,6 +55,12 @@ assert.ok(writes.slice(before).some((w) => w.key === "drive" && w.payload === "0
 assert.equal(writes.at(-1).payload, "0000");
 await assert.rejects(robot.moveLooiNavigationPulse("left", 900, "route-owner"), /参数/);
 await assert.rejects(robot.moveLooiNavigationPulse("back", 450, "route-owner"), /参数/, "autonomous pulse cap stays unchanged");
+await assert.rejects(robot.moveLooiNavigationPulse("left", 350, "route-owner"), /参数/, "larger turn is unavailable to autonomous pulses");
+const beforeTurn=writes.length;
+await robot.moveLooiOperatorTurnCalibration("left","route-owner");
+assert.ok(writes.slice(beforeTurn).some(w=>w.key==="drive" && w.payload==="047a"));
+assert.equal(writes.at(-1).payload,"0000");
+await assert.rejects(robot.moveLooiOperatorTurnCalibration("right","stale-owner"),/导航/);
 const beforeOperator=writes.length;
 await robot.moveLooiOperatorBackCalibration("route-owner");
 assert.ok(writes.slice(beforeOperator).some((w)=>w.key==="drive" && w.payload==="86fc"));

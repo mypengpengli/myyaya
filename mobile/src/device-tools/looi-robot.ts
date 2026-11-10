@@ -758,6 +758,13 @@ export async function moveLooiOperatorBackCalibration(owner: string) {
   return runBoundedMotion("back", 450, "manual-bounded", { navigationOwner: owner });
 }
 
+/** One explicitly confirmed, larger turn for observation; route pulses keep their own cap. */
+export async function moveLooiOperatorTurnCalibration(direction: "left" | "right", owner: string) {
+  assertNavigationControl(owner);
+  if (!owner || !["left", "right"].includes(direction)) throw new Error("操作者转向标定参数无效");
+  return runBoundedMotion(direction, 350, "manual-bounded", { navigationOwner: owner });
+}
+
 /** Calibrated bounded turn. First build uses time estimates that must be tuned on the real robot. */
 export async function turnLooi(direction: "left" | "right", degrees: 90 | 180 = 90) {
   assertNavigationControl();

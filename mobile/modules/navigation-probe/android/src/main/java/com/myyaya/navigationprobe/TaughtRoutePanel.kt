@@ -142,7 +142,12 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
         .setMessage("可选更明显的一次后退。实际距离尚未校准，均会自动停止；开始前有三声提示音与倒计时。")
         .setNegativeButton("取消",null).setNeutralButton("200毫秒") { _,_->confirmCalibration(direction,200) }
         .setPositiveButton("450毫秒（更明显）") { _,_->confirmCalibration(direction,450) }.show()
-    } else confirmCalibration(direction,120)
+    } else {
+      AlertDialog.Builder(activity).setTitle("${if(direction=="left") "左" else "右"}转标定时长")
+        .setMessage("120毫秒变化较小。350毫秒用于更明显的单次观察，实际角度尚未标定；两种均有三秒倒计时并自动停止。")
+        .setNegativeButton("取消",null).setNeutralButton("120毫秒（小动作）") { _,_->confirmCalibration(direction,120) }
+        .setPositiveButton("350毫秒（加大幅度）") { _,_->confirmCalibration(direction,350) }.show()
+    }
   }
   private fun confirmCalibration(direction: String,ms: Int) {
     val o=requireFloor();check(o.clearance!=RouteClearance.OBSTACLE) { "已看到车前障碍/落差，请先移开并重新观察" }
@@ -178,7 +183,12 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
         val trial=PulseMeasurementTrial(direction,ms,current.pose!!,SystemClock.elapsedRealtime())
         calibrationFlowStart=floorFlow()
         calibration=trial
-        motor.request(if(direction=="back" && ms==450) "calibration_back" else direction,ms) { ok,s->
+        val action=when {
+          direction=="back" && ms==450->"calibration_back"
+          direction in listOf("left","right") && ms==350->"calibration_$direction"
+          else->direction
+        }
+        motor.request(action,ms) { ok,s->
           synchronized(this) { if(calibration===trial) trial.acknowledge(ok,SystemClock.elapsedRealtime()) }
           message(if(ok) "动作已停止，正在等待位姿稳定并记录余移。" else "校验动作未完成：$s")
         }

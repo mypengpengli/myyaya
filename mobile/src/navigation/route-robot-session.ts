@@ -3,7 +3,7 @@ import { openNativeTaughtRoutes, subscribeRouteMotion, publishRouteRobotState, a
 import { withExternalActivityLease } from "../core/background-process-exit";
 import { acquireNavigationControl, releaseNavigationControl, assertNavigationControl } from "../core/navigation-control-lease";
 import { pauseSocialCamera } from "../core/social-attention";
-import { getLooiRobotRuntimeState, subscribeLooiRobotRuntimeState, moveLooiNavigationPulse, moveLooiOperatorBackCalibration, setLooiHead, stopLooiMotion } from "../device-tools/looi-robot";
+import { getLooiRobotRuntimeState, subscribeLooiRobotRuntimeState, moveLooiNavigationPulse, moveLooiOperatorBackCalibration, moveLooiOperatorTurnCalibration, setLooiHead, stopLooiMotion } from "../device-tools/looi-robot";
 import { forceReconnectSavedLooiRobot } from "../device-tools/looi-robot-autoconnect";
 import { compactChinese, isChineseStop } from "../voice/chinese-command";
 
@@ -79,6 +79,11 @@ export async function openTaughtRouteSession(name = ""): Promise<string | null> 
                 if(event.durationMs!==450 || !getLooiRobotRuntimeState().connected) throw new Error("操作者标定参数或连接无效");
                 const result=await moveLooiOperatorBackCalibration(token);
                 if(!result.completed) throw new Error("标定动作已停止");
+              }
+              else if (event.action === "calibration_left" || event.action === "calibration_right") {
+                if(event.durationMs!==350 || !getLooiRobotRuntimeState().connected) throw new Error("操作者转向标定参数或连接无效");
+                const result=await moveLooiOperatorTurnCalibration(event.action==="calibration_left" ? "left" : "right",token);
+                if(!result.completed) throw new Error("转向标定动作已停止");
               }
               else if (["back", "left", "right"].includes(event.action)) {
                 if (!getLooiRobotRuntimeState().connected) throw new Error("底座连接已断开");

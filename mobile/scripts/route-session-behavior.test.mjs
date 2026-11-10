@@ -27,6 +27,7 @@ const robot = {
   setLooiHead:async(direction)=>{heads.push(direction);},
   stopLooiMotion:async(reason)=>{ if(reason==="navigation-stop" && deferredStop) await new Promise(resolve=>{deferredStop=resolve;}); },
   moveLooiNavigationPulse:(dir,ms,owner)=>{lease.assertNavigationControl(owner);pulses.push({dir,ms});return new Promise(resolve=>pending.push(()=>resolve({completed:true})));},
+  moveLooiOperatorTurnCalibration:(dir,owner)=>{lease.assertNavigationControl(owner);pulses.push({dir,ms:350});return new Promise(resolve=>pending.push(()=>resolve({completed:true})));},
 };
 const voice={stop:async()=>{},pauseCaptureForRecording:async()=>async()=>{releasedMic++;}};
 const vosk={prepareChinese:async()=>({sessionId:44}),startChineseCapture:async()=>{},stopChineseCapture:async()=>{voiceStops++;},
@@ -56,10 +57,13 @@ deferredStop();await drain();assert.equal(pulses.length,2);
 pending.shift()();await drain();assert.deepEqual(acks,[{id:3,ok:true}]);
 event({token,sequence:2,action:"head_center",durationMs:0});await drain();assert.equal(acks.length,1);
 event({token,sequence:4,action:"head_down",durationMs:0});await drain();assert.deepEqual(heads,["down"]);
+event({token,sequence:5,action:"calibration_left",durationMs:600});await drain();assert.equal(pulses.length,2,"wrong duration cannot dispatch a larger turn");
+event({token,sequence:6,action:"calibration_left",durationMs:350});await drain();assert.deepEqual(pulses.at(-1),{dir:"left",ms:350});
+pending.shift()();await drain();
 voiceResult({sessionId:44,text:"小丫小丫，停止导航",partial:true});await drain();assert.deepEqual(nativeStops,[token]);
 voiceResult({sessionId:45,text:"停止",partial:true});await drain();assert.equal(nativeStops.length,1);
 app.currentState="background";lifecycle("background");await drain();assert.ok(voiceStops>0);
-event({token,sequence:5,action:"back",durationMs:100});await drain();assert.equal(pulses.length,2,"background cannot drive");
+event({token,sequence:7,action:"back",durationMs:100});await drain();assert.equal(pulses.length,3,"background cannot drive");
 close(null);await task;assert.equal(lease.hasNavigationControl(),false);assert.equal(event,undefined);
 assert.equal(releasedCamera,1);assert.equal(releasedMic,1);
 console.log("Route session: ownership, STOP serialization, late ack, foreground, Chinese stop and cleanup: PASS");
