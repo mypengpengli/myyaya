@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 const require = createRequire(import.meta.url), ts = require("typescript");
 const data = Buffer.from(Uint8Array.from({ length: 252 * 252 }, (_, i) => i % 256)).toString("base64");
 function rig(mode = "ok") {
@@ -9,10 +10,13 @@ function rig(mode = "ok") {
   const mocks = {
     "expo-file-system/legacy": {
       EncodingType: { Base64: "base64" },
+      cacheDirectory: "file:///cache/",
+      makeDirectoryAsync: async () => {},
       getInfoAsync: async (uri) => ({ exists: true, isDirectory: false, size: uri.endsWith("onnx") ? 27342208 : mode === "bad-input" ? 0 : 256 * 256 * 3 }),
       readAsStringAsync: async () => "fixed-input",
-      writeAsStringAsync: async (uri) => { assert.ok(uri.startsWith("file:///test/monocular-benchmark/")); state.writes++; },
+      writeAsStringAsync: async (uri) => { assert.ok(uri.startsWith("file:///cache/monocular-benchmark/")); state.writes++; },
     },
+    "expo-crypto": { CryptoDigestAlgorithm: { SHA256: "sha256" }, digest: async (_algorithm, bytes) => Uint8Array.from(createHash("sha256").update(new Uint8Array(bytes)).digest()).buffer },
     "@siteed/sherpa-onnx.rn": {
       base64ToTypedArray: (value) => new Uint8Array(Buffer.from(value, "base64")),
       OnnxInference: {
@@ -35,6 +39,8 @@ function rig(mode = "ok") {
 }
 const good = rig(); const result = await good.run();
 assert.equal(result.samples.length, 4); assert.equal(result.autonomousMotionAuthorized, false); assert.equal(result.metricDepthValidated, false);
+assert.equal(result.samples[0].sha256, createHash("sha256").update(Buffer.from(data, "base64")).digest("hex"));
+assert.equal(result.samples[0].sampledValues.length, 256);
 assert.deepEqual(good.state, { created: 1, released: 1, writes: 4, runs: 4 });
 const invalid = rig("bad-input"); await assert.rejects(invalid.run(), /图像不完整/); assert.equal(invalid.state.created, 0);
 for (const mode of ["bad-output", "native-error", "constant"]) {

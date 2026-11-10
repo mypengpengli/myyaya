@@ -1,4 +1,5 @@
 import * as FileSystem from "expo-file-system/legacy";
+import * as Crypto from "expo-crypto";
 import { OnnxInference, base64ToTypedArray } from "@siteed/sherpa-onnx.rn";
 import { getNavigationProbeStatus } from "../../modules/navigation-probe";
 import { holdAmbientMotionFor } from "../core/ambient-motion";
@@ -20,6 +21,9 @@ export async function runMonocularDepthBenchmark() {
     const info = await FileSystem.getInfoAsync(`${root}${name}.rgb`);
     if (!info.exists || info.isDirectory || info.size !== 256 * 256 * 3) throw new Error(`输入图像不完整：${name}`);
   }
+  if (!FileSystem.cacheDirectory) throw new Error("缺少应用缓存目录");
+  const outputRoot = `${FileSystem.cacheDirectory}monocular-benchmark/`;
+  await FileSystem.makeDirectoryAsync(outputRoot, { intermediates: true });
   const started = Date.now();
   const session = await OnnxInference.createSession({ modelPath, numThreads: 4 });
   const loadMs = Date.now() - started;
@@ -43,8 +47,11 @@ export async function runMonocularDepthBenchmark() {
       let min = 255, max = 0;
       for (const value of values) { min = Math.min(min, value); max = Math.max(max, value); }
       if (max <= min) throw new Error("模型返回常量深度，不能作为有效对照");
-      await FileSystem.writeAsStringAsync(`${root}${name}.depth`, output.data, { encoding: FileSystem.EncodingType.Base64 });
-      samples.push({ name, bridgeInferenceMs, min, max, outputBytes: values.length });
+      await FileSystem.writeAsStringAsync(`${outputRoot}${name}.depth`, output.data, { encoding: FileSystem.EncodingType.Base64 });
+      const digest = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, new Uint8Array(values).buffer);
+      const sha256 = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, "0")).join("");
+      const sampledValues = Array.from({ length: 256 }, (_, i) => values[Math.floor(i / 16) * 16 * 252 + (i % 16) * 16]);
+      samples.push({ name, bridgeInferenceMs, min, max, outputBytes: values.length, sha256, sampledValues });
     }
     return { model: "DepthAnythingV2-small-int8-256", loadMs, threads: 4, samples,
       relativeDepthOnly: true, metricDepthValidated: false, autonomousMotionAuthorized: false };
