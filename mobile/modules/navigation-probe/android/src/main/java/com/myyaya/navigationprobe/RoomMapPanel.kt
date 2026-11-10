@@ -28,7 +28,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private val directory = File(activity.filesDir,"room-maps").apply { mkdirs() }
   private val io = Executors.newSingleThreadExecutor()
   private val depthRecorder=DepthEvidenceRecorder(activity.getExternalFilesDir("navigation-probe") ?: activity.filesDir,io)
-  private val floorFlow=FloorFlowDiagnostic()
+  private val floorFlow=FloorFlowDiagnostic(File(activity.getExternalFilesDir("navigation-probe") ?: activity.filesDir,"floor-flow-evidence"))
   private var depthOverlay: DepthOverlayView?=null
   @Volatile private var overlayEnabled=true
   private var lastOverlayNs=0L
@@ -171,7 +171,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private fun chooseFloorFlowRegion() {
     taughtRoutes?.holdForUi()
     AlertDialog.Builder(activity).setTitle("地板视觉取样区")
-      .setItems(arrayOf("中下部（行驶试验建议）","画面下部（原范围）","靠下中央（避开边缘物品）","自定义黄框","查看完整取样画面","重设视觉起点（不接续原位置）")) { _,i ->
+      .setItems(arrayOf("中下部（行驶试验建议）","画面下部（原范围）","靠下中央（避开边缘物品）","自定义黄框","查看完整取样画面","重设视觉起点（不接续原位置）","记录一次失跟诊断（仅本机）")) { _,i ->
         when(i) {
           0->applyFloorFlowRegion(FloorFlowRegion.TRAVEL_CENTER)
           1->applyFloorFlowRegion(FloorFlowRegion())
@@ -179,6 +179,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
           3->editFloorFlowRegion()
           4->showFloorFlowPreview()
           5->{ taughtRoutes?.stop("重新设定视觉起点");floorFlow.reset();toast("下一有效帧作为新的视觉起点，原位置不接续；不会行驶。") }
+          6->{ if(floorFlow.armEvidence()) toast("已准备记录下一次失跟的灰度图与匹配点，仅存本机，不上传。") }
         }
       }.setNegativeButton("取消",null).show()
   }

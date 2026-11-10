@@ -12,12 +12,15 @@ import org.opencv.video.Video
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.io.File
+import java.util.UUID
+import org.json.JSONObject
 import kotlin.math.*
 
 /** Read-only sparse flow worker. Manual lower-image floor ROI is an assumption, not segmentation/free space. */
-internal class FloorFlowDiagnostic {
+internal class FloorFlowDiagnostic(private val evidenceDirectory: File?=null) {
   private data class Input(val gray: ByteArray,val width: Int,val height: Int,val time: Long,val q: FloatArray,
-    val fx: Float,val fy: Float,val cx: Float,val cy: Float,val measuredHeight: Float,val region: FloorFlowRegion,val capturedAtMs: Long)
+    val fx: Float,val fy: Float,val cx: Float,val cy: Float,val measuredHeight: Float,val region: FloorFlowRegion,val capturedAtMs: Long,val frameTime: Long)
   private val worker=Executors.newSingleThreadExecutor()
   private val busy=AtomicBoolean(false)
   private val epoch=AtomicInteger(0)
@@ -33,6 +36,10 @@ internal class FloorFlowDiagnostic {
   private val chain=FloorFlowTrackChain()
   private var featuresAdded=0
   private var replenishments=0
+  private val evidenceArmed=AtomicBoolean(false)
+  private var evidenceReference: Input?=null
+  @Volatile private var evidenceFile: String?=null
+  fun armEvidence(): Boolean { if(evidenceDirectory==null) return false;evidenceFile=null;evidenceArmed.set(true);return true }
   private var initialized=false
   @Volatile private var latestFrameNs=0L
   @Volatile private var preview: Bitmap?=null
@@ -61,7 +68,7 @@ internal class FloorFlowDiagnostic {
         for(y in 0 until image.height) for(x in 0 until image.width) bytes[y*image.width+x]=buffer.get(base+y*plane.rowStride+x*plane.pixelStride)
         val k=frame.camera.imageIntrinsics;val f=k.focalLength;val c=k.principalPoint
         check(k.imageDimensions.contentEquals(intArrayOf(image.width,image.height)))
-        Input(bytes,image.width,image.height,image.timestamp,frame.camera.pose.rotationQuaternion,f[0],f[1],c[0],c[1],height,selectedRegion,android.os.SystemClock.elapsedRealtime())
+        Input(bytes,image.width,image.height,image.timestamp,frame.camera.pose.rotationQuaternion,f[0],f[1],c[0],c[1],height,selectedRegion,android.os.SystemClock.elapsedRealtime(),frame.timestamp)
       }
     } catch(_: Exception) { busy.set(false);return }
     runCatching { worker.execute {
@@ -81,6 +88,7 @@ internal class FloorFlowDiagnostic {
           process(input)
         }
         if(!closed && epoch.get()==generation) state=result+mapOf("sampleTimestampNs" to input.time,
+          "evidenceFile" to evidenceFile,"cameraImageLagMs" to (input.frameTime-input.time)/1_000_000.0,
           "workerDurationMs" to android.os.SystemClock.elapsedRealtime()-workStarted,
           "measuredHeightMeters" to height,"region" to input.region.report(),"source" to "rolling-floor-flow-fixed-height","autonomousMotionAuthorized" to false)
       } catch(error: Throwable) {
@@ -89,7 +97,7 @@ internal class FloorFlowDiagnostic {
       } finally { busy.set(false) }
     } }.onFailure { busy.set(false) }
   }
-  private fun releaseTracking() { previous?.release();previous=null;points=emptyArray();reference=emptyList();previousTime=0;referenceTime=0 }
+  private fun releaseTracking() { previous?.release();previous=null;points=emptyArray();reference=emptyList();previousTime=0;referenceTime=0;evidenceReference=null }
   private fun clear() { releaseTracking();chain.reset();featuresAdded=0;replenishments=0;previewAt=0 }
   private fun createPreview(i: Input): Bitmap {
     val width=320;val height=(width*i.height/i.width).coerceAtLeast(1)
@@ -138,6 +146,7 @@ internal class FloorFlowDiagnostic {
     val pairs=detectFresh(gray,i,emptyArray())
     points=pairs.map { it.first }.toTypedArray();reference=pairs.map { it.second }
     previous=gray;previousTime=i.time;referenceTime=i.time
+    if(evidenceArmed.get()) evidenceReference=i
     return chain.report(false)+mapOf("status" to if(points.size>=12) "REFERENCE_READY" else "FLOOR_FEATURES_INSUFFICIENT",
       "tracks" to points.size,"referenceTimestampNs" to referenceTime,"seedReason" to reason)
   }
@@ -160,10 +169,14 @@ internal class FloorFlowDiagnostic {
       prev.release();previous=gray;previousTime=i.time
       val assessment=FloorFlowGeometry.assess(projected.map { it.second },projected.map { it.third });val estimate=assessment.estimate
       val linkFrom=referenceTime
-      if(estimate==null) return chain.report(false)+assessment.report()+mapOf("status" to "FLOOR_FLOW_REJECTED","tracks" to points.size,"referenceTimestampNs" to linkFrom)
+      if(estimate==null) {
+        if(!closed && evidenceArmed.compareAndSet(true,false)) runCatching { saveEvidence(i,projected,assessment) }
+        return chain.report(false)+assessment.report()+mapOf("status" to "FLOOR_FLOW_REJECTED","tracks" to points.size,"referenceTimestampNs" to linkFrom)
+      }
       check(chain.accept(linkFrom,i.time,estimate)) { "Invalid floor-flow reference link" }
       val inliers=projected.filter { FloorFlowGeometry.isInlier(it.second,it.third,estimate) }
       points=inliers.map { points[it.first] }.toTypedArray();reference=inliers.map { it.third };referenceTime=i.time
+      if(evidenceArmed.get()) evidenceReference=i else evidenceReference=null
       var added=0
       if(points.size<480) {
         val fresh=detectFresh(gray,i,points);added=fresh.size
@@ -176,5 +189,22 @@ internal class FloorFlowDiagnostic {
         "tracks" to points.size,"addedFeatures" to added,"featuresAddedTotal" to featuresAdded,"replenishments" to replenishments)
     } catch(error: Throwable) { gray.release();throw error }
     finally { from.release();to.release();back.release();ok.release();err.release();backOk.release();backErr.release() }
+  }
+  private fun saveEvidence(current: Input,pairs: List<Triple<Int,FloorFlowGeometry.Point,FloorFlowGeometry.Point>>,assessment: FloorFlowGeometry.Assessment) {
+    val source=evidenceReference ?: return
+    val folder=evidenceDirectory ?: return;folder.mkdirs()
+    val id="floor-flow-"+UUID.randomUUID().toString()
+    fun image(input: Input,name: String) {
+      File(folder,name).outputStream().use { out->out.write("P5\n${input.width} ${input.height}\n255\n".toByteArray(Charsets.US_ASCII));out.write(input.gray) }
+    }
+    fun metadata(input: Input)=mapOf("imageTimestampNs" to input.time,"frameTimestampNs" to input.frameTime,
+      "quaternion" to input.q.toList(),"dimensions" to listOf(input.width,input.height),
+      "focalLength" to listOf(input.fx,input.fy),"principalPoint" to listOf(input.cx,input.cy),"heightMeters" to input.measuredHeight)
+    image(source,"$id-reference.pgm");image(current,"$id-current.pgm")
+    val report=mapOf("reference" to metadata(source),"current" to metadata(current),"region" to current.region.report(),
+      "fit" to assessment.report(),"pairs" to pairs.map { listOf(it.second.x,it.second.z,it.third.x,it.third.z,points[it.first].x,points[it.first].y) },
+      "referenceImage" to "$id-reference.pgm","currentImage" to "$id-current.pgm","localOnly" to true,"autonomousMotionAuthorized" to false)
+    File(folder,"$id.json").writeText(JSONObject(report).toString())
+    evidenceFile="floor-flow-evidence/$id.json"
   }
 }
