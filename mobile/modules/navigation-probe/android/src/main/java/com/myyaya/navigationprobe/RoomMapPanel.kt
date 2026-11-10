@@ -171,12 +171,14 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private fun chooseFloorFlowRegion() {
     taughtRoutes?.holdForUi()
     AlertDialog.Builder(activity).setTitle("地板视觉取样区")
-      .setItems(arrayOf("画面下部（原范围）","靠下中央（避开边缘物品）","自定义黄框","查看完整取样画面")) { _,i ->
+      .setItems(arrayOf("中下部（行驶试验建议）","画面下部（原范围）","靠下中央（避开边缘物品）","自定义黄框","查看完整取样画面","重设视觉起点（不接续原位置）")) { _,i ->
         when(i) {
-          0->applyFloorFlowRegion(FloorFlowRegion())
-          1->applyFloorFlowRegion(FloorFlowRegion.LOWER_CENTER)
-          2->editFloorFlowRegion()
-          3->showFloorFlowPreview()
+          0->applyFloorFlowRegion(FloorFlowRegion.TRAVEL_CENTER)
+          1->applyFloorFlowRegion(FloorFlowRegion())
+          2->applyFloorFlowRegion(FloorFlowRegion.LOWER_CENTER)
+          3->editFloorFlowRegion()
+          4->showFloorFlowPreview()
+          5->{ taughtRoutes?.stop("重新设定视觉起点");floorFlow.reset();toast("下一有效帧作为新的视觉起点，原位置不接续；不会行驶。") }
         }
       }.setNegativeButton("取消",null).show()
   }
@@ -324,6 +326,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     val flowText=if(flow["status"]=="FLOOR_FLOW_ESTIMATE") {
       val dx=(flow["cameraDxMeters"] as Number).toDouble();val dz=(flow["cameraDzMeters"] as Number).toDouble()
       "地板视觉：手机相对参考约%.1f厘米（诊断，不代表通行许可）".format(hypot(dx,dz)*100)
+    } else if(flow["originContinuity"]==false) {
+      "地板视觉：此前失跟，累计位置未知。当前仅跟踪新片段，可重新设视觉起点（诊断）。"
     } else if(flow["status"]=="FLOOR_FLOW_REJECTED") {
       val reason=when(flow["fitReason"]) {
         "LOW_INLIER_RATIO"->"地板一致特征比例不足"

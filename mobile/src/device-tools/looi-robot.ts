@@ -167,6 +167,10 @@ export function markLooiDriveControlNeedsRevalidation(reason: string): void {
 export function handleLooiRobotTransportDisconnected(error?: unknown): void {
   const message = error instanceof Error ? error.message : error ? String(error) : "BLE link disconnected";
   const previousDirection = state.activeDirection;
+  // Pending head/gesture work belongs to this connection, even if reconnection is quick.
+  motionSequenceAbortGeneration += 1;
+  try { stopNativeHeadPulse?.(); } catch { /* Disconnect cleanup must finish even if the native bridge is gone. */ }
+  clearContinuousMotionDeadman();
   state.driveControlRevalidationRequired = true;
   state.driveControlRevalidationReason = "transport-disconnected";
   state.motionGeneration += 1;
@@ -1051,8 +1055,11 @@ export async function performLooiCharacterReaction(reaction: LooiCharacterReacti
         break;
       case "annoyed": {
         const robot = await getRobot();
+        assertPendingMotionCurrent(sequenceToken, robot);
         await robot.setHead("down");
         await delay(300);
+        assertPendingMotionCurrent(sequenceToken, robot);
+        assertNavigationControl();
         await robot.setHead("center");
         assertMotionSequenceActive(sequenceToken, "character-annoyed", "head");
         break;

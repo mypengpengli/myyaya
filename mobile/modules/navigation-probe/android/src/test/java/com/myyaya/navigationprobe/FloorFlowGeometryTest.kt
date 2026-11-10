@@ -55,4 +55,12 @@ class FloorFlowGeometryTest {
     assertEquals("ROTATION_OUT_OF_RANGE",FloorFlowGeometry.assess(a,b).reason)
     assertEquals("INSUFFICIENT_CORRESPONDENCES",FloorFlowGeometry.assess(a.take(4),a.take(4)).reason)
   }
+  @Test fun acceptedModelIdentifiesWhichTracksCanBecomeTheNextKeyframe() {
+    val e=FloorFlowGeometry.Estimate(.01,-.03,1.01,.01,30,1.0,.001)
+    val a=FloorFlowGeometry.Point(.1,-.3)
+    val x=a.x-e.dx;val z=a.z-e.dz
+    val b=FloorFlowGeometry.Point(e.scale*(cos(e.angle)*x-sin(e.angle)*z),e.scale*(sin(e.angle)*x+cos(e.angle)*z))
+    assertTrue(FloorFlowGeometry.isInlier(a,b,e))
+    assertFalse(FloorFlowGeometry.isInlier(a,FloorFlowGeometry.Point(b.x+.01,b.z),e))
+  }
 }

@@ -7,6 +7,10 @@ import kotlin.random.Random
 internal object FloorFlowGeometry {
   data class Point(val x: Double,val z: Double)
   data class Estimate(val dx: Double,val dz: Double,val scale: Double,val angle: Double,val inliers: Int,val ratio: Double,val residual: Double)
+  fun isInlier(a: Point,b: Point,e: Estimate): Boolean {
+    val x=a.x-e.dx;val z=a.z-e.dz;val c=cos(e.angle)*e.scale;val s=sin(e.angle)*e.scale
+    return hypot(c*x-s*z-b.x,s*x+c*z-b.z)<=.004
+  }
   data class Assessment(val reason: String,val estimate: Estimate?=null,val inliers: Int=0,val correspondences: Int=0,
     val scale: Double?=null,val angle: Double?=null,val residual: Double?=null) {
     fun report(): Map<String,Any?> = mapOf("fitReason" to reason,"inliers" to inliers,"correspondences" to correspondences,

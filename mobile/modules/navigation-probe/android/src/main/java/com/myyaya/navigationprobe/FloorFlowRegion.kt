@@ -10,5 +10,8 @@ internal data class FloorFlowRegion(val left: Float=.05f,val top: Float=.67f,val
     right*width,bottom*height,left*width,bottom*height)
   fun report()=mapOf("left" to left,"top" to top,"right" to right,"bottom" to bottom,
     "coordinateFrame" to "unrotated-cpu-image-normalized","floorVerified" to false)
-  companion object { val LOWER_CENTER=FloorFlowRegion(.3f,.8f,.88f,.95f) }
+  companion object {
+    val LOWER_CENTER=FloorFlowRegion(.3f,.8f,.88f,.95f)
+    val TRAVEL_CENTER=FloorFlowRegion(.3f,.65f,.88f,.82f)
+  }
 }

@@ -44,4 +44,17 @@ class NavigationPoseLockTest {
     assertEquals(.054f,lock.report()["heightDeltaMeters"] as Float,.00001f)
     assertFalse(lock.isLocked)
   }
+  @Test fun disconnectionInvalidatesTheMinimumEvenWithoutVisiblePoseChange() {
+    val lock=locked()
+    assertFalse(lock.observe(p,.1f,3000,false,1))
+    assertEquals("CONNECTION_CHANGED",lock.report()["state"])
+    assertFalse(lock.observe(p,.1f,5000,true,2))
+    lock.begin(6000,2);assertFalse(lock.observe(p,.1f,6800,true,2));assertTrue(lock.observe(p,.1f,7400,true,2))
+  }
+  @Test fun reconnectBetweenCameraFramesStillRequiresManualPoseConfirmation() {
+    val lock=locked()
+    // The camera sees connected=true both times; the transport revision exposes the intervening drop.
+    assertFalse(lock.observe(p,.1f,3000,true,2))
+    assertFalse(lock.isLocked);assertFalse(lock.observe(p,.1f,4000,true,2))
+  }
 }

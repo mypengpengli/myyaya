@@ -80,7 +80,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   private fun fixHead() {
     check(follower?.phase !in listOf("FOLLOWING","FACING_USER")) { "请先停止复走" }
     AlertDialog.Builder(activity).setTitle("保持最低导航姿态")
-      .setMessage("先将脖子放到最低，确认后摄平视前方且能看到近处地面。默认保持你手动调整的位置，不发送回正或抬头指令。也可尝试社区协议的降头动作，之后仍需核对实际画面。")
+      .setMessage("断连或重连后脖子可能抬起，请先手动压回最低，确认后摄平视前方且能看到近处地面。保持当前位置不会发回正或抬头指令。也可尝试社区降头动作，之后仍需核对画面。")
       .setNegativeButton("取消",null).setPositiveButton("保持当前位置") { _,_->prepareHead(false) }
       .setNeutralButton("降到最低") { _,_->prepareHead(true) }.show()
   }
@@ -89,9 +89,9 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
       check(current().tracking && motor.isConnected()) { "请先开始扫描、恢复定位并连接底座" }
       motor.stop("固定导航姿态前停止")
       headFixed=false;poseLock.reset();backChecked=false;turnChecked=false
-      if (!lower) { poseLock.begin(SystemClock.elapsedRealtime());message(poseLock.reason) }
+      if (!lower) { poseLock.begin(SystemClock.elapsedRealtime(),motor.connectionRevision);message(poseLock.reason) }
       else motor.request("head_down") { ok,s->
-        if(ok) { poseLock.begin(SystemClock.elapsedRealtime());message("已发送降头指令，确认后摄平视；保持最低位置，不自动回正。") }
+        if(ok) { poseLock.begin(SystemClock.elapsedRealtime(),motor.connectionRevision);message("已发送降头指令，确认后摄平视；保持最低位置，不自动回正。") }
         else message("降头未完成：$s")
       }
     }.onFailure { message(it.message ?: "无法固定导航姿态") }
@@ -218,9 +218,10 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   @Synchronized fun frame(session: String,camera: RigidPose?,actualFloor: Boolean,clearance: RouteClearance) {
     val now=SystemClock.elapsedRealtime();currentSession=session
     val p=camera?.let { runCatching { RoutePose.fromCamera(it,mount.right,mount.alongView) }.getOrNull() }
-    val fixed=poseLock.observe(p,camera?.t?.get(1),now)
+    val fixed=poseLock.observe(p,camera?.t?.get(1),now,motor.isConnected(),motor.connectionRevision)
     if(!headFixed && fixed) notice=poseLock.reason
     if(headFixed && !fixed && !poseLock.isLocked) { backChecked=false;turnChecked=false;notice=poseLock.reason }
+    if(!fixed && poseLock.report()["state"]=="CONNECTION_CHANGED") notice=poseLock.reason
     headFixed=fixed
     val o=RouteObservation(p,now,p!=null,actualFloor,clearance,motor.isConnected(),fixed)
     observation=o;teacher?.observe(p,p!=null && fixed)

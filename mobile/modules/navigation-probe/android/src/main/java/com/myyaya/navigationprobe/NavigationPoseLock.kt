@@ -10,13 +10,19 @@ internal class NavigationPoseLock {
   private var candidateHeight=0f
   @Volatile private var locked: RoutePose?=null
   private var lockedHeight=0f
+  private var boundConnection: Long?=null
   @Volatile private var diagnostics: Map<String,Any?> = mapOf("state" to "WAITING")
   @Volatile var reason="请将脖子降到最低并确认后摄平视，再保持当前姿态";private set
   val isLocked get()=locked!=null
-  @Synchronized fun reset() { readyAt=0;stableAt=0;candidate=null;locked=null;diagnostics=mapOf("state" to "WAITING") }
+  @Synchronized fun reset() { readyAt=0;stableAt=0;candidate=null;locked=null;boundConnection=null;diagnostics=mapOf("state" to "WAITING") }
   fun report()=diagnostics
-  @Synchronized fun begin(now: Long) { reset();readyAt=now+800;reason="保持当前最低姿态，等待稳定；不会自动回正或抬头" }
-  @Synchronized fun observe(pose: RoutePose?,height: Float?,now: Long): Boolean {
+  @Synchronized fun begin(now: Long,connectionRevision: Long=0) { reset();boundConnection=connectionRevision;readyAt=now+800;reason="保持当前最低姿态，等待稳定；不会自动回正或抬头" }
+  @Synchronized fun observe(pose: RoutePose?,height: Float?,now: Long,connected: Boolean=true,connectionRevision: Long=0): Boolean {
+    if(boundConnection?.let { !connected || it!=connectionRevision }==true) {
+      reset();diagnostics=mapOf("state" to "CONNECTION_CHANGED","connectionRevision" to connectionRevision)
+      reason="底座断连或重连后可能抬头，请手动压回最低，再选择保持当前位置"
+      return false
+    }
     if (pose==null || height==null || !height.isFinite()) { diagnostics=mapOf("state" to "TRACKING_MISSING");return false }
     locked?.let {
       val pitch=wrapYaw(pose.pitch-it.pitch);val roll=wrapYaw(pose.roll-it.roll);val dy=height-lockedHeight

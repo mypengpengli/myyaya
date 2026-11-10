@@ -17,6 +17,7 @@ const fed9 = load("src/device-tools/fed9-sensors.ts");
 const writes = [];
 let notify;
 let headObservationEntered, finishHeadBaseline;
+let onHeadWrite;
 const robot = load("src/device-tools/looi-robot.ts", {
   "@sourcebug/looi-sdk": sdk,
   "./fed9-sensors": fed9,
@@ -32,7 +33,7 @@ robot.configureLooiRobotTransport({
   connect: async () => {}, disconnect: async () => {},
   hasCharacteristic: (key) => key === "drive" || key === "dockNotify",
   startNotifications: async (key, callback) => { if (key === "dockNotify") notify = callback; },
-  write: async (key, payload) => { writes.push({ key, payload }); },
+  write: async (key, payload) => { writes.push({ key, payload });if(key==="head") onHeadWrite?.(payload); },
 });
 await robot.connectLooiRobot();
 notify({ characteristic: "dockNotify", hex: "0101010101", bytes: new Uint8Array([1, 1, 1, 1, 1]) });
@@ -74,5 +75,21 @@ await robot.stopLooiMotion("cancel-during-head-sensor-baseline");
 finishHeadBaseline();
 await assert.rejects(delayedHead, /取消/);
 assert.equal(writes.filter((w) => w.key === "head").length, headWritesBefore, "STOP during the sensor baseline prevents a late head write");
+const reconnectEntered=new Promise((resolve)=>{headObservationEntered=resolve;});
+const staleHead=robot.setLooiHead("up",undefined,true);
+const staleHeadRejected=assert.rejects(staleHead,/取消/);
+await reconnectEntered;
+const beforeReconnectHeads=writes.filter(w=>w.key==="head").length;
+robot.handleLooiRobotTransportDisconnected("test link loss");
+await robot.connectLooiRobot();finishHeadBaseline();await staleHeadRejected;
+assert.equal(writes.filter(w=>w.key==="head").length,beforeReconnectHeads,"a pending head command cannot cross a disconnect/reconnect epoch");
+const lowered=new Promise((resolve)=>{onHeadWrite=(payload)=>{if(payload==="ff") resolve();};});
+const annoyed=robot.performLooiCharacterReaction("annoyed");
+const annoyedRejected=assert.rejects(annoyed,/取消|interrupted/);
+await lowered;onHeadWrite=undefined;
+const beforeReactionDisconnect=writes.filter(w=>w.key==="head").length;
+robot.handleLooiRobotTransportDisconnected("gesture link loss");
+await robot.connectLooiRobot();await annoyedRejected;
+assert.equal(writes.filter(w=>w.key==="head").length,beforeReactionDisconnect,"a cancelled reaction never sends its delayed center frame after reconnect");
 await robot.disconnectLooiRobot();
 console.log("Navigation motor ownership, real BLE pulse and cancellation tests passed");

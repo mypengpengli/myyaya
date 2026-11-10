@@ -10,13 +10,17 @@ internal class RouteMotorGateway(val token: String=UUID.randomUUID().toString(),
   private val handler=Handler(Looper.getMainLooper())
   private var sequence=0
   @Volatile var connected=false;private set
+  @Volatile var connectionRevision=0L;private set
   @Volatile var foreground=true;private set
   @Volatile private var stateAt=0L
   @Volatile var voiceStopReady=false;private set
   @Volatile private var pending: Pair<Int,(Boolean,String)->Unit>?=null
   val busy get()=pending!=null
   fun isConnected()=connected && foreground && SystemClock.elapsedRealtime()-stateAt<=1500
-  fun state(connected: Boolean,voiceStop: Boolean) { this.connected=connected;voiceStopReady=voiceStop;stateAt=SystemClock.elapsedRealtime() }
+  @Synchronized fun state(connected: Boolean,voiceStop: Boolean) {
+    if(this.connected!=connected) connectionRevision++
+    this.connected=connected;voiceStopReady=voiceStop;stateAt=SystemClock.elapsedRealtime()
+  }
   @Synchronized fun request(action: String,durationMs: Int=0,callback: (Boolean,String)->Unit={_,_->}) {
     if (!foreground || pending!=null) { callback(false,"控制通道未就绪");return }
     require(action in setOf("connect","head_down","back","left","right","calibration_back"))
