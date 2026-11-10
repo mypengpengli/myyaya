@@ -12,6 +12,7 @@ export type NavigationProbeStatus = {
 
 type Native = {
   getStatus(): Promise<NavigationProbeStatus>;
+  analyzeUprightReference(id: string,height: number,width: number): Promise<Record<string, unknown>>;
   captureMonocularFrame(): Promise<{ requestId: string; inputUri: string; imageDimensions: number[]; [key: string]: unknown }>;
   showMonocularFrame(id: string, data: string, inferenceMs: number): Promise<void>;
   exportMonocularBenchmark(): Promise<{ directory: string; files: string[] }>;
@@ -31,6 +32,7 @@ function getNative(): Native {
   return native ??= requireNativeModule<Native>("NavigationProbe");
 }
 export const getNavigationProbeStatus = () => getNative().getStatus();
+export const analyzeNativeUprightReference = (id: string,height: number,width: number) => getNative().analyzeUprightReference(id,height,width);
 export const captureNativeMonocularFrame = () => getNative().captureMonocularFrame();
 export const showNativeMonocularFrame = (id: string,data: string,inferenceMs: number) => getNative().showMonocularFrame(id,data,inferenceMs);
 export const exportNativeMonocularBenchmark = () => getNative().exportMonocularBenchmark();

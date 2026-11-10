@@ -21,7 +21,9 @@ export function startIntegrationControl() {
       let result;
       if (command.kind === "head_probe") result = await (await import("./head-protocol-probe")).runHeadProtocolProbe(command);
       else if (command.kind === "chat") result = await replyToCompanion(String(command.text).slice(0, 10000), new AbortController().signal);
-      else if (command.kind === "probe") result = command.mode === "monocular_depth"
+      else if (command.kind === "probe") result = command.mode === "upright_reference"
+        ? await (await import("./upright-reference-probe")).runUprightReferenceProbe(command.args)
+        : command.mode === "monocular_depth"
         ? await (await import("./monocular-depth-benchmark")).runMonocularDepthBenchmark()
         : command.mode === "monocular_live" ? await (await import("./monocular-live-probe")).runMonocularLiveProbe()
         : command.mode === "monocular_export" ? await (await import("../../modules/navigation-probe")).exportNativeMonocularBenchmark()

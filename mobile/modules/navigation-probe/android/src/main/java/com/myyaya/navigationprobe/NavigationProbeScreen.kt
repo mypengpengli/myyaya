@@ -110,6 +110,7 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
   private val monocular=MonocularSnapshot(host) { running && resumed && !isDestroyed && !isFinishing }
   fun captureMonocular(promise: expo.modules.kotlin.Promise)=monocular.request(promise)
   fun showMonocular(id: String,data: String,inferenceMs: Double)=monocular.show(id,data,inferenceMs)
+  fun analyzeUprightReference(id: String,height: Double,width: Double,promise: expo.modules.kotlin.Promise)=monocular.reference(id,height,width,promise)
 
   fun onCreate(savedInstanceState: Bundle?) {
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

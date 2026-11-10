@@ -20,6 +20,11 @@ class NavigationProbeModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("NavigationProbe")
     Events("onRouteMotion")
+    AsyncFunction("analyzeUprightReference") { id: String,height: Double,width: Double,promise: Promise ->
+      val screen=routeScreen;val activity=appContext.currentActivity
+      if(screen==null || activity==null) promise.reject("ERR_REFERENCE_SCREEN","请打开教路线相机并开始扫描",null)
+      else activity.runOnUiThread { screen.analyzeUprightReference(id,height,width,promise) }
+    }
     AsyncFunction("captureMonocularFrame") { promise: Promise ->
       val screen=routeScreen;val activity=appContext.currentActivity
       if(screen==null || activity==null) promise.reject("ERR_MONOCULAR_SCREEN","请打开教路线相机并开始扫描",null)
