@@ -107,6 +107,9 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
   private val datasets=ARSessionDataset(host)
   private var playbackName: String?=null
   private lateinit var datasetButton: Button
+  private val monocular=MonocularSnapshot(host) { running && resumed && !isDestroyed && !isFinishing }
+  fun captureMonocular(promise: expo.modules.kotlin.Promise)=monocular.request(promise)
+  fun showMonocular(id: String,data: String,inferenceMs: Double)=monocular.show(id,data,inferenceMs)
 
   fun onCreate(savedInstanceState: Bundle?) {
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -388,6 +391,7 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
   }
 
   private fun pauseCapture(reason: String) {
+    monocular.cancel()
     running = false
     breakPath = true
     // GL must stop accessing Session before pause/close or camera handover.
@@ -499,6 +503,7 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
   fun onDestroy() {
     if (destroyed) return
     destroyed=true
+    monocular.close()
     val old = session
     session = null
     io.execute { runCatching { old?.close() } }
@@ -606,6 +611,7 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
           return
         }
         if (frame.timestamp == 0L) return
+        monocular.offer(frame)
         vertices.position(0); uv.position(0)
         frame.transformCoordinates2d(Coordinates2d.OPENGL_NORMALIZED_DEVICE_COORDINATES, vertices, Coordinates2d.TEXTURE_NORMALIZED, uv)
         GLES20.glUseProgram(program)

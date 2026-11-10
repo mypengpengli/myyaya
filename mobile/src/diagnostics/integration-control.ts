@@ -23,6 +23,8 @@ export function startIntegrationControl() {
       else if (command.kind === "chat") result = await replyToCompanion(String(command.text).slice(0, 10000), new AbortController().signal);
       else if (command.kind === "probe") result = command.mode === "monocular_depth"
         ? await (await import("./monocular-depth-benchmark")).runMonocularDepthBenchmark()
+        : command.mode === "monocular_live" ? await (await import("./monocular-live-probe")).runMonocularLiveProbe()
+        : command.mode === "monocular_export" ? await (await import("../../modules/navigation-probe")).exportNativeMonocularBenchmark()
         : command.mode === "media" ? await (await import("../artifacts/media-jobs")).probeMediaJobs() : await probeModelConnection(String(command.mode));
       else if (command.kind === "status") result = chineseVoice.getSnapshot();
       else {

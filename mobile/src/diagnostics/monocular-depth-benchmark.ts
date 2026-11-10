@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system/legacy";
 import * as Crypto from "expo-crypto";
 import { OnnxInference, base64ToTypedArray } from "@siteed/sherpa-onnx.rn";
-import { getNavigationProbeStatus } from "../../modules/navigation-probe";
+import { getNavigationProbeStatus, exportNativeMonocularBenchmark } from "../../modules/navigation-probe";
 import { holdAmbientMotionFor } from "../core/ambient-motion";
 import { holdSocialAttentionMotionFor } from "../core/social-attention";
 
@@ -53,7 +53,8 @@ export async function runMonocularDepthBenchmark() {
       const sampledValues = Array.from({ length: 256 }, (_, i) => values[Math.floor(i / 16) * 16 * 252 + (i % 16) * 16]);
       samples.push({ name, bridgeInferenceMs, min, max, outputBytes: values.length, sha256Base64, sampledValues });
     }
-    return { model: "DepthAnythingV2-small-int8-256", loadMs, threads: 4, samples,
+    const exported = await exportNativeMonocularBenchmark();
+    return { model: "DepthAnythingV2-small-int8-256", loadMs, threads: 4, samples, exported,
       relativeDepthOnly: true, metricDepthValidated: false, autonomousMotionAuthorized: false };
   } finally {
     await session.release();

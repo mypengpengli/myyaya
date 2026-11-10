@@ -28,7 +28,7 @@ function rig(mode = "ok") {
         },
       },
     },
-    "../../modules/navigation-probe": { getNavigationProbeStatus: async () => ({ dataDirectory: "/test" }) },
+    "../../modules/navigation-probe": { getNavigationProbeStatus: async () => ({ dataDirectory: "/test" }), exportNativeMonocularBenchmark: async () => ({ directory: "/test/exports", files: [] }) },
     "../core/ambient-motion": { holdAmbientMotionFor: () => {} },
     "../core/social-attention": { holdSocialAttentionMotionFor: () => {} },
   };

@@ -20,6 +20,39 @@ class NavigationProbeModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("NavigationProbe")
     Events("onRouteMotion")
+    AsyncFunction("captureMonocularFrame") { promise: Promise ->
+      val screen=routeScreen;val activity=appContext.currentActivity
+      if(screen==null || activity==null) promise.reject("ERR_MONOCULAR_SCREEN","请打开教路线相机并开始扫描",null)
+      else activity.runOnUiThread { screen.captureMonocular(promise) }
+    }
+    AsyncFunction("showMonocularFrame") { id: String,data: String,inferenceMs: Double,promise: Promise ->
+      val screen=routeScreen;val activity=appContext.currentActivity
+      if(screen==null || activity==null) promise.reject("ERR_MONOCULAR_SCREEN","相机界面已关闭",null)
+      else activity.runOnUiThread {
+        runCatching { screen.showMonocular(id,data,inferenceMs) }
+          .onSuccess { promise.resolve(null) }.onFailure { promise.reject("ERR_MONOCULAR_SHOW",it.message,it) }
+      }
+    }
+    AsyncFunction("exportMonocularBenchmark") {
+      val context=requireNotNull(appContext.reactContext)
+      val source=File(context.cacheDir,"monocular-benchmark")
+      val destination=File(context.getExternalFilesDir("navigation-probe") ?: File(context.filesDir,"navigation-probe"),"monocular-outputs").apply { mkdirs() }
+      val sizes=mapOf("can_before.depth" to 63504,"can_after.depth" to 63504,"turn_before.depth" to 63504,"turn_after.depth" to 63504,
+        "live.depth" to 63504,"live.rgb" to 196608)
+      val copied=ArrayList<String>()
+      for((name,size) in sizes) {
+        val input=File(source,name)
+        if(input.isFile && input.length()==size.toLong()) { input.copyTo(File(destination,name),true);copied.add(name) }
+      }
+      for(name in listOf("live.jpg","live.json")) {
+        val input=File(source,name)
+        val limit=if(name.endsWith("jpg")) 2_000_000L else 8_000L
+        if(input.isFile && input.length() in 1L..limit) {
+          input.copyTo(File(destination,name),true);copied.add(name)
+        }
+      }
+      mapOf("directory" to destination.absolutePath,"files" to copied)
+    }
     AsyncFunction("listTaughtRoutes") {
       val context=requireNotNull(appContext.reactContext)
       val routes: List<Map<String,Any>> = File(context.filesDir,"taught-routes").listFiles()?.filter { it.extension=="yayaroute" && it.length() in 32..64000 }
