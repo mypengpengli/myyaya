@@ -39,6 +39,9 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   private var lastStop=0L
   private var lastIssued=0L
   private var lastUi=0L
+  @Volatile private var field: OperatorExploration?=null
+  @Volatile private var fieldSample: OperatorExploration.Sample?=null
+  @Volatile private var savedFieldResult: Map<String,Any?>?=null
   @Volatile private var notice="先连接底座并固定头部；教路线前请确认真实平整地面。"
   private lateinit var status: TextView
   fun buildView()=android.widget.LinearLayout(activity).apply {
@@ -50,9 +53,14 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   private fun menu() {
     holdForUi()
     val items=arrayOf("连接保存的底座","固定最低导航姿态（不回正）","设置镜头到底座偏移","开始教路线","完成并保存路线","选择已教路线",
-      "短后退方向校验","短左转方向校验","开始复走","移开障碍后继续","停止","短右转方向校验")
+      "短后退方向校验","短左转方向校验","开始复走","移开障碍后继续","停止","短右转方向校验","空地分段采集（450毫秒）")
     AlertDialog.Builder(activity).setTitle("已教路线导航 · 真实平整地面试验").setItems(items) { _,i->
-      runCatching { when(i) {
+      runCatching {
+        if(i !in listOf(10,12)) {
+          check(field?.moving!=true) { "请等本段停止，或点击停止" }
+          field?.cancel("OTHER_OPERATION")
+        }
+        when(i) {
         0->motor.request("connect") { ok,s->message(if(ok && motor.isConnected()) "底座已连接" else "连接未完成：$s") }
         1->fixHead()
         2->editMount()
@@ -65,6 +73,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
         9->resumeFollowing()
         10->stop("用户停止")
         11->calibrate("right")
+        12->confirmFieldSegment()
       } }.onFailure { message(it.message ?: "操作未完成") }
     }.setNegativeButton("返回",null).show()
   }
@@ -150,6 +159,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     }
   }
   private fun confirmCalibration(direction: String,ms: Int) {
+    runCatching {
     val o=requireFloor();check(o.clearance!=RouteClearance.OBSTACLE) { "已看到车前障碍/落差，请先移开并重新观察" }
     check(motor.isConnected() && !motor.busy && teacher==null && follower?.phase !in listOf("FOLLOWING","FACING_USER")) { "请连接底座并停止当前操作" }
     check(calibration==null) { "请等上一轮动作位姿测量完成" }
@@ -158,13 +168,28 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
       .setNegativeButton("取消",null).setPositiveButton("空地已确认，做一次") { _,_->runCatching {
         beginCountdown(direction,ms)
       }.onFailure { message(it.message ?: "无法准备标定") } }.show()
+    }.onFailure { message(it.message ?: "标定条件已变化，请重新观察") }
+  }
+  private fun confirmFieldSegment() {
+    check(!motor.busy && calibration==null && teacher==null && follower?.phase !in listOf("FOLLOWING","FACING_USER")) { "请先停止其他动作" }
+    check(field?.moving!=true) { "请等待本段停稳" }
+    val s=requireNotNull(fieldSample) { "请先开始实时扫描和录像" }
+    check(SystemClock.elapsedRealtime()-s.at in 0..500 && s.pose!=null && !s.playback && s.recording && motor.isConnected()) { "请开始实时相机/IMU录制并连接底座" }
+    val newBatch=field?.phase!="READY"
+    val number=if(newBatch) 1 else field!!.segments+1
+    AlertDialog.Builder(activity).setTitle("空地采集 · 第${number}/3段")
+      .setMessage("请确认实际地板平整、脖子最低，后摄方向约50厘米空地且线缆有余量。三声提示后朝后摄方向行驶450毫秒并停止，记录相机与IMU；每段停稳后需再次选择下一段，最多三段。\n本项使用人工确认的场地，地图高度漂移仅作记录；仍监测倾斜、定位、断连和已见障碍。不启动自主导航，也不把未知深度当空地。")
+      .setNegativeButton("取消",null).setPositiveButton("场地已确认，采集一段") { _,_->runCatching {
+        if(newBatch) field=OperatorExploration(requireNotNull(fieldSample))
+        beginCountdown("back",450,true)
+      }.onFailure { message(it.message ?: "采集条件未满足") } }.show()
   }
   private fun cancelCountdown() {
     countdown?.cancel();countdown=null
     val dialog=countdownDialog;countdownDialog=null;dialog?.dismiss()
     countdownTone?.release();countdownTone=null
   }
-  private fun beginCountdown(direction: String,ms: Int) {
+  private fun beginCountdown(direction: String,ms: Int,operatorTrial: Boolean=false) {
     cancelCountdown()
     val handler=Handler(Looper.getMainLooper())
     countdownTone=runCatching { ToneGenerator(AudioManager.STREAM_MUSIC,75) }.getOrNull()
@@ -178,6 +203,14 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     },{
       cancelCountdown()
       runCatching {
+        if(operatorTrial) {
+          check(motor.isConnected() && !motor.busy && calibration==null) { "连接或控制状态已变化" }
+          val trial=requireNotNull(field);trial.issue(SystemClock.elapsedRealtime())
+          motor.request("calibration_back",450) { ok,s->
+            trial.acknowledge(ok,SystemClock.elapsedRealtime())
+            message(if(ok) "本段已限时停止，正在记录停稳后的画面。" else "采集动作未完成：$s")
+          }
+        } else {
         val current=requireFloor()
         check(current.clearance!=RouteClearance.OBSTACLE && motor.isConnected() && !motor.busy && calibration==null) { "姿态、障碍或连接已变化，请重新确认" }
         val trial=PulseMeasurementTrial(direction,ms,current.pose!!,SystemClock.elapsedRealtime())
@@ -191,6 +224,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
         motor.request(action,ms) { ok,s->
           synchronized(this) { if(calibration===trial) trial.acknowledge(ok,SystemClock.elapsedRealtime()) }
           message(if(ok) "动作已停止，正在等待位姿稳定并记录余移。" else "校验动作未完成：$s")
+        }
         }
       }.onFailure { message(it.message ?: "倒计时后条件已变化，未开始动作") }
     }).also { it.start() }
@@ -212,11 +246,11 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   }
   @Synchronized fun stop(reason: String) {
     activity.runOnUiThread { cancelCountdown() }
-    teacher=null;calibration=null;follower?.cancel();motor.stop(reason);message(reason)
+    teacher=null;calibration=null;field?.cancel(reason);follower?.cancel();motor.stop(reason);message(reason)
   }
   @Synchronized fun pause() {
     activity.runOnUiThread { cancelCountdown() }
-    teacher?.observe(null,false);follower?.pause("界面或定位已暂停");calibration=null;headFixed=false;poseLock.reset()
+    teacher?.observe(null,false);follower?.pause("界面或定位已暂停");calibration=null;field?.cancel("CAMERA_PAUSED");fieldSample=null;headFixed=false;poseLock.reset()
     backChecked=false;turnChecked=false;motor.stop("扫描已暂停")
   }
   @Synchronized fun holdForUi() {
@@ -225,6 +259,23 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   }
   fun basePose(camera: RigidPose)=RoutePose.fromCamera(camera,mount.right,mount.alongView)
   fun previewPoints()=selected?.points ?: emptyList()
+  /** Live camera session coordinates, independent of map anchoring and floor-plane drift. */
+  @Synchronized fun operatorFrame(camera: RigidPose?,session: String,recording: Boolean,playback: Boolean,hazard: Boolean) {
+    val now=SystemClock.elapsedRealtime()
+    val pose=camera?.let { runCatching { basePose(it) }.getOrNull() }
+    val sample=OperatorExploration.Sample(now,pose,camera?.t?.get(1),session,motor.isConnected(),motor.connectionRevision,recording,playback,hazard)
+    fieldSample=sample
+    field?.let { trial ->
+      val moving=trial.moving;trial.observe(sample,now)
+      if(moving && trial.phase=="STOPPED") { motor.stop("空地采集中断：${trial.reason}");message("采集已停止：${trial.reason}") }
+      trial.result?.let { result -> if(result!==savedFieldResult) {
+        savedFieldResult=result
+        val record=result+mapOf("atEpochMs" to System.currentTimeMillis(),"recordingSession" to session)
+        activity.getSharedPreferences("navigation-field-exploration",0).edit().putString("latest",org.json.JSONObject(record).toString()).apply()
+        message("第${trial.segments}/3段已停止并记录；${if(trial.phase=="COMPLETE") "本轮采集结束" else "观察新画面后可选择下一段"}。地图数值仅作诊断。")
+      } }
+    }
+  }
   @Synchronized fun frame(session: String,camera: RigidPose?,actualFloor: Boolean,clearance: RouteClearance) {
     val now=SystemClock.elapsedRealtime();currentSession=session
     val p=camera?.let { runCatching { RoutePose.fromCamera(it,mount.right,mount.alongView) }.getOrNull() }
@@ -294,7 +345,8 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   fun report(): Map<String,Any?> = mapOf("phase" to (if(teacher!=null) "TEACHING" else follower?.phase ?: "IDLE"),
     "routeName" to (follower?.route?.name ?: selected?.name),"waypoint" to follower?.waypoint,"headFixed" to headFixed,
     "backDirectionChecked" to backChecked,"turnDirectionChecked" to turnChecked,"connected" to motor.isConnected(),
-    "mountMeasurement" to mountSettings.report(),"poseLock" to poseLock.report(),"pulseMeasurementRunning" to (calibration!=null),"lastPulseMeasurement" to lastMeasurement,"reason" to (follower?.reason ?: notice))
+    "mountMeasurement" to mountSettings.report(),"poseLock" to poseLock.report(),"pulseMeasurementRunning" to (calibration!=null),"lastPulseMeasurement" to lastMeasurement,
+    "operatorExploration" to field?.report(),"reason" to (follower?.reason ?: notice))
   companion object {
     fun referenceKey(map: RoomMapData): String {
       if(map.referenceJpeg.isEmpty() || map.imageFromMap==null) return ""
