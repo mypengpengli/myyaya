@@ -31,6 +31,14 @@ class PlaneScaleAuditTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             estimate(self.image(), matrix, .21, .297)
 
+    def test_relative_motion_uses_the_same_rectangle_frame(self):
+        obj = np.array([[0., 0, 0], [.21, 0, 0], [.21, .297, 0], [0, .297, 0]])
+        rotation, _ = cv2.Rodrigues(np.array([[1., 0, 0], [0, 0, 1.], [0, -1., 0]]))
+        after, _ = cv2.projectPoints(obj, rotation, np.array([-.105, .1, .525]), self.matrix, None)
+        before_position = estimate(self.image(), self.matrix, .21, .297)['selected']['cameraPositionInRectangleMeters']
+        after_position = estimate(after.reshape(-1, 2), self.matrix, .21, .297)['selected']['cameraPositionInRectangleMeters']
+        self.assertAlmostEqual(.075, np.linalg.norm(np.array(after_position) - before_position), places=5)
+
 
 if __name__ == '__main__':
     unittest.main()

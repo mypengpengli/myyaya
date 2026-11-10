@@ -39,7 +39,8 @@ def estimate(corners, camera_matrix, width, length, max_rms_pixels=2.0):
         usable = bool(front and normal[1] > np.cos(np.deg2rad(20)) and 0.03 <= height <= 0.5
                       and rms <= max_rms_pixels and float(errors.max()) <= max_rms_pixels * 2)
         candidates.append(dict(heightMeters=height, rmsPixels=rms, maxErrorPixels=float(errors.max()),
-                               normalCamera=normal.tolist(), positiveDepth=front, geometricFitValid=usable))
+                               normalCamera=normal.tolist(), cameraPositionInRectangleMeters=(-basis.T @ translation.ravel()).tolist(),
+                               positiveDepth=front, geometricFitValid=usable))
     valid = sorted([c for c in candidates if c['geometricFitValid']], key=lambda c: c['rmsPixels'])
     return dict(geometricFitValid=bool(valid), selected=valid[0] if valid else None, candidates=candidates,
                 paperDimensionsMeters=[width, length], maxRmsPixels=max_rms_pixels,
