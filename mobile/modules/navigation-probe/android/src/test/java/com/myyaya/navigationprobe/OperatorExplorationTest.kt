@@ -76,4 +76,12 @@ class OperatorExplorationTest {
     val bad=OperatorExploration(sample());try { bad.issue(1000,"back_step",400);fail() } catch(_:IllegalArgumentException) {}
     assertEquals(0,bad.segments)
   }
+  @Test fun localMissionRetainsOneLargerBudgetAndBoundedTurnPulses() {
+    val f=OperatorExploration(sample(),80,600_000)
+    repeat(4) { i -> val t=1000L+i*2000;f.observe(sample(t),t);f.issue(t,"right_step",100);f.acknowledge(true,t+100)
+      for(j in 200L..1800L step 100) f.observe(sample(t+j),t+j) }
+    assertEquals("READY",f.phase);assertEquals(4,f.segments);assertEquals(100,f.result!!["durationMs"])
+    f.cancel("USER_STOP");try { f.issue(10_000,"back_step",250);fail() } catch(_: IllegalStateException) {}
+    assertEquals(4,f.segments)
+  }
 }

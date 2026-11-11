@@ -62,7 +62,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   private fun menu() {
     holdForUi()
     val items=arrayOf("连接保存的底座","固定最低导航姿态（不回正）","设置镜头到底座偏移","开始教路线","完成并保存路线","选择已教路线",
-      "短后退方向校验","短左转方向校验","开始复走","移开障碍后继续","停止","短右转方向校验","空地分段采集（450毫秒）","左转观察采集（350毫秒）","右转观察采集（350毫秒）")
+      "短后退方向校验","短左转方向校验","开始复走","移开障碍后继续","停止","短右转方向校验","空地分段采集（450毫秒）","左转观察采集（350毫秒）","右转观察采集（350毫秒）","绕障到前方40厘米（局部试验）")
     AlertDialog.Builder(activity).setTitle("已教路线导航 · 真实平整地面试验").setItems(items) { _,i->
       runCatching {
         if(i !in listOf(10,12,13,14)) {
@@ -85,6 +85,9 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
         12->confirmFieldSegment()
         13->confirmFieldSegment("left")
         14->confirmFieldSegment("right")
+        15->AlertDialog.Builder(activity).setTitle("局部目标绕障")
+          .setMessage("以后摄方向为前，目标是当前底座前方40厘米。保持最低姿态，在平整地板、线缆有余量且已开始录像时启动。会持续规划、转向和观察，不以三步结束；随时点停止导航。")
+          .setNegativeButton("取消",null).setPositiveButton("开始绕障") { _,_->runCatching { validateFieldStart();motor.localGoal() }.onFailure { message(it.message ?: "无法启动") } }.show()
       } }.onFailure { message(it.message ?: "操作未完成") }
     }.setNegativeButton("返回",null).show()
   }
@@ -200,22 +203,22 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     check(SystemClock.elapsedRealtime()-s.at in 0..500 && s.pose!=null && !s.playback && s.recording && motor.isConnected()) { "请开始实时相机/IMU录制并连接底座" }
     check(s.recordingRemainingMs>=6000) { "录像即将结束，请先保存并开始新一轮录像；本次未发动作" }
   }
-  @Synchronized private fun newFieldBatch(): String {
-    field=OperatorExploration(requireNotNull(fieldSample));fieldAnnotatedResult=null;fieldStartFailure=null
+  @Synchronized private fun newFieldBatch(mission: Boolean=false): String {
+    field=OperatorExploration(requireNotNull(fieldSample),if(mission) 80 else 3,if(mission) 600_000 else 90_000);fieldAnnotatedResult=null;fieldStartFailure=null
     fieldMeasuredHeight=activity.getSharedPreferences("terrain-camera",0).getFloat("height",0f).takeIf { it in .03f.. .5f }
     fieldBatchId=java.util.UUID.randomUUID().toString();resetFloorFlow()
     return requireNotNull(fieldBatchId)
   }
   private fun prepareField(direction: String,stepMs: Int=150,batchId: String="") {
-    require(direction in setOf("back","back_step","left","right"));validateFieldStart()
-    require(stepMs in setOf(150,250) && (direction=="back_step" || stepMs==150))
+    require(direction in setOf("back","back_step","left","right","left_step","right_step"));validateFieldStart()
+    require(when(direction) { "back_step"->stepMs in setOf(150,250);"left_step","right_step"->stepMs in setOf(100,150);else->stepMs==150 })
     if(batchId.isNotEmpty()) check(batchId==fieldBatchId && field?.phase=="READY") { "本轮任务已停止、过期或达到步数上限" }
     else if(field?.phase!="READY") newFieldBatch()
     // Inference/library warm-up may interrupt flow while the robot is stopped.
     // A pulse needs its own fresh displacement origin, not pre-inference continuity.
     // Preserve the task token and remaining budget; never re-arm a stopped task.
-    if(direction=="back_step") resetFloorFlow()
-    beginCountdown(direction,when(direction) { "back"->450;"back_step"->stepMs;else->350 },true)
+    if(direction.endsWith("_step")) resetFloorFlow()
+    beginCountdown(direction,when { direction=="back"->450;direction.endsWith("_step")->stepMs;else->350 },true)
   }
   fun beginDiagnosticBatch(confirmed: Boolean,region: FloorFlowRegion,promise: expo.modules.kotlin.Promise) {
     try {
@@ -223,6 +226,17 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
       val id=newFieldBatch();selectFloorRegion(region)
       promise.resolve(mapOf("batchId" to id,"maximumSteps" to 3,"floorRegion" to region.report()))
     } catch(e: Exception) { promise.reject("ERR_FIELD_BATCH",e.message,e) }
+  }
+  fun beginLocalMission(confirmed: Boolean,region: FloorFlowRegion,promise: expo.modules.kotlin.Promise) {
+    try {
+      check(confirmed) { "需要确认实际地板和线缆" };check(fieldDiagnostic==null) { "上一段尚未结束" };validateFieldStart()
+      val id=newFieldBatch(true);selectFloorRegion(region)
+      promise.resolve(mapOf("batchId" to id,"maximumSteps" to 80,"maximumSeconds" to 600))
+    } catch(e: Exception) { promise.reject("ERR_LOCAL_MISSION",e.message,e) }
+  }
+  fun localMissionProgress(value: String) { message(value.take(450)) }
+  fun localMissionRegion(token: String,region: FloorFlowRegion) {
+    check(token==fieldBatchId && field?.phase=="READY" && countdown==null && !motor.busy) { "任务已停止或当前仍在运动" };selectFloorRegion(region)
   }
   /** Only the DUMP-protected integration receiver uses this typed, bounded test entry. */
   fun diagnosticField(direction: String,confirmed: Boolean,stepMs: Int,batchId: String,promise: expo.modules.kotlin.Promise) {
@@ -264,12 +278,12 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
         if(operatorTrial) {
           check(motor.isConnected() && !motor.busy && calibration==null) { "连接或控制状态已变化" }
           fieldFlowStart=floorFlow()
-          visualPulseGuard=if(direction=="back_step") {
+          visualPulseGuard=if(direction.endsWith("_step")) {
             val start=requireNotNull(visualMotionSample(fieldFlowStart)) { "地板视觉尚未就绪，本次不发动作" }
-            VisualPulseGuard(start,if(ms==250) .05 else .03).also { check(it.check(start,latestCameraNs)==null) { "地板视觉已过期，本次不发动作" } }
+            VisualPulseGuard(start,if(direction!="back_step") .08 else if(ms==250) .05 else .03).also { check(it.check(start,latestCameraNs)==null) { "地板视觉已过期，本次不发动作" } }
           } else null
-          val trial=requireNotNull(field);trial.issue(SystemClock.elapsedRealtime(),direction,if(direction=="back_step") ms else 150)
-          motor.request(if(direction=="back_step") "back" else "calibration_$direction",ms) { ok,s->
+          val trial=requireNotNull(field);trial.issue(SystemClock.elapsedRealtime(),direction,if(direction.endsWith("_step")) ms else 150)
+          motor.request(if(direction.endsWith("_step")) direction.removeSuffix("_step") else "calibration_$direction",ms) { ok,s->
             visualPulseGuard=null
             trial.acknowledge(ok,SystemClock.elapsedRealtime())
             message(if(ok) "本段已限时停止，正在记录停稳后的画面。" else "采集动作未完成：$s")

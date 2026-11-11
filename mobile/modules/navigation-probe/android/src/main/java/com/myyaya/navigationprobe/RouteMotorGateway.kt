@@ -16,6 +16,10 @@ internal class RouteMotorGateway(val token: String=UUID.randomUUID().toString(),
   @Volatile var voiceStopReady=false;private set
   @Volatile private var pending: Pair<Int,(Boolean,String)->Unit>?=null
   val busy get()=pending!=null
+  @Synchronized fun localGoal() {
+    check(isConnected() && !busy)
+    emit(mapOf("token" to token,"sequence" to ++sequence,"action" to "local_goal","durationMs" to 0))
+  }
   fun isConnected()=connected && foreground && SystemClock.elapsedRealtime()-stateAt<=1500
   @Synchronized fun state(connected: Boolean,voiceStop: Boolean) {
     if(this.connected!=connected) connectionRevision++

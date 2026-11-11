@@ -180,6 +180,7 @@ internal class MonocularSnapshot(private val host: Activity,private val active: 
           old.delete()
         }
       }
+    if(!report.optBoolean("displayOverlay",true)) { original.recycle();overlay.recycle();dismissComparison();return }
     val row=LinearLayout(host)
     for(bitmap in listOf(original,overlay)) row.addView(ImageView(host).apply { setImageBitmap(bitmap);scaleType=ImageView.ScaleType.FIT_CENTER },
       LinearLayout.LayoutParams(0,(host.resources.displayMetrics.heightPixels*.5).toInt(),1f))

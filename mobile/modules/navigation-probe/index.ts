@@ -14,7 +14,10 @@ export type NavigationProbeStatus = {
 
 type Native = {
   getStatus(): Promise<NavigationProbeStatus>;
-  diagnosticField(direction: "back" | "back_step" | "left" | "right", confirmed: boolean, stepMs: number, batchId: string): Promise<Record<string, unknown>>;
+  diagnosticField(direction: "back" | "back_step" | "left" | "right" | "left_step" | "right_step", confirmed: boolean, stepMs: number, batchId: string): Promise<Record<string, unknown>>;
+  beginLocalMission(confirmed: boolean,left: number,top: number,right: number,bottom: number): Promise<{batchId:string;maximumSteps:number;maximumSeconds:number}>;
+  localMissionProgress(value:string):Promise<void>;
+  localMissionRegion(token:string,left:number,top:number,right:number,bottom:number):Promise<void>;
   beginDiagnosticBatch(confirmed: boolean,left: number,top: number,right: number,bottom: number): Promise<{ batchId: string; maximumSteps: number }>;
   stopOperatorObservation(): Promise<void>;
   showFloorLabels(id: string, labels: string, summary: string): Promise<void>;
@@ -38,7 +41,10 @@ function getNative(): Native {
   return native ??= requireNativeModule<Native>("NavigationProbe");
 }
 export const getNavigationProbeStatus = () => getNative().getStatus();
-export const runNativeFieldDiagnostic = (direction: "back" | "back_step" | "left" | "right", confirmed: boolean, stepMs = 150, batchId = "") => getNative().diagnosticField(direction, confirmed, stepMs, batchId);
+export const runNativeFieldDiagnostic = (direction: "back" | "back_step" | "left" | "right" | "left_step" | "right_step", confirmed: boolean, stepMs = 150, batchId = "") => getNative().diagnosticField(direction, confirmed, stepMs, batchId);
+export const beginNativeLocalMission = (confirmed: boolean,region={left:.3,top:.65,right:.88,bottom:.82}) => getNative().beginLocalMission(confirmed,region.left,region.top,region.right,region.bottom);
+export const publishNativeLocalMission = (value:string)=>getNative().localMissionProgress(value);
+export const setNativeLocalMissionRegion=(token:string,region:{left:number;top:number;right:number;bottom:number})=>getNative().localMissionRegion(token,region.left,region.top,region.right,region.bottom);
 export const beginNativeFieldBatch = (confirmed: boolean,region={left:.3,top:.65,right:.88,bottom:.82}) => getNative().beginDiagnosticBatch(confirmed,region.left,region.top,region.right,region.bottom);
 export const stopNativeOperatorObservation = () => getNative().stopOperatorObservation();
 export const showNativeFloorLabels = (id: string, labels: string, report: unknown) => getNative().showFloorLabels(id, labels, JSON.stringify(report));

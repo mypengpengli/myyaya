@@ -66,6 +66,13 @@ export async function openTaughtRouteSession(name = ""): Promise<string | null> 
           void (async () => {
             try {
               if (event.action === "stop") { stopping=stopLooiMotion("navigation-stop").catch(() => {});await stopping;return; }
+              if(event.action === "local_goal") {
+                await stopping;assertNavigationControl(token);
+                const {getNavigationProbeStatus}=await import("../../modules/navigation-probe");
+                const status=await getNavigationProbeStatus();
+                await (await import("../diagnostics/local-goal-mission")).runLocalGoalMission({operatorConfirmed:true,heightCm:(status.measuredCameraHeightMeters ?? 0)*100,goalForwardMeters:.4,goalRightMeters:0});
+                return;
+              }
               await stopping;
               if (closed || requestSequence !== lastSequence) return;
               assertNavigationControl(token);

@@ -1,7 +1,7 @@
 {
   "name": "my-looi",
   "main": "expo-router/entry",
-  "version": "2.1.199",
+  "version": "2.1.200",
   "packageManager": "pnpm@10.34.5",
   "dependencies": {
     "@earendil-works/pi-agent-core": "1.4.0",
@@ -126,6 +126,7 @@
     "test:hermes": "node scripts/hermes-connection-behavior.test.mjs",
     "test:hermes:runs": "node scripts/hermes-runs-behavior.test.mjs",
     "navigation:robot-test": "node scripts/navigation-robot-behavior.test.mjs && node scripts/route-session-behavior.test.mjs && node scripts/monocular-depth-benchmark.test.mjs && node scripts/monocular-live-probe.test.mjs && node scripts/upright-reference-probe.test.mjs && node scripts/field-operator-probe.test.mjs && node scripts/vision-floor-analysis.test.mjs && node scripts/near-step-guard.test.mjs && node scripts/near-sequence-probe.test.mjs",
+    "navigation:goal-test": "node scripts/local-goal-controller.test.mjs && node scripts/local-goal-mission.test.mjs",
     "test:head-observation": "node scripts/head-observation-behavior.test.mjs"
   },
   "private": true,

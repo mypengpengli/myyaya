@@ -40,6 +40,19 @@ class NavigationProbeModule : Module() {
         screen.beginDiagnosticBatch(confirmed,FloorFlowRegion(left.toFloat(),top.toFloat(),right.toFloat(),bottom.toFloat()),promise)
       }.onFailure { promise.reject("ERR_FIELD_REGION",it.message,it) } }
     }
+    AsyncFunction("beginLocalMission") { confirmed: Boolean,left: Double,top: Double,right: Double,bottom: Double,promise: Promise ->
+      val screen=routeScreen;val activity=appContext.currentActivity
+      if(screen==null || activity==null) promise.reject("ERR_LOCAL_MISSION","请打开路线相机",null)
+      else activity.runOnUiThread { runCatching { screen.beginLocalMission(confirmed,FloorFlowRegion(left.toFloat(),top.toFloat(),right.toFloat(),bottom.toFloat()),promise) }
+        .onFailure { promise.reject("ERR_LOCAL_MISSION",it.message,it) } }
+    }
+    AsyncFunction("localMissionProgress") { value: String -> appContext.currentActivity?.runOnUiThread { routeScreen?.localMissionProgress(value) } }
+    AsyncFunction("localMissionRegion") { token: String,left: Double,top: Double,right: Double,bottom: Double,promise: Promise ->
+      val screen=routeScreen;val activity=appContext.currentActivity
+      if(screen==null || activity==null) promise.reject("ERR_LOCAL_MISSION","路线页已关闭",null)
+      else activity.runOnUiThread { runCatching { screen.localMissionRegion(token,FloorFlowRegion(left.toFloat(),top.toFloat(),right.toFloat(),bottom.toFloat())) }
+        .onSuccess { promise.resolve(null) }.onFailure { promise.reject("ERR_LOCAL_MISSION",it.message,it) } }
+    }
     AsyncFunction("stopOperatorObservation") { promise: Promise ->
       val activity=appContext.currentActivity
       if(activity==null) promise.resolve(null)

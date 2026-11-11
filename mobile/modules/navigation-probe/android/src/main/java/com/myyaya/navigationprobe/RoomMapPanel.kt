@@ -693,6 +693,11 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     val panel=taughtRoutes
     if(panel==null) promise.reject("ERR_FIELD_SCREEN","请打开教路线采集页面",null) else panel.beginDiagnosticBatch(confirmed,region,promise)
   }
+  fun beginLocalMission(confirmed: Boolean,region: FloorFlowRegion,promise: expo.modules.kotlin.Promise) {
+    taughtRoutes?.beginLocalMission(confirmed,region,promise) ?: promise.reject("ERR_FIELD_SCREEN","未打开路线页",null)
+  }
+  fun localMissionProgress(value: String) { taughtRoutes?.localMissionProgress(value) }
+  fun localMissionRegion(token: String,region: FloorFlowRegion) { requireNotNull(taughtRoutes).localMissionRegion(token,region) }
   fun openTaughtRoute(id: String) {
     runCatching {
       require(UUID.fromString(id).toString()==id)

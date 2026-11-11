@@ -5,7 +5,7 @@ import { analyzeFloorDepth, type FloorRegion } from "../navigation/vision-floor-
 import { holdAmbientMotionFor } from "../core/ambient-motion";
 import { holdSocialAttentionMotionFor } from "../core/social-attention";
 
-export async function runFloorVisionProbe(args: { heightCm?: unknown; roi?: FloorRegion }) {
+export async function runFloorVisionProbe(args: { heightCm?: unknown; roi?: FloorRegion; navigationCells?: boolean; showOverlay?: boolean; autoFloorRegion?: boolean }) {
   if(typeof args?.heightCm!=="number" || !Number.isFinite(args.heightCm) || args.heightCm<3 || args.heightCm>50) throw new Error("需要实测镜头高度（厘米）");
   holdAmbientMotionFor(90_000,"floor-vision");holdSocialAttentionMotionFor(90_000,"floor-vision");
   const status=await getNavigationProbeStatus(), modelPath=`file://${status.dataDirectory}/monocular-benchmark/fused_model_int8_256.onnx`;
@@ -27,12 +27,18 @@ export async function runFloorVisionProbe(args: { heightCm?: unknown; roi?: Floo
     const geometry=status.navigationGeometry;
     const corridor=geometry ? {centerRightMeters:geometry.centerRightMeters,widthMeters:geometry.widthMeters+2*geometry.marginMeters,
       frontReachMeters:Math.max(0,geometry.alongViewMeters+geometry.lengthMeters/2)} : undefined;
-    const analysis=analyzeFloorDepth(values,252,252,{width:frame.imageDimensions[0],height:frame.imageDimensions[1],
-      fx:focal[0],fy:focal[1],cx:principal[0],cy:principal[1],q:frame.cameraQuaternion as number[]},args.heightCm/100,
-      args.roi ?? {left:.3,top:.65,right:.88,bottom:.82},corridor);
+    const candidates=[args.roi ?? {left:.3,top:.65,right:.88,bottom:.82},...(args.autoFloorRegion ? [{left:.05,top:.72,right:.28,bottom:.94},{left:.35,top:.75,right:.65,bottom:.94},{left:.7,top:.72,right:.94,bottom:.94}] : [])];
+    let analysis:ReturnType<typeof analyzeFloorDepth>|undefined,selectedFloorRegion=candidates[0],failure:unknown;
+    for(const region of candidates) {
+      try { const value=analyzeFloorDepth(values,252,252,{width:frame.imageDimensions[0],height:frame.imageDimensions[1],
+        fx:focal[0],fy:focal[1],cx:principal[0],cy:principal[1],q:frame.cameraQuaternion as number[]},args.heightCm/100,region,corridor);
+        if(!analysis || value.report.heldoutFloorP90HeightErrorMeters<analysis.report.heldoutFloorP90HeightErrorMeters) {analysis=value;selectedFloorRegion=region;}
+      } catch(error) {failure=error;}
+    }
+    if(!analysis) throw failure ?? new Error("未找到可校验的地板区域");
     if(!FileSystem.cacheDirectory) throw new Error("缺少应用缓存");
     await FileSystem.writeAsStringAsync(`${FileSystem.cacheDirectory}monocular-benchmark/live.depth`,outputs[0].data,{encoding:FileSystem.EncodingType.Base64});
-    await showNativeFloorLabels(frame.requestId,typedArrayToBase64(analysis.labels),analysis.report);
-    return {frame,analysis:analysis.report,geometry,exported:await exportNativeMonocularBenchmark()};
+    await showNativeFloorLabels(frame.requestId,typedArrayToBase64(analysis.labels),{...analysis.report,displayOverlay:args.showOverlay!==false});
+    return {frame,analysis:analysis.report,geometry,selectedFloorRegion,navigationCells:args.navigationCells ? analysis.navigationCells : undefined,exported:await exportNativeMonocularBenchmark()};
   } finally {await session.release();}
 }

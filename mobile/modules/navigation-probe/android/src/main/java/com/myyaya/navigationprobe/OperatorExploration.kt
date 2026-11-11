@@ -3,7 +3,7 @@ package com.myyaya.navigationprobe
 import kotlin.math.abs
 
 /** Operator-confirmed flat area, bounded data collection. Never grants autonomous free space. */
-internal class OperatorExploration(initial: Sample) {
+internal class OperatorExploration(initial: Sample,private val maximumSegments: Int=3,private val lifetimeMs: Long=90_000) {
   data class Sample(val at: Long,val pose: RoutePose?,val cameraY: Float?,val session: String,
     val connected: Boolean,val revision: Long,val recording: Boolean,val playback: Boolean,val hazard: Boolean,
     val recordingRemainingMs: Long=90_000)
@@ -14,16 +14,16 @@ internal class OperatorExploration(initial: Sample) {
   private var lastAt=initial.at
   private var direction="back"
   private var stepDuration=150
-  private val durationMs get()=when(direction) { "back"->450;"back_step"->stepDuration;else->350 }
+  private val durationMs get()=when { direction=="back"->450;direction.endsWith("_step")->stepDuration;else->350 }
   @Volatile var phase="READY";private set
   var reason="OPERATOR_CONFIRMED_AREA";private set
   var segments=0;private set
   @Volatile var result: Map<String,Any?>?=null;private set
   val moving get()=phase in listOf("RUNNING","SETTLING")
-  init { require(failure(initial,initial.at)==null) { "需要实时定位、录像及底座连接" } }
+  init { require(maximumSegments in 1..80 && lifetimeMs in 90_000..600_000);require(failure(initial,initial.at)==null) { "需要实时定位、录像及底座连接" } }
   private fun failure(s: Sample,now: Long): String? = when {
     now<s.at || now-s.at>500 || s.at<lastAt->"STALE_CAMERA"
-    s.at-origin.at>90_000->"CONFIRMATION_EXPIRED"
+    s.at-origin.at>lifetimeMs->"CONFIRMATION_EXPIRED"
     s.playback->"PLAYBACK"
     !s.recording->"RECORDING_STOPPED"
     !s.connected || s.revision!=origin.revision->"CONNECTION_CHANGED"
@@ -53,13 +53,13 @@ internal class OperatorExploration(initial: Sample) {
     latest=s;lastAt=s.at
     if(phase=="SETTLING" && now-ackAt>=1500) {
       result=snapshot(s,true,"SEGMENT_STOPPED")
-      phase=if(segments>=3) "COMPLETE" else "READY";reason="SEGMENT_STOPPED"
+      phase=if(segments>=maximumSegments) "COMPLETE" else "READY";reason="SEGMENT_STOPPED"
     }
   }
   @Synchronized fun issue(now: Long,requestedDirection: String="back",stepMs: Int=150) {
-    require(requestedDirection in setOf("back","back_step","left","right")) { "Unsupported field direction" }
-    require(stepMs in setOf(150,250) && (requestedDirection=="back_step" || stepMs==150)) { "Invalid bounded step duration" }
-    check(phase=="READY" && segments<3) { "请等待上一段停止或重新确认空地" }
+    require(requestedDirection in setOf("back","back_step","left","right","left_step","right_step")) { "Unsupported field direction" }
+    require(when(requestedDirection) { "back_step"->stepMs in setOf(150,250);"left_step","right_step"->stepMs in setOf(100,150);else->stepMs==150 }) { "Invalid bounded step duration" }
+    check(phase=="READY" && segments<maximumSegments) { "请等待上一段停止或重新确认空地" }
     failure(latest,now)?.let { cancel(it);error(it) }
     check(latest.recordingRemainingMs>=2500) { "录像即将结束，请先保存并开始新一轮录像" }
     direction=requestedDirection;stepDuration=stepMs;segments++;pulseStart=latest;ackAt=0;phase="RUNNING";reason="TIMED_PULSE"
@@ -68,6 +68,6 @@ internal class OperatorExploration(initial: Sample) {
     if(phase!="RUNNING") return
     if(!ok) cancel("ACTION_FAILED") else { ackAt=now;phase="SETTLING";reason="WAITING_AFTER_STOP" }
   }
-  fun report(): Map<String,Any?> = mapOf("phase" to phase,"reason" to reason,"segments" to segments,"maximumSegments" to 3,
+  fun report(): Map<String,Any?> = mapOf("phase" to phase,"reason" to reason,"segments" to segments,"maximumSegments" to maximumSegments,
     "durationMs" to durationMs,"direction" to direction,"lastSegment" to result,"mapHeightRequired" to false,"autonomousMotionAuthorized" to false)
 }

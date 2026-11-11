@@ -120,6 +120,13 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
     if(!running || !resumed || isDestroyed || isFinishing) promise.reject("ERR_FIELD_CAMERA","请先开始实时扫描和录像",null)
     else roomMap?.beginDiagnosticBatch(confirmed,region,promise) ?: promise.reject("ERR_FIELD_SCREEN","请打开教路线采集页面",null)
   }
+  fun beginLocalMission(confirmed: Boolean,region: FloorFlowRegion,promise: expo.modules.kotlin.Promise) {
+    if(!confirmed || !running || !resumed || playbackName!=null || !datasets.recording()) { promise.reject("ERR_LOCAL_MISSION","需要实时相机、录像和场地确认",null);return }
+    datasets.extendForLocalMission()
+    roomMap?.beginLocalMission(confirmed,region,promise) ?: promise.reject("ERR_FIELD_SCREEN","未打开路线页",null)
+  }
+  fun localMissionProgress(value: String) { roomMap?.localMissionProgress(value) }
+  fun localMissionRegion(token: String,region: FloorFlowRegion) { check(running && resumed);requireNotNull(roomMap).localMissionRegion(token,region) }
 
   fun onCreate(savedInstanceState: Bundle?) {
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
