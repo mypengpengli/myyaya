@@ -720,7 +720,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   fun offerVisualFrame(frame: Frame) {
     if(frame.camera.trackingState!=TrackingState.TRACKING) return
     val mapHeight=calibratedHeight?.takeIf { active && surfaceSource=="MEASURED_HEIGHT" && terrainSnapshot.floorConfirmed }
-    floorFlow.offer(frame,mapHeight ?: taughtRoutes?.operatorFloorHeight())
+    floorFlow.offer(frame,mapHeight ?: taughtRoutes?.operatorFloorHeight(),taughtRoutes?.operatorAllowsGapRecovery()==true)
   }
   /** GL thread, depth sampled at up to 10 Hz; view snapshots limited to 2 Hz. */
   fun frame(session: Session, frame: Frame, sample: DepthSamples.Result?, depthNs: Long,

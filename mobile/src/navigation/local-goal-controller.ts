@@ -10,6 +10,7 @@ export function cameraYaw(q:number[]) {
 /** Local grid plans through unknown at extra cost; every actual translation is observed again. */
 export class LocalGoalController {
   pose:GoalPose={x:0,y:0,yaw:0};
+  positionUncertaintyMeters=0;
   readonly cells=new Map<string,{x:number;y:number;label:number;clearVotes:number}>();
   private originYaw:number;
   private bestDistance:number;
@@ -32,10 +33,16 @@ export class LocalGoalController {
   }
   applyMotion(segment:Record<string,any>) {
     const a=segment.floorFlowBefore,b=segment.floorFlowAfter;
+    const dyaw=segment.rawPoseYawRadians;
+    const continuous=!!a?.cumulativePoseAvailable && !!b?.cumulativePoseAvailable && a.originTimestampNs===b.originTimestampNs && a.originContinuity && b.originContinuity;
+    if(segment.completed && segment.motorStopAcknowledged && ["left_step","right_step"].includes(segment.direction) && Number.isFinite(dyaw) && Math.abs(dyaw)<=.6 && !continuous) {
+      // Differential-track pivot: angular feedback remains usable when floor features leave view.
+      // Position is held as an explicit approximation, never replaced by drifting ARCore translation.
+      this.pose.yaw=wrap(this.pose.yaw+dyaw);this.positionUncertaintyMeters+=.01;return;
+    }
     if(!segment.completed || !segment.motorStopAcknowledged || !a?.cumulativePoseAvailable || !b?.cumulativePoseAvailable
       || a.originTimestampNs!==b.originTimestampNs || !a.originContinuity || !b.originContinuity) throw new Error("本段视觉位姿不连续，不能累计到目标");
     const dx=b.cumulativeCameraDxMeters-a.cumulativeCameraDxMeters,dz=b.cumulativeCameraDzMeters-a.cumulativeCameraDzMeters;
-    const dyaw=segment.rawPoseYawRadians;
     if(![dx,dz,dyaw].every(Number.isFinite) || Math.hypot(dx,dz)>.18 || Math.abs(dyaw)>.6) throw new Error("本段位姿跳变");
     const oldYaw=this.pose.yaw,newYaw=wrap(oldYaw+dyaw);
     // Floor-flow translation uses ARCore's gravity basis, never ARCore translation.
@@ -49,6 +56,7 @@ export class LocalGoalController {
   }
   distance(){return Math.hypot(this.goal.x-this.pose.x,this.goal.y-this.pose.y);}
   plan():{phase:string;path:Array<{x:number;y:number}>;turn?:"left_step"|"right_step";turnMs?:100|150;headingError?:number} {
+    if(this.positionUncertaintyMeters>.1) return {phase:"LOCALIZATION_UNCERTAIN",path:[]};
     if(this.distance()<=.06) return {phase:"AT_GOAL",path:[]};
     if(this.stagnant>32) return {phase:"NO_PROGRESS",path:[]};
     const radius=Math.max(this.geometry.widthMeters,this.geometry.lengthMeters)/2+this.geometry.marginMeters+.01;

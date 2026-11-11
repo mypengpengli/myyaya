@@ -20,7 +20,7 @@ import kotlin.math.*
 /** Read-only sparse flow worker. Manual lower-image floor ROI is an assumption, not segmentation/free space. */
 internal class FloorFlowDiagnostic(private val evidenceDirectory: File?=null) {
   private data class Input(val gray: ByteArray,val width: Int,val height: Int,val time: Long,val q: FloatArray,
-    val fx: Float,val fy: Float,val cx: Float,val cy: Float,val measuredHeight: Float,val region: FloorFlowRegion,val capturedAtMs: Long,val frameTime: Long)
+    val fx: Float,val fy: Float,val cx: Float,val cy: Float,val measuredHeight: Float,val region: FloorFlowRegion,val capturedAtMs: Long,val frameTime: Long,val gapLimitNs: Long)
   private val worker=Executors.newSingleThreadExecutor()
   private val busy=AtomicBoolean(false)
   private val epoch=AtomicInteger(0)
@@ -55,7 +55,7 @@ internal class FloorFlowDiagnostic(private val evidenceDirectory: File?=null) {
       (snapshot-setOf("cameraDxMeters","cameraDzMeters"))+mapOf("status" to "FLOW_STALE","cumulativePoseAvailable" to false,
         "cumulativeCameraDxMeters" to null,"cumulativeCameraDzMeters" to null) else snapshot
   }
-  fun offer(frame: Frame,height: Float?) {
+  fun offer(frame: Frame,height: Float?,boundedMotion: Boolean=false) {
     latestFrameNs=frame.timestamp
     if(closed || height==null || frame.timestamp-sampleAt<66_000_000L || !busy.compareAndSet(false,true)) return
     sampleAt=frame.timestamp;val (generation,selectedRegion)=synchronized(this) { epoch.get() to region }
@@ -65,10 +65,13 @@ internal class FloorFlowDiagnostic(private val evidenceDirectory: File?=null) {
         require(image.width*image.height<=1280*960)
         val plane=image.planes[0];val buffer=plane.buffer;val bytes=ByteArray(image.width*image.height)
         val base=buffer.position()
-        for(y in 0 until image.height) for(x in 0 until image.width) bytes[y*image.width+x]=buffer.get(base+y*plane.rowStride+x*plane.pixelStride)
+        if(plane.pixelStride==1) {
+          val row=buffer.duplicate()
+          for(y in 0 until image.height) {row.position(base+y*plane.rowStride);row.get(bytes,y*image.width,image.width)}
+        } else for(y in 0 until image.height) for(x in 0 until image.width) bytes[y*image.width+x]=buffer.get(base+y*plane.rowStride+x*plane.pixelStride)
         val k=frame.camera.imageIntrinsics;val f=k.focalLength;val c=k.principalPoint
         check(k.imageDimensions.contentEquals(intArrayOf(image.width,image.height)))
-        Input(bytes,image.width,image.height,image.timestamp,frame.camera.pose.rotationQuaternion,f[0],f[1],c[0],c[1],height,selectedRegion,android.os.SystemClock.elapsedRealtime(),frame.timestamp)
+        Input(bytes,image.width,image.height,image.timestamp,frame.camera.pose.rotationQuaternion,f[0],f[1],c[0],c[1],height,selectedRegion,android.os.SystemClock.elapsedRealtime(),frame.timestamp,if(boundedMotion) 2_000_000_000L else 400_000_000L)
       }
     } catch(_: Exception) { busy.set(false);return }
     runCatching { worker.execute {
@@ -153,7 +156,7 @@ internal class FloorFlowDiagnostic(private val evidenceDirectory: File?=null) {
   private fun process(i: Input): Map<String,Any?> {
     val gray=Mat(i.height,i.width,CvType.CV_8UC1);gray.put(0,0,i.gray)
     val prev=previous
-    if(prev==null || points.size<12 || i.time-previousTime !in 1..400_000_000L || prev.cols()!=i.width || prev.rows()!=i.height)
+    if(prev==null || points.size<12 || i.time-previousTime !in 1..i.gapLimitNs || prev.cols()!=i.width || prev.rows()!=i.height)
       return seed(gray,i,when { prev==null->"NO_PREVIOUS_IMAGE";points.size<12->"TRACKS_DEPLETED";prev.cols()!=i.width || prev.rows()!=i.height->"IMAGE_SIZE_CHANGED";else->"FRAME_GAP" })
     val from=MatOfPoint2f(*points);val to=MatOfPoint2f();val back=MatOfPoint2f()
     val ok=MatOfByte();val err=MatOfFloat();val backOk=MatOfByte();val backErr=MatOfFloat()
@@ -164,6 +167,7 @@ internal class FloorFlowDiagnostic(private val evidenceDirectory: File?=null) {
       val keep=points.indices.filter { accepted[it].toInt()==1 && reverseOk[it].toInt()==1 &&
         next[it].x>=8 && next[it].x<i.width-8 && next[it].y>=8 && next[it].y<i.height-8 &&
         hypot(reverse[it].x-points[it].x,reverse[it].y-points[it].y)<.6 }
+      val pairGapMs=(i.time-previousTime)/1_000_000.0
       val oldReference=reference;points=keep.map { next[it] }.toTypedArray();reference=keep.map { oldReference[it] }
       val projected=points.indices.mapNotNull { n->project(points[n],i)?.let { Triple(n,reference[n],it) } }
       prev.release();previous=gray;previousTime=i.time
@@ -184,7 +188,7 @@ internal class FloorFlowDiagnostic(private val evidenceDirectory: File?=null) {
         if(added>0) { replenishments++;featuresAdded+=added }
       }
       val origin=if(chain.continuous) mapOf("cameraDxMeters" to chain.dx,"cameraDzMeters" to chain.dz) else emptyMap()
-      return chain.report(true)+assessment.report()+origin+mapOf("status" to if(chain.continuous) "FLOOR_FLOW_ESTIMATE" else "FLOOR_FLOW_SEGMENT_ESTIMATE",
+      return chain.report(true)+assessment.report()+origin+mapOf("status" to if(chain.continuous) "FLOOR_FLOW_ESTIMATE" else "FLOOR_FLOW_SEGMENT_ESTIMATE","pairGapMs" to pairGapMs,"boundedGapRecovered" to (pairGapMs>400),
         "localDxMeters" to estimate.dx,"localDzMeters" to estimate.dz,"referenceTimestampNs" to linkFrom,
         "tracks" to points.size,"addedFeatures" to added,"featuresAddedTotal" to featuresAdded,"replenishments" to replenishments)
     } catch(error: Throwable) { gray.release();throw error }

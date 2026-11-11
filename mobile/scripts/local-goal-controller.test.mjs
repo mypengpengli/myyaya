@@ -13,6 +13,8 @@ const wall=rig();wall.observe(Array.from({length:61},(_,i)=>[(i-30)*.05,.3,2,40]
 const flow=(x,z)=>({cumulativePoseAvailable:true,originContinuity:true,originTimestampNs:1,cumulativeCameraDxMeters:x,cumulativeCameraDzMeters:z});
 const move=rig();move.applyMotion({completed:true,motorStopAcknowledged:true,rawPoseYawRadians:0,floorFlowBefore:flow(0,0),floorFlowAfter:flow(0,-.05)});assert.ok(Math.abs(move.pose.y-.05)<1e-8);
 assert.throws(()=>move.applyMotion({completed:true,motorStopAcknowledged:true,rawPoseYawRadians:0,floorFlowBefore:flow(0,0),floorFlowAfter:{...flow(0,-.05),originTimestampNs:2}}));
+const lostTurn=rig();lostTurn.applyMotion({direction:'right_step',completed:true,motorStopAcknowledged:true,rawPoseYawRadians:.2});assert.ok(Math.abs(lostTurn.pose.yaw-.2)<1e-8);assert.equal(lostTurn.pose.x,0);assert.equal(lostTurn.positionUncertaintyMeters,.01);
+assert.throws(()=>lostTurn.applyMotion({direction:'back_step',completed:true,motorStopAcknowledged:true,rawPoseYawRadians:0}));
 // Camera lever-arm motion from a pure turn must not move the estimated base center.
 const angle=.2,turn=rig(),dx=-(Math.cos(angle)*g.centerRightMeters+Math.sin(angle)*g.alongViewMeters-g.centerRightMeters),dz=(-Math.sin(angle)*g.centerRightMeters+Math.cos(angle)*g.alongViewMeters-g.alongViewMeters);
 turn.applyMotion({completed:true,motorStopAcknowledged:true,rawPoseYawRadians:angle,floorFlowBefore:flow(0,0),floorFlowAfter:flow(dx,dz)});assert.ok(Math.hypot(turn.pose.x,turn.pose.y)<1e-8);

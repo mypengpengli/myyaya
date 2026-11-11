@@ -48,6 +48,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   @Volatile private var fieldFlowStart: Map<String,Any?> = emptyMap()
   @Volatile private var fieldAnnotatedResult: Map<String,Any?>?=null
   @Volatile private var fieldBatchId: String?=null
+  @Volatile private var fieldIsLocalMission=false
   @Volatile private var fieldStartFailure: String?=null
   @Volatile private var visualPulseGuard: VisualPulseGuard?=null
   @Volatile private var latestCameraNs=0L
@@ -204,6 +205,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     check(s.recordingRemainingMs>=6000) { "录像即将结束，请先保存并开始新一轮录像；本次未发动作" }
   }
   @Synchronized private fun newFieldBatch(mission: Boolean=false): String {
+    fieldIsLocalMission=mission
     field=OperatorExploration(requireNotNull(fieldSample),if(mission) 80 else 3,if(mission) 600_000 else 90_000);fieldAnnotatedResult=null;fieldStartFailure=null
     fieldMeasuredHeight=activity.getSharedPreferences("terrain-camera",0).getFloat("height",0f).takeIf { it in .03f.. .5f }
     fieldBatchId=java.util.UUID.randomUUID().toString();resetFloorFlow()
@@ -252,6 +254,24 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   private fun finishFieldDiagnostic() { val old=fieldDiagnostic;fieldDiagnostic=null;old?.resolve(fieldReport()) }
   private fun fieldReport()=field?.report()?.plus(mapOf("batchId" to fieldBatchId,"startFailureDetail" to fieldStartFailure,"lastSegment" to (fieldAnnotatedResult ?: field?.result)))
   fun operatorFloorHeight(): Float?=fieldMeasuredHeight.takeIf { field?.phase in listOf("READY","RUNNING","SETTLING","COMPLETE") }
+  fun operatorAllowsGapRecovery()=fieldIsLocalMission && field?.phase in listOf("READY","RUNNING","SETTLING","COMPLETE")
+  private fun startFieldWhenFresh(direction: String,ms: Int,trial: OperatorExploration,deadline: Long) {
+    if(field!==trial || trial.phase!="READY") return
+    val now=SystemClock.elapsedRealtime();val flow=floorFlow();val sample=visualMotionSample(flow)
+    val needsVisual=direction.endsWith("_step")
+    val fresh=fieldSample?.let { now-it.at in 0..200 }==true && (!needsVisual || sample!=null && latestCameraNs-sample.sampledNs in 0..200_000_000L)
+    if(!fresh && now<deadline) { Handler(Looper.getMainLooper()).postDelayed({startFieldWhenFresh(direction,ms,trial,deadline)},80);return }
+    runCatching {
+      validateFieldStart();check(fresh) { "等待新的相机和地板观测超时，本次未发动作" }
+      fieldFlowStart=flow
+      visualPulseGuard=if(needsVisual) VisualPulseGuard(requireNotNull(sample),if(direction!="back_step") .08 else if(ms==250) .05 else .03) else null
+      trial.issue(now,direction,if(needsVisual) ms else 150)
+      motor.request(if(needsVisual) direction.removeSuffix("_step") else "calibration_$direction",ms) {ok,s->
+        visualPulseGuard=null;trial.acknowledge(ok,SystemClock.elapsedRealtime())
+        message(if(ok) "本段已限时停止，正在记录停稳后的画面。" else "采集动作未完成：$s")
+      }
+    }.onFailure {fieldStartFailure=it.message ?: it.javaClass.simpleName;trial.cancel("START_PRECONDITION_CHANGED");message(fieldStartFailure!!);finishFieldDiagnostic()}
+  }
   private fun cancelCountdown() {
     countdown?.cancel();countdown=null
     val dialog=countdownDialog;countdownDialog=null;dialog?.dismiss()
@@ -276,18 +296,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
       cancelCountdown()
       runCatching {
         if(operatorTrial) {
-          check(motor.isConnected() && !motor.busy && calibration==null) { "连接或控制状态已变化" }
-          fieldFlowStart=floorFlow()
-          visualPulseGuard=if(direction.endsWith("_step")) {
-            val start=requireNotNull(visualMotionSample(fieldFlowStart)) { "地板视觉尚未就绪，本次不发动作" }
-            VisualPulseGuard(start,if(direction!="back_step") .08 else if(ms==250) .05 else .03).also { check(it.check(start,latestCameraNs)==null) { "地板视觉已过期，本次不发动作" } }
-          } else null
-          val trial=requireNotNull(field);trial.issue(SystemClock.elapsedRealtime(),direction,if(direction.endsWith("_step")) ms else 150)
-          motor.request(if(direction.endsWith("_step")) direction.removeSuffix("_step") else "calibration_$direction",ms) { ok,s->
-            visualPulseGuard=null
-            trial.acknowledge(ok,SystemClock.elapsedRealtime())
-            message(if(ok) "本段已限时停止，正在记录停稳后的画面。" else "采集动作未完成：$s")
-          }
+          startFieldWhenFresh(direction,ms,requireNotNull(field),SystemClock.elapsedRealtime()+1500)
         } else {
         val current=requireFloor()
         check(current.clearance!=RouteClearance.OBSTACLE && motor.isConnected() && !motor.busy && calibration==null) { "姿态、障碍或连接已变化，请重新确认" }
@@ -348,6 +357,21 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
       (report["sampleTimestampNs"] as Number).toLong(),(report["cumulativeCameraDxMeters"] as Number).toDouble(),
       (report["cumulativeCameraDzMeters"] as Number).toDouble()) }.getOrNull()
   }
+  @Synchronized private fun finishFieldResult(trial: OperatorExploration,result: Map<String,Any?>,start: Map<String,Any?>,deadline: Long) {
+    if(field!==trial || trial.phase=="STOPPED" && result["completed"]==true) return
+    val after=floorFlow();val sample=visualMotionSample(after)
+    val fresh=sample!=null && after["originTimestampNs"]==start["originTimestampNs"] && latestCameraNs-sample.sampledNs in -100_000_000L..400_000_000L
+    if(fieldIsLocalMission && result["completed"]==true && !fresh && trial.phase in listOf("READY","COMPLETE") && SystemClock.elapsedRealtime()<deadline) {
+      Handler(Looper.getMainLooper()).postDelayed({finishFieldResult(trial,result,start,deadline)},60);return
+    }
+    val record=result+mapOf("atEpochMs" to System.currentTimeMillis(),"recordingSession" to fieldSample?.session,
+      "floorFlowBefore" to start,"floorFlowAfter" to after,"measuredCameraHeightMeters" to fieldMeasuredHeight)
+    fieldAnnotatedResult=record
+    activity.getSharedPreferences("navigation-field-exploration",0).edit().putString("latest",org.json.JSONObject(record).toString()).apply()
+    message(if(result["completed"]==true) "第${trial.segments}段已停止并记录；继续观察和规划。"
+      else "第${trial.segments}段记录不完整：${trial.reason}；${if(result["motorStopAcknowledged"]==true) "已收到停止回执" else "已请求停止，请检查底座"}。")
+    finishFieldDiagnostic()
+  }
   @Synchronized fun operatorFrame(camera: RigidPose?,session: String,recording: Boolean,playback: Boolean,hazard: Boolean,recordingRemainingMs: Long,cameraNs: Long) {
     latestCameraNs=cameraNs
     val now=SystemClock.elapsedRealtime()
@@ -362,13 +386,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
       if(moving && trial.phase=="STOPPED") { motor.stop("空地采集中断：${trial.reason}");message("采集已停止：${trial.reason}") }
       trial.result?.let { result -> if(result!==savedFieldResult) {
         savedFieldResult=result
-        val record=result+mapOf("atEpochMs" to System.currentTimeMillis(),"recordingSession" to session,
-          "floorFlowBefore" to fieldFlowStart,"floorFlowAfter" to floorFlow(),"measuredCameraHeightMeters" to fieldMeasuredHeight)
-        fieldAnnotatedResult=record
-        activity.getSharedPreferences("navigation-field-exploration",0).edit().putString("latest",org.json.JSONObject(record).toString()).apply()
-        message(if(result["completed"]==true) "第${trial.segments}/3段已停止并记录；${if(trial.phase=="COMPLETE") "本轮采集结束" else "观察新画面后可选择下一段"}。地图数值仅作诊断。"
-          else "第${trial.segments}/3段记录不完整：${trial.reason}；${if(result["motorStopAcknowledged"]==true) "已收到停止回执" else "已请求停止，请检查底座"}。")
-        finishFieldDiagnostic()
+        finishFieldResult(trial,result,fieldFlowStart,SystemClock.elapsedRealtime()+1200)
       } }
     }
   }
