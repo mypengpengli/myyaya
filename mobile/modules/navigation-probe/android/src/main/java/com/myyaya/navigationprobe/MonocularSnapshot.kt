@@ -18,7 +18,7 @@ import java.util.concurrent.Executors
 import org.json.JSONObject
 
 /** One explicit camera sample, not a live feed or a motor/perception authority. */
-internal class MonocularSnapshot(private val host: Activity,private val active: ()->Boolean) {
+internal class MonocularSnapshot(private val host: Activity,private val active: ()->Boolean,private val navigationPose: ()->Map<String,Any?>?={null}) {
   private data class Request(val id: String,val promise: Promise)
   private val io=Executors.newSingleThreadExecutor()
   private val handler=Handler(Looper.getMainLooper())
@@ -49,10 +49,10 @@ internal class MonocularSnapshot(private val host: Activity,private val active: 
           Yuv420Pack.Plane(bytes,plane.rowStride,plane.pixelStride)
         }
         val width=image.width;val height=image.height;val k=frame.camera.imageIntrinsics
-        val metadata=mapOf<String,Any>("requestId" to request.id,"frameTimestampNs" to frame.timestamp,
+        val metadata=mapOf<String,Any?>("requestId" to request.id,"frameTimestampNs" to frame.timestamp,
           "imageTimestampNs" to image.timestamp,"imageLagMs" to lag,"imageDimensions" to listOf(width,height),
           "imageFocalLength" to k.focalLength.toList(),"imagePrincipalPoint" to k.principalPoint.toList(),
-          "cameraQuaternion" to frame.camera.pose.rotationQuaternion.toList(),"trackingState" to frame.camera.trackingState.name)
+          "navigationPose" to navigationPose(),"cameraQuaternion" to frame.camera.pose.rotationQuaternion.toList(),"trackingState" to frame.camera.trackingState.name)
         io.execute {
           try {
             val nv21=Yuv420Pack.nv21(width,height,planes[0],planes[1],planes[2])

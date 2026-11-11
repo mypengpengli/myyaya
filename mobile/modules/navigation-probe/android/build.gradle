@@ -12,6 +12,8 @@ android {
 }
 
 dependencies {
+  implementation 'com.facebook.react:react-android'
+  implementation project(':react-native-ble-plx')
   implementation 'com.google.ar:core:1.57.0'
   implementation 'org.opencv:opencv:4.13.0'
   testImplementation 'junit:junit:4.13.2'

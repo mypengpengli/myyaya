@@ -52,6 +52,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   @Volatile private var fieldStartFailure: String?=null
   @Volatile private var visualPulseGuard: VisualPulseGuard?=null
   @Volatile private var latestCameraNs=0L
+  @Volatile private var continuousMountPose: RoutePose?=null
   @Volatile private var notice="先连接底座并固定头部；教路线前请确认真实平整地面。"
   private lateinit var status: TextView
   fun buildView()=android.widget.LinearLayout(activity).apply {
@@ -63,7 +64,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   private fun menu() {
     holdForUi()
     val items=arrayOf("连接保存的底座","固定最低导航姿态（不回正）","设置镜头到底座偏移","开始教路线","完成并保存路线","选择已教路线",
-      "短后退方向校验","短左转方向校验","开始复走","移开障碍后继续","停止","短右转方向校验","空地分段采集（450毫秒）","左转观察采集（350毫秒）","右转观察采集（350毫秒）","绕障到前方40厘米（局部试验）")
+      "短后退方向校验","短左转方向校验","开始复走","移开障碍后继续","停止","短右转方向校验","空地分段采集（450毫秒）","左转观察采集（350毫秒）","右转观察采集（350毫秒）","绕障到前方40厘米（局部试验）","连续绕障到前方40厘米（试验）")
     AlertDialog.Builder(activity).setTitle("已教路线导航 · 真实平整地面试验").setItems(items) { _,i->
       runCatching {
         if(i !in listOf(10,12,13,14)) {
@@ -86,6 +87,9 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
         12->confirmFieldSegment()
         13->confirmFieldSegment("left")
         14->confirmFieldSegment("right")
+        16->AlertDialog.Builder(activity).setTitle("连续局部绕障")
+          .setMessage("后摄方向前方40厘米为目标。只在开始时确认一次，随后持续调整速度和转向；点停止或说停止可取消。请保持最低姿态、实际地板和线缆余量，并开始录像。")
+          .setNegativeButton("取消",null).setPositiveButton("开始连续绕障") { _,_->runCatching { validateFieldStart();motor.continuousGoal() }.onFailure { message(it.message ?: "无法启动") } }.show()
         15->AlertDialog.Builder(activity).setTitle("局部目标绕障")
           .setMessage("以后摄方向为前，目标是当前底座前方40厘米。保持最低姿态，在平整地板、线缆有余量且已开始录像时启动。会持续规划、转向和观察，不以三步结束；随时点停止导航。")
           .setNegativeButton("取消",null).setPositiveButton("开始绕障") { _,_->runCatching { validateFieldStart();motor.localGoal() }.onFailure { message(it.message ?: "无法启动") } }.show()
@@ -197,6 +201,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
       }.onFailure { message(it.message ?: "采集条件未满足") } }.show()
   }
   private fun validateFieldStart() {
+    check(motor.continuous?.pilot?.active!=true) { "请先停止连续导航" }
     check(countdown==null) { "请等待当前倒计时或取消本次动作" }
     check(!motor.busy && calibration==null && teacher==null && follower?.phase !in listOf("FOLLOWING","FACING_USER")) { "请先停止其他动作" }
     check(field?.moving!=true) { "请等待本段停稳" }
@@ -236,6 +241,22 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
       promise.resolve(mapOf("batchId" to id,"maximumSteps" to 80,"maximumSeconds" to 600))
     } catch(e: Exception) { promise.reject("ERR_LOCAL_MISSION",e.message,e) }
   }
+  fun beginContinuous(ble: com.bleplx.BlePlxModule,device: String,expectedEpoch: Int,gx: Double,gy: Double,height: Float,region: FloorFlowRegion): Map<String,Any?> {
+    validateFieldStart();check(motor.stopEpoch==expectedEpoch) { "启动已被停止操作取消" }
+    check(mountSettings.value!=null) { "缺少安装偏移" }
+    val envelope=activity.getSharedPreferences("terrain-envelope",0)
+    val measured=activity.getSharedPreferences("terrain-camera",0).getFloat("height",0f)
+    require(height in .03f.. .5f && abs(height-measured)<=.005f)
+    val pilot=ContinuousPilot(gx,gy,envelope.getFloat("width",0f).toDouble(),envelope.getFloat("length",0f).toDouble(),
+      envelope.getFloat("margin",.05f).toDouble(),mount.right.toDouble(),mount.alongView.toDouble(),height,SystemClock.elapsedRealtime())
+    field?.cancel("CONTINUOUS_TASK");fieldBatchId=null;motor.continuous?.close()
+    continuousMountPose=requireNotNull(fieldSample?.pose)
+    resetFloorFlow();selectFloorRegion(region)
+    motor.continuous=NativeContinuousDrive(ble,device,pilot);motor.seedSensors()
+    message("连续导航已启动，正在建立地板定位；可点停止或说停止。")
+    return requireNotNull(motor.continuous).report()
+  }
+  fun continuousSnapshot(): Map<String,Any?>?=motor.continuous?.report()
   fun localMissionProgress(value: String) { message(value.take(450)) }
   fun localMissionRegion(token: String,region: FloorFlowRegion) {
     check(token==fieldBatchId && field?.phase=="READY" && countdown==null && !motor.busy) { "任务已停止或当前仍在运动" };selectFloorRegion(region)
@@ -253,8 +274,8 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   }
   private fun finishFieldDiagnostic() { val old=fieldDiagnostic;fieldDiagnostic=null;old?.resolve(fieldReport()) }
   private fun fieldReport()=field?.report()?.plus(mapOf("batchId" to fieldBatchId,"startFailureDetail" to fieldStartFailure,"lastSegment" to (fieldAnnotatedResult ?: field?.result)))
-  fun operatorFloorHeight(): Float?=fieldMeasuredHeight.takeIf { field?.phase in listOf("READY","RUNNING","SETTLING","COMPLETE") }
-  fun operatorAllowsGapRecovery()=fieldIsLocalMission && field?.phase in listOf("READY","RUNNING","SETTLING","COMPLETE")
+  fun operatorFloorHeight(): Float?=motor.continuous?.pilot?.takeIf { it.active }?.height ?: fieldMeasuredHeight.takeIf { field?.phase in listOf("READY","RUNNING","SETTLING","COMPLETE") }
+  fun operatorAllowsGapRecovery()=motor.continuous?.pilot?.active==true || fieldIsLocalMission && field?.phase in listOf("READY","RUNNING","SETTLING","COMPLETE")
   private fun startFieldWhenFresh(direction: String,ms: Int,trial: OperatorExploration,deadline: Long) {
     if(field!==trial || trial.phase!="READY") return
     val now=SystemClock.elapsedRealtime();val flow=floorFlow();val sample=visualMotionSample(flow)
@@ -378,6 +399,17 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     val pose=camera?.let { runCatching { basePose(it) }.getOrNull() }
     val sample=OperatorExploration.Sample(now,pose,camera?.t?.get(1),session,motor.isConnected(),motor.connectionRevision,recording,playback,hazard,recordingRemainingMs)
     fieldSample=sample
+    motor.continuous?.let { drive ->
+      if(drive.pilot.active && (!recording || playback)) drive.stop("相机录制已停止")
+      val baseline=continuousMountPose
+      if(drive.pilot.active && baseline!=null && pose!=null && (abs(pose.pitch-baseline.pitch)>.10f || abs(pose.roll-baseline.roll)>.08f)) drive.stop("头部或手机安装倾角发生变化")
+      if(drive.canReseed()) { resetFloorFlow();drive.pilot.reseeded() }
+      if(camera!=null) {
+        val q=camera.q
+        val yaw=atan2(-2.0*(q[0]*q[2]+q[1]*q[3]),1.0-2.0*(q[0]*q[0]+q[1]*q[1]))
+        drive.pilot.frame(now,cameraNs,yaw,floorFlow())
+      }
+    }
     field?.let { trial ->
       if(trial.phase=="RUNNING") visualPulseGuard?.check(visualMotionSample(floorFlow()),cameraNs)?.let { why ->
         trial.cancel(why);visualPulseGuard=null;motor.stop("地板视觉短步停止：$why")
@@ -460,7 +492,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     "routeName" to (follower?.route?.name ?: selected?.name),"waypoint" to follower?.waypoint,"headFixed" to headFixed,
     "backDirectionChecked" to backChecked,"turnDirectionChecked" to turnChecked,"connected" to motor.isConnected(),
     "mountMeasurement" to mountSettings.report(),"poseLock" to poseLock.report(),"pulseMeasurementRunning" to (calibration!=null),"lastPulseMeasurement" to lastMeasurement,
-    "operatorExploration" to fieldReport(),"reason" to (follower?.reason ?: notice))
+    "continuousNavigation" to continuousSnapshot(),"operatorExploration" to fieldReport(),"reason" to (follower?.reason ?: notice))
   companion object {
     fun referenceKey(map: RoomMapData): String {
       if(map.referenceJpeg.isEmpty() || map.imageFromMap==null) return ""

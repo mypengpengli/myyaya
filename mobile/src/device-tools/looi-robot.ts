@@ -36,6 +36,7 @@ let continuousMotionDeadmanTimer: ReturnType<typeof setTimeout> | null = null;
 let frontNearEdgeClearTimer: ReturnType<typeof setTimeout> | null = null;
 let rearNearEdgeClearTimer: ReturnType<typeof setTimeout> | null = null;
 let motionSequenceAbortGeneration = 0;
+let stopNativeNavigationDrive: (()=>void)|null=null;
 let stopNativeHeadPulse: (() => void) | null = null;
 
 type LooiSensorSnapshot = {
@@ -169,6 +170,7 @@ export function handleLooiRobotTransportDisconnected(error?: unknown): void {
   const previousDirection = state.activeDirection;
   // Pending head/gesture work belongs to this connection, even if reconnection is quick.
   motionSequenceAbortGeneration += 1;
+  try { stopNativeNavigationDrive?.(); } catch { /* native watchdog also detects disconnect */ }
   try { stopNativeHeadPulse?.(); } catch { /* Disconnect cleanup must finish even if the native bridge is gone. */ }
   clearContinuousMotionDeadman();
   state.driveControlRevalidationRequired = true;
@@ -748,6 +750,19 @@ export async function performLooiSocialAttentionPivot(direction: "left" | "right
   });
 }
 
+export function navigationDrivePermits() {
+  return {back:computeSafety("back").state==="safe",turn:computeSafety("left").state==="safe" && computeSafety("right").state==="safe"};
+}
+/** Keep one BLE owner and register native stop before any motor frames. */
+export async function prepareNativeNavigationDrive(owner:string,stop:()=>void) {
+  assertNavigationControl(owner);const requestToken=motionSequenceAbortGeneration,robot=await getRobot();
+  await waitForMovementSafetyReady("back","manual-bounded");
+  assertPendingMotionCurrent(requestToken,robot);assertNavigationControl(owner);assertMovementAllowed("back","manual-bounded");
+  const device=getLooiRobotRuntimeState().gatt?.deviceId;if(!device) throw new Error("缺少已连接的蓝牙设备");
+  prepareMotionStart(robot,"back","native-navigation");const generation=state.motionGeneration;
+  stopNativeNavigationDrive=stop;state.motionActive=true;state.activeDirection="back";
+  return {device,finish:()=>{if(generation===state.motionGeneration){state.motionActive=false;state.activeDirection=null;}if(stopNativeNavigationDrive===stop)stopNativeNavigationDrive=null;}};
+}
 /** Route controller's short pulses reuse community BLE and all existing interlocks. */
 export async function moveLooiNavigationPulse(direction: "back" | "left" | "right", durationMs: number, owner: string) {
   assertNavigationControl(owner);
@@ -889,6 +904,7 @@ export async function startLooiMotion(direction: string) {
 /** Immediate best-effort motor stop. Safe to call repeatedly. */
 export async function stopLooiMotion(reason = "explicit"): Promise<void> {
   motionSequenceAbortGeneration += 1;
+  stopNativeNavigationDrive?.();
   stopNativeHeadPulse?.();
   clearContinuousMotionDeadman();
   clearNearEdgeEscapeTimers();
@@ -1296,6 +1312,7 @@ function rememberRawNotification(event: LooiRawNotification): void {
 
 function triggerSensorSafetyStop(reason: "cliff" | "obstacle", details: Record<string, unknown>): void {
   if (!state.motionActive) return;
+  stopNativeNavigationDrive?.();
   motionSequenceAbortGeneration += 1;
   clearContinuousMotionDeadman();
   clearNearEdgeEscapeTimers();

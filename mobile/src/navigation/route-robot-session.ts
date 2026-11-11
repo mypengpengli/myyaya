@@ -3,7 +3,7 @@ import { openNativeTaughtRoutes, subscribeRouteMotion, publishRouteRobotState, a
 import { withExternalActivityLease } from "../core/background-process-exit";
 import { acquireNavigationControl, releaseNavigationControl, assertNavigationControl } from "../core/navigation-control-lease";
 import { pauseSocialCamera } from "../core/social-attention";
-import { getLooiRobotRuntimeState, subscribeLooiRobotRuntimeState, moveLooiNavigationPulse, moveLooiOperatorBackCalibration, moveLooiOperatorTurnCalibration, setLooiHead, stopLooiMotion } from "../device-tools/looi-robot";
+import { getLooiRobotRuntimeState, navigationDrivePermits, subscribeLooiRobotRuntimeState, moveLooiNavigationPulse, moveLooiOperatorBackCalibration, moveLooiOperatorTurnCalibration, setLooiHead, stopLooiMotion } from "../device-tools/looi-robot";
 import { forceReconnectSavedLooiRobot } from "../device-tools/looi-robot-autoconnect";
 import { compactChinese, isChineseStop } from "../voice/chinese-command";
 
@@ -66,6 +66,10 @@ export async function openTaughtRouteSession(name = ""): Promise<string | null> 
           void (async () => {
             try {
               if (event.action === "stop") { stopping=stopLooiMotion("navigation-stop").catch(() => {});await stopping;return; }
+              if(event.action === "continuous_goal") {
+                await stopping;assertNavigationControl(token);
+                await (await import("../diagnostics/continuous-goal-mission")).runContinuousGoalMission({operatorConfirmed:true,navigationOwner:token});return;
+              }
               if(event.action === "local_goal") {
                 await stopping;assertNavigationControl(token);
                 const {getNavigationProbeStatus}=await import("../../modules/navigation-probe");
@@ -108,9 +112,9 @@ export async function openTaughtRouteSession(name = ""): Promise<string | null> 
           })();
         });
         removeListener = () => listener.remove();
-        const publish = () => { if (!closed) void publishRouteRobotState(token, getLooiRobotRuntimeState().connected, voiceReady).catch(() => {}); };
+        const publish = () => { if (!closed) void publishRouteRobotState(token, getLooiRobotRuntimeState().connected, voiceReady,navigationDrivePermits().back,navigationDrivePermits().turn).catch(() => {}); };
         removeState = subscribeLooiRobotRuntimeState(publish);
-        timer = setInterval(publish, 400);
+        timer = setInterval(publish, 200);
         return await openNativeTaughtRoutes(token, name);
       } finally {
         closed = true;

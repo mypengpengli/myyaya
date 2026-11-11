@@ -91,6 +91,7 @@ internal class FloorFlowDiagnostic(private val evidenceDirectory: File?=null) {
           process(input)
         }
         if(!closed && epoch.get()==generation) state=result+mapOf("sampleTimestampNs" to input.time,
+          "sampleYawRadians" to atan2(-2.0*(input.q[0]*input.q[2]+input.q[1]*input.q[3]),1.0-2.0*(input.q[0]*input.q[0]+input.q[1]*input.q[1])),
           "evidenceFile" to evidenceFile,"cameraImageLagMs" to (input.frameTime-input.time)/1_000_000.0,
           "workerDurationMs" to android.os.SystemClock.elapsedRealtime()-workStarted,
           "measuredHeightMeters" to height,"region" to input.region.report(),"source" to "rolling-floor-flow-fixed-height","autonomousMotionAuthorized" to false)

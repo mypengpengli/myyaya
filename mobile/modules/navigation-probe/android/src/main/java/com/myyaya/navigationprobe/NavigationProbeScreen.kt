@@ -107,7 +107,7 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
   private val datasets=ARSessionDataset(host)
   private var playbackName: String?=null
   private lateinit var datasetButton: Button
-  private val monocular=MonocularSnapshot(host) { running && resumed && !isDestroyed && !isFinishing }
+  private val monocular=MonocularSnapshot(host,{ running && resumed && !isDestroyed && !isFinishing },{roomMap?.continuousSnapshot()})
   fun captureMonocular(promise: expo.modules.kotlin.Promise)=monocular.request(promise)
   fun showMonocular(id: String,data: String,inferenceMs: Double)=monocular.show(id,data,inferenceMs)
   fun showFloor(id: String,data: String,summary: String)=monocular.showFloor(id,data,summary)
@@ -124,6 +124,11 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
     if(!confirmed || !running || !resumed || playbackName!=null || !datasets.recording()) { promise.reject("ERR_LOCAL_MISSION","需要实时相机、录像和场地确认",null);return }
     datasets.extendForLocalMission()
     roomMap?.beginLocalMission(confirmed,region,promise) ?: promise.reject("ERR_FIELD_SCREEN","未打开路线页",null)
+  }
+  fun beginContinuous(ble: com.bleplx.BlePlxModule,device: String,epoch: Int,gx: Double,gy: Double,height: Float,region: FloorFlowRegion): Map<String,Any?> {
+    check(running && resumed && playbackName==null && datasets.recording()) { "请开始实时扫描和录像" }
+    datasets.extendForLocalMission()
+    return requireNotNull(roomMap).beginContinuous(ble,device,epoch,gx,gy,height,region)
   }
   fun localMissionProgress(value: String) { roomMap?.localMissionProgress(value) }
   fun localMissionRegion(token: String,region: FloorFlowRegion) { check(running && resumed);requireNotNull(roomMap).localMissionRegion(token,region) }

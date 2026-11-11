@@ -26,6 +26,7 @@ export function startIntegrationControl() {
         : command.mode === "floor_vision" ? await (await import("./floor-vision-probe")).runFloorVisionProbe(command.args)
         : command.mode === "near_step" ? await (await import("./near-step-probe")).runNearStepProbe(command.args)
         : command.mode === "near_sequence" ? await (await import("./near-sequence-probe")).runNearSequenceProbe(command.args)
+        : command.mode === "continuous_goal" ? await (await import("./continuous-goal-mission")).runContinuousGoalMission(command.args)
         : command.mode === "local_goal" ? await (await import("./local-goal-mission")).runLocalGoalMission(command.args)
         : command.mode === "robot_sensors" ? await (await import("../device-tools/looi-robot")).inspectLooiSensorChannels()
         : command.mode === "upright_reference"

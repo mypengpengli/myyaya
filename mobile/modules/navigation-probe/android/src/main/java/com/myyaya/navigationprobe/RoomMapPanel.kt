@@ -696,6 +696,9 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   fun beginLocalMission(confirmed: Boolean,region: FloorFlowRegion,promise: expo.modules.kotlin.Promise) {
     taughtRoutes?.beginLocalMission(confirmed,region,promise) ?: promise.reject("ERR_FIELD_SCREEN","未打开路线页",null)
   }
+  fun continuousSnapshot()=taughtRoutes?.continuousSnapshot()
+  fun beginContinuous(ble: com.bleplx.BlePlxModule,device: String,epoch: Int,gx: Double,gy: Double,height: Float,region: FloorFlowRegion)=
+    requireNotNull(taughtRoutes).beginContinuous(ble,device,epoch,gx,gy,height,region)
   fun localMissionProgress(value: String) { taughtRoutes?.localMissionProgress(value) }
   fun localMissionRegion(token: String,region: FloorFlowRegion) { requireNotNull(taughtRoutes).localMissionRegion(token,region) }
   fun openTaughtRoute(id: String) {

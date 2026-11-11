@@ -12,7 +12,13 @@ export type NavigationProbeStatus = {
   measuredCameraHeightMeters?: number;
 };
 
+export type ContinuousStatus={token?:string;stopEpoch:number;phase?:string;reason?:string;active?:boolean;pose?:{x:number;y:number;yaw:number};poseReady?:boolean;frameNs?:number;[key:string]:unknown};
 type Native = {
+  continuousStatus():Promise<ContinuousStatus>;
+  startContinuous(device:string,epoch:number,config:string):Promise<ContinuousStatus>;
+  continuousObservation(token:string,data:string):Promise<void>;
+  stopContinuous(reason:string):Promise<void>;
+  saveContinuousReport(data:string):Promise<void>;
   getStatus(): Promise<NavigationProbeStatus>;
   diagnosticField(direction: "back" | "back_step" | "left" | "right" | "left_step" | "right_step", confirmed: boolean, stepMs: number, batchId: string): Promise<Record<string, unknown>>;
   beginLocalMission(confirmed: boolean,left: number,top: number,right: number,bottom: number): Promise<{batchId:string;maximumSteps:number;maximumSeconds:number}>;
@@ -29,7 +35,7 @@ type Native = {
   open(): Promise<string | null>;
   openMap(): Promise<string | null>;
   openRoutes(token: string, name: string): Promise<string | null>;
-  routeRobotState(token: string, connected: boolean, voiceStop: boolean): Promise<void>;
+  routeRobotState(token: string, connected: boolean, voiceStop: boolean,back:boolean,turn:boolean): Promise<void>;
   acknowledgeRouteMotion(token: string, sequence: number, ok: boolean, message: string): Promise<void>;
   addListener(event: string, callback: (event: RouteMotorEvent) => void): { remove(): void };
   listTaughtRoutes(): Promise<Array<{ id: string; name: string; mapId: string; requiresReference: boolean; waypoints: number }>>;
@@ -41,6 +47,11 @@ function getNative(): Native {
   if (Platform.OS !== "android") throw new Error("房间视觉探针目前仅支持 Android");
   return native ??= requireNativeModule<Native>("NavigationProbe");
 }
+export const getContinuousStatus=()=>getNative().continuousStatus();
+export const startNativeContinuous=(device:string,epoch:number,gx:number,gy:number,height:number,region:{left:number;top:number;right:number;bottom:number})=>getNative().startContinuous(device,epoch,JSON.stringify({gx,gy,height,region}));
+export const observeNativeContinuous=(token:string,data:unknown)=>getNative().continuousObservation(token,JSON.stringify(data));
+export const stopNativeContinuous=(reason:string)=>getNative().stopContinuous(reason);
+export const saveContinuousReport=(value:unknown)=>getNative().saveContinuousReport(JSON.stringify(value));
 export const getNavigationProbeStatus = () => getNative().getStatus();
 export const runNativeFieldDiagnostic = (direction: "back" | "back_step" | "left" | "right" | "left_step" | "right_step", confirmed: boolean, stepMs = 150, batchId = "") => getNative().diagnosticField(direction, confirmed, stepMs, batchId);
 export const beginNativeLocalMission = (confirmed: boolean,region={left:.3,top:.65,right:.88,bottom:.82}) => getNative().beginLocalMission(confirmed,region.left,region.top,region.right,region.bottom);
@@ -59,7 +70,7 @@ export const exportNativeMonocularBenchmark = () => getNative().exportMonocularB
 export const openNativeNavigationProbe = () => getNative().open();
 export const openNativeRoomMap = () => getNative().openMap();
 export const openNativeTaughtRoutes = (token: string, name = "") => getNative().openRoutes(token, name);
-export const publishRouteRobotState = (token: string, connected: boolean, voiceStop = false) => getNative().routeRobotState(token, connected, voiceStop);
+export const publishRouteRobotState = (token: string, connected: boolean, voiceStop = false,back=false,turn=false) => getNative().routeRobotState(token, connected, voiceStop,back,turn);
 export const acknowledgeRouteMotion = (token: string, sequence: number, ok: boolean, message: string) => getNative().acknowledgeRouteMotion(token, sequence, ok, message);
 export const subscribeRouteMotion = (callback: (event: RouteMotorEvent) => void) => getNative().addListener("onRouteMotion", callback);
 export const listTaughtRoutes = () => getNative().listTaughtRoutes();

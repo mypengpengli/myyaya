@@ -1,5 +1,6 @@
 /** One navigation screen owns motion. Stale owners never regain access after close. */
 let owner: string | null = null;
+export function getNavigationControlOwner(): string | null { return owner; }
 export function acquireNavigationControl(token: string): void {
   if (!token || owner !== null) throw new Error("导航控制已经打开");
   owner = token;

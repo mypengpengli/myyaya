@@ -40,6 +40,39 @@ class NavigationProbeModule : Module() {
         screen.beginDiagnosticBatch(confirmed,FloorFlowRegion(left.toFloat(),top.toFloat(),right.toFloat(),bottom.toFloat()),promise)
       }.onFailure { promise.reject("ERR_FIELD_REGION",it.message,it) } }
     }
+    AsyncFunction("continuousStatus") { (gateway?.continuous?.report() ?: emptyMap<String,Any?>())+mapOf("stopEpoch" to (gateway?.stopEpoch ?: -1)) }
+    AsyncFunction("stopContinuous") { reason: String -> gateway?.cancelContinuous(reason.take(200)) }
+    AsyncFunction("startContinuous") { device: String,epoch: Int,config: String,promise: Promise ->
+      val activity=appContext.currentActivity
+      if(activity==null || gateway?.foreground!=true) promise.reject("ERR_CONTINUOUS","请打开路线页面",null)
+      else activity.runOnUiThread { runCatching {
+        require(config.length<=2000);val c=org.json.JSONObject(config);val r=c.getJSONObject("region")
+        val ble=requireNotNull((appContext.reactContext as? com.facebook.react.bridge.ReactContext)?.getNativeModule(com.bleplx.BlePlxModule::class.java))
+        requireNotNull(routeScreen).beginContinuous(ble,device,epoch,c.getDouble("gx"),c.getDouble("gy"),c.getDouble("height").toFloat(),FloorFlowRegion(r.getDouble("left").toFloat(),r.getDouble("top").toFloat(),r.getDouble("right").toFloat(),r.getDouble("bottom").toFloat()))
+      }.onSuccess { promise.resolve(it) }.onFailure { promise.reject("ERR_CONTINUOUS",it.message,it) } }
+    }
+    AsyncFunction("continuousObservation") { token: String,data: String ->
+      require(data.length<=500_000)
+      val drive=requireNotNull(gateway?.continuous);check(drive.token==token && drive.pilot.active)
+      val value=org.json.JSONObject(data);val source=value.getJSONObject("capture")
+      fun number(o: org.json.JSONObject,k: String)=o.getDouble(k).also { require(it.isFinite() && kotlin.math.abs(it)<100) }
+      val capture=ContinuousPilot.Pose(number(source,"x"),number(source,"y"),number(source,"yaw"))
+      val cells=value.getJSONArray("cells");require(cells.length()<=10_000)
+      val points=(0 until cells.length()).mapNotNull { i->val a=cells.getJSONArray(i)
+        val x=a.getDouble(0);val y=a.getDouble(1);val label=a.getInt(2)
+        if(x.isFinite() && y.isFinite() && kotlin.math.abs(x)<5 && kotlin.math.abs(y)<5 && label in 1..3 && a.getInt(3)>=3) ContinuousPilot.Point(x,y,label) else null }
+      val path=value.getJSONArray("path");require(path.length()<=200)
+      val route=(0 until path.length()).map { i->val a=path.getJSONObject(i);ContinuousPilot.Pose(number(a,"x"),number(a,"y"),0.0) }
+      val obstacles=value.optJSONArray("obstacles") ?: org.json.JSONArray();require(obstacles.length()<=5000)
+      val retained=(0 until obstacles.length()).map {i->val a=obstacles.getJSONObject(i);val label=a.getInt("label");require(label in 2..3);ContinuousPilot.Point(number(a,"x"),number(a,"y"),label)}
+      drive.pilot.observation(android.os.SystemClock.elapsedRealtime(),value.getLong("imageNs"),capture,points,route,retained)
+    }
+    AsyncFunction("saveContinuousReport") { data: String ->
+      require(data.length<=250_000);org.json.JSONObject(data)
+      val context=requireNotNull(appContext.reactContext)
+      val root=(context.getExternalFilesDir("navigation-probe") ?: File(context.filesDir,"navigation-probe")).apply { mkdirs() }
+      val tmp=File(root,"continuous-goal-mission.tmp");tmp.writeText(data);check(tmp.renameTo(File(root,"continuous-goal-mission.json")))
+    }
     AsyncFunction("beginLocalMission") { confirmed: Boolean,left: Double,top: Double,right: Double,bottom: Double,promise: Promise ->
       val screen=routeScreen;val activity=appContext.currentActivity
       if(screen==null || activity==null) promise.reject("ERR_LOCAL_MISSION","请打开路线相机",null)
@@ -149,7 +182,7 @@ class NavigationProbeModule : Module() {
         }
       }
     }
-    AsyncFunction("routeRobotState") { token: String, connected: Boolean, voiceStop: Boolean -> if (gateway?.token==token) gateway?.state(connected,voiceStop) }
+    AsyncFunction("routeRobotState") { token: String, connected: Boolean, voiceStop: Boolean, back: Boolean, turn: Boolean -> if (gateway?.token==token) gateway?.state(connected,voiceStop,back,turn) }
     AsyncFunction("acknowledgeRouteMotion") { token: String, sequence: Int, ok: Boolean, message: String ->
       if (gateway?.token==token) gateway?.acknowledge(sequence,ok,message)
     }
