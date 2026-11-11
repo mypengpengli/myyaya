@@ -8,8 +8,8 @@ export type NearStepDecision = ({allowed:false;reason:string} & Partial<Clearanc
 export function assessNearStep(report: { reason: string; nearFloorObserved: boolean; corridorDropPixels: number;
   nearestObstacleEstimateMeters: number|null; fitInlierRatio: number; heldoutFloorP90HeightErrorMeters: number },geometry?: NearStepGeometry|null): NearStepDecision {
   if(!geometry || ![geometry.centerRightMeters,geometry.alongViewMeters,geometry.widthMeters,geometry.lengthMeters,geometry.marginMeters].every(Number.isFinite)
-    || geometry.widthMeters<.1 || geometry.widthMeters>1 || geometry.lengthMeters<.1 || geometry.lengthMeters>1
-    || geometry.marginMeters<.02 || geometry.marginMeters>.3 || Math.abs(geometry.alongViewMeters)>.3 || Math.abs(geometry.centerRightMeters)>.3) return {allowed:false,reason:"NAVIGATION_GEOMETRY_REQUIRED"};
+    || geometry.widthMeters<.1-1e-6 || geometry.widthMeters>1+1e-6 || geometry.lengthMeters<.1-1e-6 || geometry.lengthMeters>1+1e-6
+    || geometry.marginMeters<.02-1e-6 || geometry.marginMeters>.3+1e-6 || Math.abs(geometry.alongViewMeters)>.3+1e-6 || Math.abs(geometry.centerRightMeters)>.3+1e-6) return {allowed:false,reason:"NAVIGATION_GEOMETRY_REQUIRED"};
   if(![report.corridorDropPixels,report.fitInlierRatio,report.heldoutFloorP90HeightErrorMeters].every(Number.isFinite)
     || report.fitInlierRatio<0 || report.fitInlierRatio>1 || report.corridorDropPixels<0
     || (report.nearestObstacleEstimateMeters!==null && (!Number.isFinite(report.nearestObstacleEstimateMeters) || report.nearestObstacleEstimateMeters<=0))) return {allowed:false,reason:"INVALID_OBSERVATION"};

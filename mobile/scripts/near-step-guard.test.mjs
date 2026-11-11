@@ -11,6 +11,8 @@ assert.equal(assessNearStep({...near,nearestObstacleEstimateMeters:.27},geometry
 assert.equal(assessNearStep({...near,nearestObstacleEstimateMeters:.24},geometry).durationMs,150);
 assert.equal(assessNearStep({...near,nearestObstacleEstimateMeters:.27},{...geometry,alongViewMeters:.1}).allowed,false);
 assert.equal(assessNearStep(near).allowed,false);
+assert.equal(assessNearStep(near,{...geometry,marginMeters:Math.fround(.02)}).allowed,true);
+assert.equal(assessNearStep(near,{...geometry,marginMeters:.019}).allowed,false);
 for(const change of [{nearFloorObserved:false},{corridorDropPixels:20},{nearestObstacleEstimateMeters:.2},{nearestObstacleEstimateMeters:NaN},{fitInlierRatio:.2},{fitInlierRatio:Infinity}]) assert.equal(assessNearStep({...near,...change},geometry).allowed,false);
 let captures=0,motions=0,stops=0,batches=0;let report=near;
 const probe=load("src/diagnostics/near-step-probe.ts",{

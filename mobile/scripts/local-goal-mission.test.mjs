@@ -6,7 +6,7 @@ const geometry={centerRightMeters:.07,alongViewMeters:.05,widthMeters:.15,length
 function rig(fail=false) {
  const calls={begins:0,stops:0,moves:0,observations:0},pose={x:0,y:0,yaw:0};
  const flow=(x,z)=>({cumulativePoseAvailable:true,originContinuity:true,originTimestampNs:1,cumulativeCameraDxMeters:x,cumulativeCameraDzMeters:z});
- const native={getNavigationProbeStatus:async()=>({dataDirectory:'/test'}),beginNativeLocalMission:async()=>{calls.begins++;return {batchId:'one-persistent-task'};},
+ const native={saveNativeLocalMissionReport:async(value)=>{assert.ok(value.phase);assert.ok(value.history.length<=80);},beginNativeLocalMission:async()=>{calls.begins++;return {batchId:'one-persistent-task'};},
  publishNativeLocalMission:async()=>{},setNativeLocalMissionRegion:async token=>assert.equal(token,'one-persistent-task'),stopNativeOperatorObservation:async()=>{calls.stops++;},
  runNativeFieldDiagnostic:async(direction,confirmed,ms,token)=>{
   assert.equal(confirmed,true);assert.equal(token,'one-persistent-task');calls.moves++;

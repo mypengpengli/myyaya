@@ -47,6 +47,13 @@ class NavigationProbeModule : Module() {
         .onFailure { promise.reject("ERR_LOCAL_MISSION",it.message,it) } }
     }
     AsyncFunction("localMissionProgress") { value: String -> appContext.currentActivity?.runOnUiThread { routeScreen?.localMissionProgress(value) } }
+    AsyncFunction("saveLocalMissionReport") { data: String ->
+      require(data.length<=250_000);org.json.JSONObject(data)
+      val context=requireNotNull(appContext.reactContext)
+      val root=(context.getExternalFilesDir("navigation-probe") ?: File(context.filesDir,"navigation-probe")).apply { mkdirs() }
+      val target=File(root,"local-goal-mission.json");val temporary=File(root,"local-goal-mission.tmp")
+      temporary.writeText(data);check(temporary.renameTo(target)) { "无法保存本机任务记录" }
+    }
     AsyncFunction("localMissionRegion") { token: String,left: Double,top: Double,right: Double,bottom: Double,promise: Promise ->
       val screen=routeScreen;val activity=appContext.currentActivity
       if(screen==null || activity==null) promise.reject("ERR_LOCAL_MISSION","路线页已关闭",null)

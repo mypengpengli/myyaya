@@ -1,5 +1,4 @@
-import * as FileSystem from "expo-file-system/legacy";
-import { beginNativeLocalMission,getNavigationProbeStatus,publishNativeLocalMission,runNativeFieldDiagnostic,setNativeLocalMissionRegion,stopNativeOperatorObservation } from "../../modules/navigation-probe";
+import { beginNativeLocalMission,publishNativeLocalMission,saveNativeLocalMissionReport,runNativeFieldDiagnostic,setNativeLocalMissionRegion,stopNativeOperatorObservation } from "../../modules/navigation-probe";
 import { LocalGoalController,cameraYaw } from "../navigation/local-goal-controller";
 import { assessNearStep } from "../navigation/near-step-guard";
 import { runFloorVisionProbe } from "./floor-vision-probe";
@@ -15,13 +14,11 @@ export async function runLocalGoalMission(args:{operatorConfirmed?:unknown;heigh
     || typeof maximumSteps!=="number" || !Number.isInteger(maximumSteps) || maximumSteps<1 || maximumSteps>80) throw new Error("目标应在15厘米至1米内，动作不超过80次");
   active=true;const started=Date.now(),history:Record<string,unknown>[]=[];
   let controller:LocalGoalController|undefined,batchId="",phase="STARTING",error:string|undefined,scanCount=0;
-  let path="";
   const save=async(note:string)=>{
     const report={phase,batchId,goal,pose:controller?.pose,remainingMeters:controller?.distance(),steps:history.length,elapsedMs:Date.now()-started,history,error,estimatedArrival:phase==="AT_GOAL",globalLocalizationValidated:false};
-    if(path) await FileSystem.writeAsStringAsync(path,JSON.stringify(report));await publishNativeLocalMission(`${note}\n局部目标前${(goal.y as number)*100}厘米 / 右${(goal.x as number)*100}厘米 · 动作${history.length}/${maximumSteps}${controller?` · 剩余估计${Math.round(controller.distance()*100)}厘米`:""}`);return report;
+    await saveNativeLocalMissionReport(report);await publishNativeLocalMission(`${note}\n局部目标前${(goal.y as number)*100}厘米 / 右${(goal.x as number)*100}厘米 · 动作${history.length}/${maximumSteps}${controller?` · 剩余估计${Math.round(controller.distance()*100)}厘米`:""}`);return report;
   };
   try {
-    const status=await getNavigationProbeStatus();path=`file://${status.dataDirectory}/local-goal-mission.json`;
     const batch=await beginNativeLocalMission(true,args.roi);batchId=batch.batchId;
     for(let n=0;n<maximumSteps && Date.now()-started<550_000;n++) {
       phase="OBSERVING";await save("绕障任务：观察地面和障碍");
