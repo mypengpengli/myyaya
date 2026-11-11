@@ -69,4 +69,11 @@ class OperatorExplorationTest {
     for(t in 1200L..2800L step 100) f.observe(sample(t),t)
     assertEquals(150,f.result!!["durationMs"]);assertEquals("back_step",f.result!!["direction"])
   }
+  @Test fun adaptiveStepAllows250ButRejectsArbitraryDurations() {
+    val f=OperatorExploration(sample());f.issue(1000,"back_step",250);f.acknowledge(true,1250)
+    for(t in 1300L..2800L step 100) f.observe(sample(t),t)
+    assertEquals(250,f.result!!["durationMs"])
+    val bad=OperatorExploration(sample());try { bad.issue(1000,"back_step",400);fail() } catch(_:IllegalArgumentException) {}
+    assertEquals(0,bad.segments)
+  }
 }

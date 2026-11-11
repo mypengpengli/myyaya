@@ -28,10 +28,22 @@ class NavigationProbeModule : Module() {
           .onFailure { promise.reject("ERR_FLOOR_SHOW",it.message,it) }
       }
     }
-    AsyncFunction("diagnosticField") { direction: String,confirmed: Boolean,promise: Promise ->
+    AsyncFunction("diagnosticField") { direction: String,confirmed: Boolean,stepMs: Int,batchId: String,promise: Promise ->
       val screen=routeScreen;val activity=appContext.currentActivity
       if(screen==null || activity==null) promise.reject("ERR_FIELD_SCREEN","请打开教路线采集页面",null)
-      else activity.runOnUiThread { screen.diagnosticField(direction,confirmed,promise) }
+      else activity.runOnUiThread { screen.diagnosticField(direction,confirmed,stepMs,batchId,promise) }
+    }
+    AsyncFunction("beginDiagnosticBatch") { confirmed: Boolean,left: Double,top: Double,right: Double,bottom: Double,promise: Promise ->
+      val screen=routeScreen;val activity=appContext.currentActivity
+      if(screen==null || activity==null) promise.reject("ERR_FIELD_SCREEN","请打开教路线采集页面",null)
+      else activity.runOnUiThread { runCatching {
+        screen.beginDiagnosticBatch(confirmed,FloorFlowRegion(left.toFloat(),top.toFloat(),right.toFloat(),bottom.toFloat()),promise)
+      }.onFailure { promise.reject("ERR_FIELD_REGION",it.message,it) } }
+    }
+    AsyncFunction("stopOperatorObservation") { promise: Promise ->
+      val activity=appContext.currentActivity
+      if(activity==null) promise.resolve(null)
+      else activity.runOnUiThread { routeScreen?.stopNavigation("视觉观察要求停车");promise.resolve(null) }
     }
     AsyncFunction("analyzeUprightReference") { id: String,height: Double,width: Double,promise: Promise ->
       val screen=routeScreen;val activity=appContext.currentActivity
@@ -129,12 +141,20 @@ class NavigationProbeModule : Module() {
       val service = runCatching { context.packageManager.getPackageInfo("com.google.ar.core", 0) }.getOrNull()
       val availability = ArCoreApk.getInstance().checkAvailability(context)
       val last = File(context.getExternalFilesDir("navigation-probe") ?: context.filesDir, "latest.json")
+      val mount=context.getSharedPreferences("navigation-mount",0)
+      val envelope=context.getSharedPreferences("terrain-envelope",0)
+      val width=envelope.getFloat("width",0f);val length=envelope.getFloat("length",0f);val margin=envelope.getFloat("margin",.05f)
+      val geometry=if(mount.getInt("schema",0)==1 && width in .1f..1f && length in .1f..1f && margin in .02f.. .3f)
+        mapOf("centerRightMeters" to mount.getFloat("right",0f),"alongViewMeters" to mount.getFloat("alongView",0f),
+          "widthMeters" to width,"lengthMeters" to length,"marginMeters" to margin,"source" to "user-measured-settings") else null
       mapOf(
         "available" to true,
         "availability" to availability.name,
         "serviceInstalled" to (service != null),
         "serviceVersion" to service?.versionName,
         "dataDirectory" to last.parentFile!!.absolutePath,
+        "navigationGeometry" to geometry,
+        "measuredCameraHeightMeters" to context.getSharedPreferences("terrain-camera",0).getFloat("height",0f),
         "lastReport" to last.takeIf { it.isFile && it.length() <= 32_000 }?.readText()
       )
     }

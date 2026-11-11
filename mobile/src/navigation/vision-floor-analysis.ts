@@ -1,10 +1,14 @@
 /** Experimental known-height floor geometry. Independent of model/network/motor runtimes. */
 export type FloorCamera = { width: number; height: number; fx: number; fy: number; cx: number; cy: number; q: number[] };
 export type FloorRegion = { left: number; top: number; right: number; bottom: number };
+export type FloorCorridor = { centerRightMeters: number; widthMeters: number; frontReachMeters: number };
 const median = (a: number[]) => { const s = [...a].sort((a,b) => a-b); return s[Math.floor(s.length/2)]; };
 
 export function analyzeFloorDepth(depth: Uint8Array, width: number, height: number, camera: FloorCamera,
-  cameraHeight: number, roi: FloorRegion) {
+  cameraHeight: number, roi: FloorRegion, corridor: FloorCorridor={centerRightMeters:0,widthMeters:.25,frontReachMeters:.1}) {
+  if(!Object.values(corridor).every(Number.isFinite) || Math.abs(corridor.centerRightMeters)>.5 || corridor.widthMeters<.1 || corridor.widthMeters>1.6 || corridor.frontReachMeters<0 || corridor.frontReachMeters>1) throw new Error("无效车身观测范围");
+  const corridorLeft=corridor.centerRightMeters-corridor.widthMeters/2, corridorRight=corridor.centerRightMeters+corridor.widthMeters/2;
+  const nearStart=Math.max(.1,corridor.frontReachMeters+.05),nearEnd=nearStart+.15,farEnd=nearStart+.35;
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 32 || height < 32 || width*height > 262144 || depth.length !== width*height) throw new Error("无效深度栅格");
   const numeric = [camera.width,camera.height,camera.fx,camera.fy,camera.cx,camera.cy,cameraHeight,...camera.q,...Object.values(roi)];
   if (!numeric.every(Number.isFinite) || camera.q.length !== 4 || camera.fx <= 0 || camera.fy <= 0 || camera.width <= 0 || camera.height <= 0
@@ -65,20 +69,21 @@ export function analyzeFloorDepth(depth: Uint8Array, width: number, height: numb
       else if(h<=-.035) { labels[n]=3;dropPixels++; }
     }
     // Sampling ahead of the robot is evidence only; its unseen footprint is not filled in.
-    if(groundForward>=.15 && groundForward<.5 && groundRight>=-.055 && groundRight<=.195) {
-      const column=Math.min(2,Math.floor((groundRight+.055)/.25*3)), row=groundForward<.3?0:1;
+    if(groundForward>=nearStart && groundForward<farEnd && groundRight>=corridorLeft && groundRight<=corridorRight) {
+      const column=Math.min(2,Math.floor((groundRight-corridorLeft)/corridor.widthMeters*3)), row=groundForward<nearEnd?0:1;
       sectors[row*3+column][labels[n]===1 ? "floor" : "other"]++;
       if(labels[n]===3) corridorDropPixels++;
     }
-    if(labels[n]===2 && right>=-.055 && right<=.195 && forward<2) obstacleCandidates.push(forward);
+    if(labels[n]===2 && right>=corridorLeft && right<=corridorRight && forward<2) obstacleCandidates.push(forward);
   }
   if(obstacleCandidates.length>=12) nearestObstacle=obstacleCandidates.sort((a,b)=>a-b)[Math.floor(obstacleCandidates.length*.1)];
   const coverage=sectors.map(s=>({ ...s, ratio:s.floor/(s.floor+s.other || 1) }));
   const nearFloorObserved=coverage.slice(0,3).every(s=>s.floor>=12 && s.ratio>=.8);
-  const reason=corridorDropPixels>=12 ? "POSSIBLE_DROP_IN_CORRIDOR" : nearestObstacle<.35 ? "OBSTACLE_IN_VIEW_CORRIDOR" : coverage.every(s=>s.floor>=12 && s.ratio>=.8) ? "FLOOR_STRIP_OBSERVED" : nearFloorObserved ? "NEAR_FLOOR_OBSERVED_FAR_UNKNOWN" : "INCOMPLETE_FLOOR_COVERAGE";
+  const reason=corridorDropPixels>=12 ? "POSSIBLE_DROP_IN_CORRIDOR" : Number.isFinite(nearestObstacle) ? "OBSTACLE_IN_VIEW_CORRIDOR" : coverage.every(s=>s.floor>=12 && s.ratio>=.8) ? "FLOOR_STRIP_OBSERVED" : nearFloorObserved ? "NEAR_FLOOR_OBSERVED_FAR_UNKNOWN" : "INCOMPLETE_FLOOR_COVERAGE";
   return { labels, report:{ reason, cameraHeightMeters:cameraHeight, scale,bias,fitInlierRatio:best.length/train.length,
     heldoutFloorMedianHeightErrorMeters:validationMedian,heldoutFloorP90HeightErrorMeters:validationP90,
-    floorPixels,obstaclePixels,dropPixels,uncertainEdgePixels:uncertainEdge.reduce((a,b)=>a+b,0),corridorDropPixels,sectors:coverage,corridorCenterRightMeters:.07,corridorWidthMeters:.25,
+    floorPixels,obstaclePixels,dropPixels,uncertainEdgePixels:uncertainEdge.reduce((a,b)=>a+b,0),corridorDropPixels,sectors:coverage,
+    corridorCenterRightMeters:corridor.centerRightMeters,corridorWidthMeters:corridor.widthMeters,nearStartMeters:nearStart,nearEndMeters:nearEnd,farEndMeters:farEnd,
     nearestObstacleEstimateMeters:Number.isFinite(nearestObstacle)?nearestObstacle:null,nearFloorObserved,
     manualFloorAssumption:true,metricNavigationValidated:false,autonomousMotionAuthorized:false } };
 }

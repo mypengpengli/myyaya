@@ -9,6 +9,7 @@ export async function runFloorVisionProbe(args: { heightCm?: unknown; roi?: Floo
   if(typeof args?.heightCm!=="number" || !Number.isFinite(args.heightCm) || args.heightCm<3 || args.heightCm>50) throw new Error("需要实测镜头高度（厘米）");
   holdAmbientMotionFor(90_000,"floor-vision");holdSocialAttentionMotionFor(90_000,"floor-vision");
   const status=await getNavigationProbeStatus(), modelPath=`file://${status.dataDirectory}/monocular-benchmark/fused_model_int8_256.onnx`;
+  if(!Number.isFinite(status.measuredCameraHeightMeters) || Math.abs(args.heightCm/100-status.measuredCameraHeightMeters!)>.005) throw new Error("镜头高度与本机实测设置不一致，请先确认当前最低姿态和标定");
   const info=await FileSystem.getInfoAsync(modelPath);
   if(!info.exists || info.isDirectory || info.size!==27_342_208) throw new Error("缺少已核验的本地深度模型");
   const session=await OnnxInference.createSession({modelPath,numThreads:4});
@@ -23,12 +24,15 @@ export async function runFloorVisionProbe(args: { heightCm?: unknown; roi?: Floo
     if(outputs.length!==1 || outputs[0].type!=="uint8" || outputs[0].dims.join(",")!=="1,252,252") throw new Error("模型格式不符");
     const values=base64ToTypedArray(outputs[0].data,"uint8") as Uint8Array;
     const focal=frame.imageFocalLength as number[], principal=frame.imagePrincipalPoint as number[];
+    const geometry=status.navigationGeometry;
+    const corridor=geometry ? {centerRightMeters:geometry.centerRightMeters,widthMeters:geometry.widthMeters+2*geometry.marginMeters,
+      frontReachMeters:Math.max(0,geometry.alongViewMeters+geometry.lengthMeters/2)} : undefined;
     const analysis=analyzeFloorDepth(values,252,252,{width:frame.imageDimensions[0],height:frame.imageDimensions[1],
       fx:focal[0],fy:focal[1],cx:principal[0],cy:principal[1],q:frame.cameraQuaternion as number[]},args.heightCm/100,
-      args.roi ?? {left:.3,top:.65,right:.88,bottom:.82});
+      args.roi ?? {left:.3,top:.65,right:.88,bottom:.82},corridor);
     if(!FileSystem.cacheDirectory) throw new Error("缺少应用缓存");
     await FileSystem.writeAsStringAsync(`${FileSystem.cacheDirectory}monocular-benchmark/live.depth`,outputs[0].data,{encoding:FileSystem.EncodingType.Base64});
     await showNativeFloorLabels(frame.requestId,typedArrayToBase64(analysis.labels),analysis.report);
-    return {frame,analysis:analysis.report,exported:await exportNativeMonocularBenchmark()};
+    return {frame,analysis:analysis.report,geometry,exported:await exportNativeMonocularBenchmark()};
   } finally {await session.release();}
 }

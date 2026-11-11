@@ -64,7 +64,10 @@ internal class MonocularSnapshot(private val host: Activity,private val active: 
             val rgb=ByteArray(pixels.size*3)
             pixels.forEachIndexed { i,p -> rgb[i*3]=(p shr 16).toByte();rgb[i*3+1]=(p shr 8).toByte();rgb[i*3+2]=p.toByte() }
             scaled.recycle();bitmap.recycle()
-            cache.mkdirs();File(cache,"live.jpg").writeBytes(jpeg);File(cache,"live.rgb").writeBytes(rgb)
+            cache.mkdirs()
+            // Derivatives belong to one exact camera sample, never to the next photo.
+            for(name in listOf("live.depth","live.labels","live.floor.json")) File(cache,name).delete()
+            File(cache,"live.jpg").writeBytes(jpeg);File(cache,"live.rgb").writeBytes(rgb)
             File(cache,"live.json").writeText(JSONObject(metadata).toString())
             host.runOnUiThread { synchronized(this) {
               if(pending!==request) return@synchronized
@@ -160,13 +163,37 @@ internal class MonocularSnapshot(private val host: Activity,private val active: 
     val tiny=Bitmap.createBitmap(colors,252,252,Bitmap.Config.ARGB_8888)
     val colored=Bitmap.createScaledBitmap(tiny,original.width,original.height,false);tiny.recycle()
     val overlay=original.copy(Bitmap.Config.ARGB_8888,true);Canvas(overlay).drawBitmap(colored,0f,0f,null);colored.recycle()
-    File(cache,"live.labels").writeBytes(labels);File(cache,"live.floor.json").writeText(summary)
+    val frame=JSONObject(File(cache,"live.json").readText());check(frame.getString("requestId")==id)
+    report.put("requestId",id)
+    File(cache,"live.labels").writeBytes(labels);File(cache,"live.floor.json").writeText(report.toString())
+    val root=File(host.getExternalFilesDir("navigation-probe") ?: host.filesDir,"vision-samples").apply { mkdirs() }
+    check(java.util.UUID.fromString(id).toString()==id)
+    val sample=File(root,id).apply { mkdirs() };check(sample.canonicalFile.parentFile==root.canonicalFile)
+    File(cache,"live.jpg").copyTo(File(sample,"camera.jpg"),true)
+    File(sample,"camera.json").writeText(frame.toString());File(sample,"labels.bin").writeBytes(labels)
+    File(sample,"report.json").writeText(report.toString())
+    File(sample,"overlay.jpg").outputStream().use { overlay.compress(Bitmap.CompressFormat.JPEG,94,it) }
+    root.listFiles()?.filter { it.isDirectory && runCatching { java.util.UUID.fromString(it.name).toString()==it.name }.getOrDefault(false) }
+      ?.sortedByDescending { it.lastModified() }?.drop(12)?.forEach { old ->
+        if(old.canonicalFile.parentFile==root.canonicalFile) {
+          for(name in listOf("camera.jpg","camera.json","labels.bin","report.json","overlay.jpg")) File(old,name).takeIf { it.isFile }?.delete()
+          old.delete()
+        }
+      }
     val row=LinearLayout(host)
     for(bitmap in listOf(original,overlay)) row.addView(ImageView(host).apply { setImageBitmap(bitmap);scaleType=ImageView.ScaleType.FIT_CENTER },
       LinearLayout.LayoutParams(0,(host.resources.displayMetrics.heightPixels*.5).toInt(),1f))
     dialog?.dismiss()
+    val description=when(report.getString("reason")) {
+      "POSSIBLE_DROP_IN_CORRIDOR"->"行驶范围内有疑似低处，先停车观察"
+      "OBSTACLE_IN_VIEW_CORRIDOR"->"前方可见物体，是否短步由车身余量判断"
+      "FLOOR_STRIP_OBSERVED"->"近处地板取样通过"
+      "NEAR_FLOOR_OBSERVED_FAR_UNKNOWN"->"近处地板可见，远处继续观察"
+      else->"近处地板证据不足，先停车观察"
+    }
+    val distance=if(!report.isNull("nearestObstacleEstimateMeters")) "\n物体距镜头约${(report.getDouble("nearestObstacleEstimateMeters")*100).toInt()}厘米（估计）" else ""
     dialog=AlertDialog.Builder(host).setTitle("地面与障碍观察 · 实验")
-      .setMessage("左：本次原图；右：绿为地板假设、红为高出平面的物体、橙为疑似低处。\n${report.getString("reason")}\n比例来自实测镜头高度和人工地板区域；不是通行许可。")
+      .setMessage("左：本次原图；右：绿为地板假设、红为物体、橙为疑似低处。\n${description}${distance}\n比例来自实测镜头高度和人工地板区域；单独本图不代表可通行。")
       .setView(row).setPositiveButton("关闭对照",null).create();dialog?.show()
   }
   @Synchronized fun cancel() {

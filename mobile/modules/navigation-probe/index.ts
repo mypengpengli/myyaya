@@ -8,11 +8,15 @@ export type NavigationProbeStatus = {
   serviceVersion: string | null;
   lastReport: string | null;
   dataDirectory: string;
+  navigationGeometry?: { centerRightMeters: number; alongViewMeters: number; widthMeters: number; lengthMeters: number; marginMeters: number; source: string } | null;
+  measuredCameraHeightMeters?: number;
 };
 
 type Native = {
   getStatus(): Promise<NavigationProbeStatus>;
-  diagnosticField(direction: "back" | "back_step" | "left" | "right", confirmed: boolean): Promise<Record<string, unknown>>;
+  diagnosticField(direction: "back" | "back_step" | "left" | "right", confirmed: boolean, stepMs: number, batchId: string): Promise<Record<string, unknown>>;
+  beginDiagnosticBatch(confirmed: boolean,left: number,top: number,right: number,bottom: number): Promise<{ batchId: string; maximumSteps: number }>;
+  stopOperatorObservation(): Promise<void>;
   showFloorLabels(id: string, labels: string, summary: string): Promise<void>;
   analyzeUprightReference(id: string,height: number,width: number): Promise<Record<string, unknown>>;
   captureMonocularFrame(): Promise<{ requestId: string; inputUri: string; imageDimensions: number[]; [key: string]: unknown }>;
@@ -34,7 +38,9 @@ function getNative(): Native {
   return native ??= requireNativeModule<Native>("NavigationProbe");
 }
 export const getNavigationProbeStatus = () => getNative().getStatus();
-export const runNativeFieldDiagnostic = (direction: "back" | "back_step" | "left" | "right", confirmed: boolean) => getNative().diagnosticField(direction, confirmed);
+export const runNativeFieldDiagnostic = (direction: "back" | "back_step" | "left" | "right", confirmed: boolean, stepMs = 150, batchId = "") => getNative().diagnosticField(direction, confirmed, stepMs, batchId);
+export const beginNativeFieldBatch = (confirmed: boolean,region={left:.3,top:.65,right:.88,bottom:.82}) => getNative().beginDiagnosticBatch(confirmed,region.left,region.top,region.right,region.bottom);
+export const stopNativeOperatorObservation = () => getNative().stopOperatorObservation();
 export const showNativeFloorLabels = (id: string, labels: string, report: unknown) => getNative().showFloorLabels(id, labels, JSON.stringify(report));
 export const analyzeNativeUprightReference = (id: string,height: number,width: number) => getNative().analyzeUprightReference(id,height,width);
 export const captureNativeMonocularFrame = () => getNative().captureMonocularFrame();

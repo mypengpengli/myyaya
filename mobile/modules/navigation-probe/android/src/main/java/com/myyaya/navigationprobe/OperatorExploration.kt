@@ -13,7 +13,8 @@ internal class OperatorExploration(initial: Sample) {
   private var ackAt=0L
   private var lastAt=initial.at
   private var direction="back"
-  private val durationMs get()=when(direction) { "back"->450;"back_step"->150;else->350 }
+  private var stepDuration=150
+  private val durationMs get()=when(direction) { "back"->450;"back_step"->stepDuration;else->350 }
   @Volatile var phase="READY";private set
   var reason="OPERATOR_CONFIRMED_AREA";private set
   var segments=0;private set
@@ -55,12 +56,13 @@ internal class OperatorExploration(initial: Sample) {
       phase=if(segments>=3) "COMPLETE" else "READY";reason="SEGMENT_STOPPED"
     }
   }
-  @Synchronized fun issue(now: Long,requestedDirection: String="back") {
+  @Synchronized fun issue(now: Long,requestedDirection: String="back",stepMs: Int=150) {
     require(requestedDirection in setOf("back","back_step","left","right")) { "Unsupported field direction" }
+    require(stepMs in setOf(150,250) && (requestedDirection=="back_step" || stepMs==150)) { "Invalid bounded step duration" }
     check(phase=="READY" && segments<3) { "请等待上一段停止或重新确认空地" }
     failure(latest,now)?.let { cancel(it);error(it) }
     check(latest.recordingRemainingMs>=2500) { "录像即将结束，请先保存并开始新一轮录像" }
-    direction=requestedDirection;segments++;pulseStart=latest;ackAt=0;phase="RUNNING";reason="TIMED_PULSE"
+    direction=requestedDirection;stepDuration=stepMs;segments++;pulseStart=latest;ackAt=0;phase="RUNNING";reason="TIMED_PULSE"
   }
   @Synchronized fun acknowledge(ok: Boolean,now: Long) {
     if(phase!="RUNNING") return

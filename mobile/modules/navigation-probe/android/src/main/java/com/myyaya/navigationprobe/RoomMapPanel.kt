@@ -49,7 +49,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private lateinit var localState: TextView
   @Volatile private var mapper: RoomMapper? = null
   private val mountSettings=NavigationMountSettings(activity)
-  private val taughtRoutes=motor?.let { TaughtRoutePanel(activity,it,{ mapper?.metadata() },{save(true)},mountSettings,{floorFlow.report()}) }
+  private val taughtRoutes=motor?.let { TaughtRoutePanel(activity,it,{ mapper?.metadata() },{save(true)},mountSettings,{floorFlow.report()},{floorFlow.reset()},{floorFlow.selectRegion(it)}) }
   @Volatile private var observedGround: GroundPlane?=null
   @Volatile private var freshMap = false
   @Volatile private var sessionId = ""
@@ -685,9 +685,13 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       "depthCapture" to depthRecorder.report()))) }
   fun canStart() = mapper != null && !saving && !restoring
   fun stopTaughtRoute(reason: String) { taughtRoutes?.stop(reason) }
-  fun diagnosticField(direction: String,confirmed: Boolean,promise: expo.modules.kotlin.Promise) {
+  fun diagnosticField(direction: String,confirmed: Boolean,stepMs: Int,batchId: String,promise: expo.modules.kotlin.Promise) {
     val panel=taughtRoutes
-    if(panel==null) promise.reject("ERR_FIELD_SCREEN","请打开教路线采集页面",null) else panel.diagnosticField(direction,confirmed,promise)
+    if(panel==null) promise.reject("ERR_FIELD_SCREEN","请打开教路线采集页面",null) else panel.diagnosticField(direction,confirmed,stepMs,batchId,promise)
+  }
+  fun beginDiagnosticBatch(confirmed: Boolean,region: FloorFlowRegion,promise: expo.modules.kotlin.Promise) {
+    val panel=taughtRoutes
+    if(panel==null) promise.reject("ERR_FIELD_SCREEN","请打开教路线采集页面",null) else panel.beginDiagnosticBatch(confirmed,region,promise)
   }
   fun openTaughtRoute(id: String) {
     runCatching {
@@ -706,7 +710,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   fun offerOperatorFrame(frame: Frame,session: String,recording: Boolean,playback: Boolean,recordingRemainingMs: Long) {
     val camera=if(frame.camera.trackingState==TrackingState.TRACKING)
       RigidPose(frame.camera.pose.translation,frame.camera.pose.rotationQuaternion) else null
-    taughtRoutes?.operatorFrame(camera,session,recording,playback,localAssessment.clearance==RouteClearance.OBSTACLE,recordingRemainingMs)
+    taughtRoutes?.operatorFrame(camera,session,recording,playback,localAssessment.clearance==RouteClearance.OBSTACLE,recordingRemainingMs,frame.timestamp)
   }
   fun offerVisualFrame(frame: Frame) {
     if(frame.camera.trackingState!=TrackingState.TRACKING) return
