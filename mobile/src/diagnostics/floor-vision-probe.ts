@@ -14,13 +14,15 @@ export async function runFloorVisionProbe(args: { heightCm?: unknown; roi?: Floo
   if(!Number.isFinite(status.measuredCameraHeightMeters) || Math.abs(args.heightCm/100-status.measuredCameraHeightMeters!)>.005) throw new Error("镜头高度与本机实测设置不一致，请先确认当前最低姿态和标定");
   const info=await FileSystem.getInfoAsync(modelPath);
   if(!info.exists || info.isDirectory || info.size!==27_342_208) throw new Error("缺少已核验的本地深度模型");
-  const session=args.liveOnly ? (liveSession ??=await OnnxInference.createSession({modelPath,numThreads:2})) : await OnnxInference.createSession({modelPath,numThreads:4});
+  const session=args.liveOnly ? (liveSession ??=await OnnxInference.createSession({modelPath,numThreads:4})) : await OnnxInference.createSession({modelPath,numThreads:4});
   try {
     if(session.inputNames.length!==1 || session.inputTypes[0]!=="uint8") throw new Error("模型输入格式不符");
-    const frame=await captureNativeMonocularFrame();
+    const started=Date.now(),frame=await captureNativeMonocularFrame(),captured=Date.now();
     if(frame.trackingState!=="TRACKING") throw new Error("相机定位尚未有效");
     const input=await FileSystem.readAsStringAsync(frame.inputUri,{encoding:FileSystem.EncodingType.Base64});
+    const inferenceStarted=Date.now();
     const result=await OnnxInference.run(session.sessionId,{[session.inputNames[0]]:{type:"uint8",dims:[1,256,256,3],data:input}});
+    const inferred=Date.now();
     if(!result.success || !result.outputs) throw new Error(result.error || "模型未返回输出");
     const outputs=Object.values(result.outputs);
     if(outputs.length!==1 || outputs[0].type!=="uint8" || outputs[0].dims.join(",")!=="1,252,252") throw new Error("模型格式不符");
@@ -38,7 +40,8 @@ export async function runFloorVisionProbe(args: { heightCm?: unknown; roi?: Floo
       } catch(error) {failure=error;}
     }
     if(!analysis) throw failure ?? new Error("未找到可校验的地板区域");
-    if(args.liveOnly) return {frame,analysis:analysis.report,geometry,selectedFloorRegion,navigationCells:args.navigationCells ? analysis.navigationCells : undefined,exported:undefined};
+    if(args.liveOnly) return {frame,analysis:analysis.report,geometry,selectedFloorRegion,navigationCells:args.navigationCells ? analysis.navigationCells : undefined,exported:undefined,
+      timings:{captureMs:captured-started,inferenceMs:inferred-inferenceStarted,analysisMs:Date.now()-inferred,totalMs:Date.now()-started}};
     if(!FileSystem.cacheDirectory) throw new Error("缺少应用缓存");
     await FileSystem.writeAsStringAsync(`${FileSystem.cacheDirectory}monocular-benchmark/live.depth`,outputs[0].data,{encoding:FileSystem.EncodingType.Base64});
     await showNativeFloorLabels(frame.requestId,typedArrayToBase64(analysis.labels),{...analysis.report,displayOverlay:args.showOverlay!==false});

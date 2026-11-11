@@ -25,6 +25,8 @@ internal class ContinuousPilot(val gx: Double,val gy: Double,val width: Double,v
   private var frameAt=0L;private var frameNs=0L
   private var odomAt=0L;private var odomNs=0L
   private var perceptionNs=0L
+  private var perceptionPose=pose
+  private var receivedAgeMs=0L
   private var sensorAt=started;private var connected=false;private var backAllowed=false;private var turnAllowed=false
   private var points=emptyList<Point>();private var obstacles=emptyList<Point>();private var path=emptyList<Pose>()
   private var lastTick=started
@@ -56,11 +58,11 @@ internal class ContinuousPilot(val gx: Double,val gy: Double,val width: Double,v
     if(sample>odomNs){odomNs=sample;odomAt=now}
   }
   @Synchronized fun observation(now: Long,ns: Long,capture: Pose,cells: List<Point>,route: List<Pose>,retainedObstacles: List<Point> = emptyList()) {
-    if(!active || ns<=perceptionNs || frameNs-ns !in -100_000_000L..1_200_000_000L) return
+    if(!active || ns<=perceptionNs || frameNs-ns !in -100_000_000L..1_500_000_000L) return
     points=cells.map {p-> val x=p.x-mountRight;val y=p.y-mountForward
       Point(capture.x+cos(capture.yaw)*x+sin(capture.yaw)*y,capture.y-sin(capture.yaw)*x+cos(capture.yaw)*y,p.label) }
     obstacles=points.filter { it.label!=1 }+retainedObstacles.filter {it.label!=1}
-    path=route;perceptionNs=ns;perceptionCount++
+    path=route;perceptionNs=ns;perceptionPose=capture;receivedAgeMs=(frameNs-ns)/1_000_000;perceptionCount++
   }
   @Synchronized fun reseeded() {if(!active || !needReseed)return;needReseed=false;anchorOrigin=0;odomAt=0;odomNs=0;lostSince=0;uncertainty+=.02;if(uncertainty>.1)cancel("位置不确定度过大")}
   @Synchronized fun cancel(why: String) {if(!active)return;phase="CANCELLED";reason=why;sentSpeed=0;sentTurn=0}
@@ -97,12 +99,15 @@ internal class ContinuousPilot(val gx: Double,val gy: Double,val width: Double,v
     if(d<best-.01){best=d;progressedAt=now}
     if(d<=.06){phase="AT_GOAL";return brake("到达局部目标范围")}
     if(now-progressedAt>35_000){phase="FAILED";return brake("持续无进展")}
-    if(perceptionNs==0L || frameNs-perceptionNs>1_100_000_000L){phase="WAITING_PERCEPTION";return brake("感知更新过期")}
+    val viewTravel=hypot(pose.x-perceptionPose.x,pose.y-perceptionPose.y)
+    val viewTurn=abs(atan2(sin(pose.yaw-perceptionPose.yaw),cos(pose.yaw-perceptionPose.yaw)))
+    if(perceptionNs==0L || frameNs-perceptionNs>2_200_000_000L || viewTravel>.10 || viewTurn>.55){phase="WAITING_PERCEPTION";return brake("等待更新视野：时间、位移或转角达到上限")}
     if(path.isEmpty()){phase="WAITING_PATH";return brake("等待可执行路线")}
     val target=path.firstOrNull {hypot(it.x-pose.x,it.y-pose.y)>=.10} ?: Pose(gx,gy,0.0)
     val error=atan2(sin(atan2(target.x-pose.x,target.y-pose.y)-pose.yaw),cos(atan2(target.x-pose.x,target.y-pose.y)-pose.yaw))
-    var v=if(abs(error)>.70)0.0 else -min(34.0,max(20.0,d*180))*cos(error).coerceAtLeast(0.0)
-    var w=(-error*55).coerceIn(-42.0,42.0)
+    val speedLimit=if(frameNs-perceptionNs>650_000_000L)24.0 else 30.0
+    var v=if(abs(error)>.70)0.0 else -min(speedLimit,max(20.0,d*180))*cos(error).coerceAtLeast(0.0)
+    var w=(-error*35).coerceIn(-24.0,24.0)
     if(v!=0.0 && !backAllowed || abs(w)>1 && !turnAllowed){phase="WAITING_INTERLOCK";return brake("底座传感器拦截")}
     if(!clearArc(v,w)) {
       v*=.45
@@ -122,5 +127,7 @@ internal class ContinuousPilot(val gx: Double,val gy: Double,val width: Double,v
     "remainingMeters" to hypot(gx-pose.x,gy-pose.y),"goal" to listOf(gx,gy),"positionUncertaintyMeters" to uncertainty,
     "ticks" to ticks,"motionTicks" to motionTicks,"brakeCount" to brakeCount,"perceptionCount" to perceptionCount,
     "sentSpeed" to sentSpeed,"sentTurn" to sentTurn,"elapsedMs" to now-started,"frameNs" to frameNs,"frameAgeMs" to now-frameAt,
-    "odomAgeMs" to now-odomAt,"perceptionAgeMs" to if(perceptionNs>0)(frameNs-perceptionNs)/1_000_000 else null)
+    "odomAgeMs" to now-odomAt,"perceptionAgeMs" to if(perceptionNs>0)(frameNs-perceptionNs)/1_000_000 else null,
+    "perceptionReceivedAgeMs" to receivedAgeMs,"viewTravelMeters" to hypot(pose.x-perceptionPose.x,pose.y-perceptionPose.y),
+    "maximumViewTravelMeters" to .10,"maximumViewAgeMs" to 2200)
 }

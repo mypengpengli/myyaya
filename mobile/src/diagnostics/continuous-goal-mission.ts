@@ -41,7 +41,7 @@ export async function runContinuousGoalMission(args:{operatorConfirmed?:unknown;
         const obstacles=[...controller.cells.values()].filter(c=>c.label!==1).map(c=>({x:c.x*.05,y:c.y*.05,label:c.label}));
         await observeNativeContinuous(token,{imageNs:result.frame.imageTimestampNs,capture:capture.pose,cells:result.navigationCells,path:plan.path,obstacles});
         observations++;failures=0;
-        if(history.length<700)history.push({atMs:Date.now()-started,pose:latest.pose,phase:latest.phase,remaining:latest.remainingMeters,perceptionMs:latest.perceptionAgeMs,plan:plan.phase,speed:latest.sentSpeed,turn:latest.sentTurn});
+        if(history.length<700)history.push({atMs:Date.now()-started,pose:latest.pose,phase:latest.phase,remaining:latest.remainingMeters,perceptionMs:latest.perceptionAgeMs,plan:plan.phase,speed:latest.sentSpeed,turn:latest.sentTurn,timings:result.timings,path:plan.path.slice(0,15)});
         if(observations%3===0){await save();await publishNativeLocalMission(`连续绕障 · ${latest.phase} · 剩余估计${Math.round(Number(latest.remainingMeters)*100)}厘米 · 视觉更新${observations}次`);}
       } catch(e) {
         failures++;if(history.length<700)history.push({atMs:Date.now()-started,error:e instanceof Error?e.message:String(e)});

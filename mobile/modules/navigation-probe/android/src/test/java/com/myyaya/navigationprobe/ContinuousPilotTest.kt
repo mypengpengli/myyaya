@@ -27,7 +27,7 @@ class ContinuousPilotTest {
   }
   @Test fun perceptionExpiryBrakesWithLivePose() {
     val p=pilot();frame(p,1000);observe(p,1000)
-    frame(p,2200);assertEquals(0 to 0,p.tick(2200,false));assertEquals("WAITING_PERCEPTION",p.phase)
+    frame(p,3400);assertEquals(0 to 0,p.tick(3400,false));assertEquals("WAITING_PERCEPTION",p.phase)
   }
   @Test fun heartbeatExpiryBrakes() {
     val p=pilot();frame(p,1000);observe(p,1000);assertEquals(0 to 0,p.tick(1950,false));assertEquals("WAITING_LINK",p.phase)
@@ -68,5 +68,17 @@ class ContinuousPilotTest {
     val p=pilot();frame(p,1000)
     p.observation(1000,1_000_000_000,p.pose,emptyList(),listOf(ContinuousPilot.Pose(0.0,.4,0.0)),listOf(ContinuousPilot.Point(0.0,.08,2)))
     assertEquals(0 to 0,p.tick(1050,true));assertEquals("WAITING_CLEARANCE",p.phase)
+  }
+  @Test fun slowNeuralUpdatesPermitBoundedContinuousMotion() {
+    val p=pilot();frame(p,1000);observe(p,1000);frame(p,2200)
+    assertTrue(p.tick(2200,true).first<0);assertEquals("DRIVING",p.phase)
+  }
+  @Test fun oldViewCannotAuthorizeMoreThanTenCentimeters() {
+    val p=pilot();frame(p,1000);observe(p,1000);frame(p,1100,.11)
+    assertEquals(0 to 0,p.tick(1100,true));assertEquals("WAITING_PERCEPTION",p.phase)
+  }
+  @Test fun turnOutsideObservedViewRequiresAnotherImage() {
+    val p=pilot();frame(p,1000);observe(p,1000);frame(p,1100,0.0,yaw=.65)
+    assertEquals(0 to 0,p.tick(1100,true));assertEquals("WAITING_PERCEPTION",p.phase)
   }
 }
