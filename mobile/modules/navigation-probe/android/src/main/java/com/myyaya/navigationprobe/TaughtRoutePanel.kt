@@ -48,6 +48,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   @Volatile private var fieldFlowStart: Map<String,Any?> = emptyMap()
   @Volatile private var fieldAnnotatedResult: Map<String,Any?>?=null
   @Volatile private var fieldBatchId: String?=null
+  @Volatile private var fieldStartFailure: String?=null
   @Volatile private var visualPulseGuard: VisualPulseGuard?=null
   @Volatile private var latestCameraNs=0L
   @Volatile private var notice="先连接底座并固定头部；教路线前请确认真实平整地面。"
@@ -200,7 +201,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     check(s.recordingRemainingMs>=6000) { "录像即将结束，请先保存并开始新一轮录像；本次未发动作" }
   }
   @Synchronized private fun newFieldBatch(): String {
-    field=OperatorExploration(requireNotNull(fieldSample));fieldAnnotatedResult=null
+    field=OperatorExploration(requireNotNull(fieldSample));fieldAnnotatedResult=null;fieldStartFailure=null
     fieldMeasuredHeight=activity.getSharedPreferences("terrain-camera",0).getFloat("height",0f).takeIf { it in .03f.. .5f }
     fieldBatchId=java.util.UUID.randomUUID().toString();resetFloorFlow()
     return requireNotNull(fieldBatchId)
@@ -210,6 +211,10 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     require(stepMs in setOf(150,250) && (direction=="back_step" || stepMs==150))
     if(batchId.isNotEmpty()) check(batchId==fieldBatchId && field?.phase=="READY") { "本轮任务已停止、过期或达到步数上限" }
     else if(field?.phase!="READY") newFieldBatch()
+    // Inference/library warm-up may interrupt flow while the robot is stopped.
+    // A pulse needs its own fresh displacement origin, not pre-inference continuity.
+    // Preserve the task token and remaining budget; never re-arm a stopped task.
+    if(direction=="back_step") resetFloorFlow()
     beginCountdown(direction,when(direction) { "back"->450;"back_step"->stepMs;else->350 },true)
   }
   fun beginDiagnosticBatch(confirmed: Boolean,region: FloorFlowRegion,promise: expo.modules.kotlin.Promise) {
@@ -231,7 +236,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     } catch(e: Exception) { fieldDiagnostic=null;promise.reject("ERR_FIELD_PRECONDITION",e.message,e) }
   }
   private fun finishFieldDiagnostic() { val old=fieldDiagnostic;fieldDiagnostic=null;old?.resolve(fieldReport()) }
-  private fun fieldReport()=field?.report()?.plus(mapOf("batchId" to fieldBatchId,"lastSegment" to (fieldAnnotatedResult ?: field?.result)))
+  private fun fieldReport()=field?.report()?.plus(mapOf("batchId" to fieldBatchId,"startFailureDetail" to fieldStartFailure,"lastSegment" to (fieldAnnotatedResult ?: field?.result)))
   fun operatorFloorHeight(): Float?=fieldMeasuredHeight.takeIf { field?.phase in listOf("READY","RUNNING","SETTLING","COMPLETE") }
   private fun cancelCountdown() {
     countdown?.cancel();countdown=null
@@ -287,7 +292,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
         }
       }.onFailure {
         message(it.message ?: "倒计时后条件已变化，未开始动作")
-        if(operatorTrial) { field?.cancel("START_PRECONDITION_CHANGED");finishFieldDiagnostic() }
+        if(operatorTrial) { fieldStartFailure=it.message ?: it.javaClass.simpleName;field?.cancel("START_PRECONDITION_CHANGED");finishFieldDiagnostic() }
       }
     }).also { it.start() }
   }
