@@ -11,23 +11,24 @@ function rig(mode='success') {
   const native={
     getContinuousStatus:async()=>({...status,pose:{...pose}}),
     getNavigationProbeStatus:async()=>({measuredCameraHeightMeters:.08,navigationGeometry:geometry}),
-    startNativeContinuous:async(device,epoch)=>{assert.equal(device,'shared-device');assert.equal(epoch,3);calls.starts++;status={...status,token:'one-task',active:true,phase:'DRIVING',remainingMeters:.4,poseReady:true,frameNs:1e9};return status;},
+    startNativeContinuous:async(device,epoch,_gx,_gy,_height,region)=>{assert.equal(device,'shared-device');assert.equal(epoch,3);assert.deepEqual(region,{left:.35,top:.75,right:.65,bottom:.94});calls.starts++;status={...status,token:'one-task',active:true,phase:'DRIVING',remainingMeters:.4,poseReady:true,frameNs:1e9};return status;},
     observeNativeContinuous:async(token,data)=>{assert.equal(token,'one-task');assert.deepEqual(data.capture,{x:0,y:0,yaw:0});assert.ok(data.path.length);calls.observes++;status.active=false;status.phase='AT_GOAL';status.remainingMeters=.04;},
     stopNativeContinuous:async()=>{calls.stops++;status.active=false;},saveContinuousReport:async v=>{saved=v;},publishNativeLocalMission:async()=>{}
   };
   const probe={releaseContinuousVision:async()=>{calls.releases++;},runFloorVisionProbe:async args=>{
     assert.equal(args.liveOnly,true);calls.frames++;
-    if(mode==='error')throw new Error('inference failed');
+    if(mode==='preflight-error' || (mode==='error' && calls.starts>0))throw new Error('inference failed');
     if(mode==='cancel')status={...status,phase:'CANCELLED',active:false};
-    if(mode==='stale' && calls.frames===1)return {frame:{imageTimestampNs:2e9,navigationPose:{...status,pose:{...pose}}}};
-    return {frame:{imageTimestampNs:1e9,navigationPose:{...status,pose:{...pose}}},navigationCells:[[.07,.4,1,30]]};
+    if(mode==='stale' && calls.starts>0 && calls.frames===2)return {frame:{imageTimestampNs:2e9,navigationPose:{...status,pose:{...pose}}}};
+    return {selectedFloorRegion:{left:.35,top:.75,right:.65,bottom:.94},frame:{imageTimestampNs:1e9,navigationPose:{...status,pose:{...pose}}},navigationCells:[[.07,.4,1,30]]};
   }};
   const {runContinuousGoalMission}=load('src/diagnostics/continuous-goal-mission.ts',{'../../modules/navigation-probe':native,'../device-tools/looi-robot':{prepareNativeNavigationDrive:async(owner)=>{assert.equal(owner,'route-owner');return {device:'shared-device',finish:()=>calls.finishes++};}},'../core/navigation-control-lease':{getNavigationControlOwner:()=> 'route-owner'},'../navigation/local-goal-controller':navigation,'./floor-vision-probe':probe});
   return {run:runContinuousGoalMission,calls,get saved(){return saved;}};
 }
 const a=rig();const r=await a.run({operatorConfirmed:true});assert.equal(r.phase,'AT_GOAL');assert.equal(a.calls.starts,1);assert.equal(a.calls.observes,1);assert.equal(a.calls.releases,1);assert.equal(a.calls.finishes,1);
 const b=rig('cancel');await b.run({operatorConfirmed:true});assert.equal(b.calls.observes,0);assert.equal(b.calls.starts,1);assert.equal(b.calls.stops,1);
-const c=rig('stale');await c.run({operatorConfirmed:true});assert.equal(c.calls.frames,2);assert.equal(c.calls.observes,1);
-const d=rig('error');const e=await d.run({operatorConfirmed:true});assert.equal(d.calls.frames,5);assert.match(e.error,/inference failed/);assert.equal(d.calls.stops,1);assert.equal(d.calls.releases,1);
+const c=rig('stale');await c.run({operatorConfirmed:true});assert.equal(c.calls.frames,3);assert.equal(c.calls.observes,1);
+const d=rig('error');const e=await d.run({operatorConfirmed:true});assert.equal(d.calls.frames,6);assert.match(e.error,/inference failed/);assert.equal(d.calls.stops,1);assert.equal(d.calls.releases,1);
+const preflight=rig('preflight-error');await preflight.run({operatorConfirmed:true});assert.equal(preflight.calls.starts,0);assert.equal(preflight.calls.releases,1);
 const invalid=rig();await assert.rejects(invalid.run({operatorConfirmed:false}));assert.equal(invalid.calls.starts,0);
 console.log('Continuous mission: one native task, capture-time pose, late image rejection, STOP during inference and failure cleanup: PASS');
