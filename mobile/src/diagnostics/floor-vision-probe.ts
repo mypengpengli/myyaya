@@ -27,12 +27,12 @@ export async function runFloorVisionProbe(args: { heightCm?: unknown; roi?: Floo
     const geometry=status.navigationGeometry;
     const corridor=geometry ? {centerRightMeters:geometry.centerRightMeters,widthMeters:geometry.widthMeters+2*geometry.marginMeters,
       frontReachMeters:Math.max(0,geometry.alongViewMeters+geometry.lengthMeters/2)} : undefined;
-    const candidates=[args.roi ?? {left:.3,top:.65,right:.88,bottom:.82},...(args.autoFloorRegion ? [{left:.05,top:.72,right:.28,bottom:.94},{left:.35,top:.75,right:.65,bottom:.94},{left:.7,top:.72,right:.94,bottom:.94}] : [])];
+    const candidates=[args.roi ?? {left:.05,top:.68,right:.28,bottom:.93},...(args.autoFloorRegion ? [{left:.05,top:.72,right:.28,bottom:.94},{left:.35,top:.75,right:.65,bottom:.94}] : [])];
     let analysis:ReturnType<typeof analyzeFloorDepth>|undefined,selectedFloorRegion=candidates[0],failure:unknown;
     for(const region of candidates) {
       try { const value=analyzeFloorDepth(values,252,252,{width:frame.imageDimensions[0],height:frame.imageDimensions[1],
         fx:focal[0],fy:focal[1],cx:principal[0],cy:principal[1],q:frame.cameraQuaternion as number[]},args.heightCm/100,region,corridor);
-        if(!analysis || value.report.heldoutFloorP90HeightErrorMeters<analysis.report.heldoutFloorP90HeightErrorMeters) {analysis=value;selectedFloorRegion=region;}
+        analysis=value;selectedFloorRegion=region;break;
       } catch(error) {failure=error;}
     }
     if(!analysis) throw failure ?? new Error("未找到可校验的地板区域");
