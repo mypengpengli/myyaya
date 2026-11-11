@@ -504,6 +504,12 @@ export async function inspectLooiHeadChannel() {
   if (!state.connected || !transport) return { connected: false, physicalPosition: "unknown" };
   return { connected: true, channel: await transport.inspectHeadChannel?.() ?? { available: false, physicalPosition: "unknown" } };
 }
+export async function inspectLooiSensorChannels() {
+  const transport=state.transport as (LooiTransport & { inspectSensorChannels?: () => Promise<unknown> }) | null;
+  const runtime=getLooiRobotRuntimeState();
+  if(!state.connected || !transport) return { runtime, readings: null };
+  return { runtime, readings: await transport.inspectSensorChannels?.() ?? { available:false } };
+}
 
 async function getRobot(options: LooiConnectOptions = {}): Promise<LooiRobot> {
   if (!state.robot) {

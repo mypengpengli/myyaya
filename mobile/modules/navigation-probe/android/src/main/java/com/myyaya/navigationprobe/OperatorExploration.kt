@@ -12,6 +12,8 @@ internal class OperatorExploration(initial: Sample) {
   private var pulseStart: Sample?=null
   private var ackAt=0L
   private var lastAt=initial.at
+  private var direction="back"
+  private val durationMs get()=when(direction) { "back"->450;"back_step"->150;else->350 }
   @Volatile var phase="READY";private set
   var reason="OPERATOR_CONFIRMED_AREA";private set
   var segments=0;private set
@@ -32,7 +34,7 @@ internal class OperatorExploration(initial: Sample) {
   }
   private fun snapshot(s: Sample,completed: Boolean,why: String): Map<String,Any?> {
     val start=requireNotNull(pulseStart);val a=start.pose!!;val b=s.pose!!
-    return mapOf("segment" to segments,"durationMs" to 450,"direction" to "back",
+    return mapOf("segment" to segments,"durationMs" to durationMs,"direction" to direction,
       "completed" to completed,"completionReason" to why,"motorStopAcknowledged" to (ackAt>0),
       "lastPoseAtMs" to s.at,"rawPoseDisplacementMeters" to a.distance(b),"rawPoseYawRadians" to wrapYaw(b.yaw-a.yaw),
       "rawCameraYDeltaMeters" to (s.cameraY!!-start.cameraY!!),
@@ -53,16 +55,17 @@ internal class OperatorExploration(initial: Sample) {
       phase=if(segments>=3) "COMPLETE" else "READY";reason="SEGMENT_STOPPED"
     }
   }
-  @Synchronized fun issue(now: Long) {
+  @Synchronized fun issue(now: Long,requestedDirection: String="back") {
+    require(requestedDirection in setOf("back","back_step","left","right")) { "Unsupported field direction" }
     check(phase=="READY" && segments<3) { "请等待上一段停止或重新确认空地" }
     failure(latest,now)?.let { cancel(it);error(it) }
     check(latest.recordingRemainingMs>=2500) { "录像即将结束，请先保存并开始新一轮录像" }
-    segments++;pulseStart=latest;ackAt=0;phase="RUNNING";reason="TIMED_PULSE"
+    direction=requestedDirection;segments++;pulseStart=latest;ackAt=0;phase="RUNNING";reason="TIMED_PULSE"
   }
   @Synchronized fun acknowledge(ok: Boolean,now: Long) {
     if(phase!="RUNNING") return
     if(!ok) cancel("ACTION_FAILED") else { ackAt=now;phase="SETTLING";reason="WAITING_AFTER_STOP" }
   }
   fun report(): Map<String,Any?> = mapOf("phase" to phase,"reason" to reason,"segments" to segments,"maximumSegments" to 3,
-    "durationMs" to 450,"lastSegment" to result,"mapHeightRequired" to false,"autonomousMotionAuthorized" to false)
+    "durationMs" to durationMs,"direction" to direction,"lastSegment" to result,"mapHeightRequired" to false,"autonomousMotionAuthorized" to false)
 }

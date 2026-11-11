@@ -53,4 +53,20 @@ class OperatorExplorationTest {
     assertEquals(.065f,f.result!!["rawPoseDisplacementMeters"])
     assertEquals("RECORDING_STOPPED",f.result!!["completionReason"])
   }
+  @Test fun turnCaptureUsesBoundedTurnDurationAndRetainsDirection() {
+    for(direction in listOf("left","right")) {
+      val f=OperatorExploration(sample());f.issue(1000,direction);f.acknowledge(true,1350)
+      for(t in 1400L..3000L step 100) f.observe(sample(t),t)
+      assertEquals(direction,f.result!!["direction"]);assertEquals(350,f.result!!["durationMs"])
+    }
+  }
+  @Test fun unsupportedDirectionNeverConsumesBudget() {
+    val f=OperatorExploration(sample());try { f.issue(1000,"forward");fail() } catch(_:IllegalArgumentException) {}
+    assertEquals(0,f.segments);assertFalse(f.moving)
+  }
+  @Test fun nearObservationStepUsesShortBoundedPulse() {
+    val f=OperatorExploration(sample());f.issue(1000,"back_step");f.acknowledge(true,1150)
+    for(t in 1200L..2800L step 100) f.observe(sample(t),t)
+    assertEquals(150,f.result!!["durationMs"]);assertEquals("back_step",f.result!!["direction"])
+  }
 }

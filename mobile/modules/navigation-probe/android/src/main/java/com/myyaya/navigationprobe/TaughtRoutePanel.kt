@@ -42,6 +42,10 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   @Volatile private var field: OperatorExploration?=null
   @Volatile private var fieldSample: OperatorExploration.Sample?=null
   @Volatile private var savedFieldResult: Map<String,Any?>?=null
+  @Volatile private var fieldDiagnostic: expo.modules.kotlin.Promise?=null
+  @Volatile private var fieldMeasuredHeight: Float?=null
+  @Volatile private var fieldFlowStart: Map<String,Any?> = emptyMap()
+  @Volatile private var fieldAnnotatedResult: Map<String,Any?>?=null
   @Volatile private var notice="先连接底座并固定头部；教路线前请确认真实平整地面。"
   private lateinit var status: TextView
   fun buildView()=android.widget.LinearLayout(activity).apply {
@@ -53,10 +57,10 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   private fun menu() {
     holdForUi()
     val items=arrayOf("连接保存的底座","固定最低导航姿态（不回正）","设置镜头到底座偏移","开始教路线","完成并保存路线","选择已教路线",
-      "短后退方向校验","短左转方向校验","开始复走","移开障碍后继续","停止","短右转方向校验","空地分段采集（450毫秒）")
+      "短后退方向校验","短左转方向校验","开始复走","移开障碍后继续","停止","短右转方向校验","空地分段采集（450毫秒）","左转观察采集（350毫秒）","右转观察采集（350毫秒）")
     AlertDialog.Builder(activity).setTitle("已教路线导航 · 真实平整地面试验").setItems(items) { _,i->
       runCatching {
-        if(i !in listOf(10,12)) {
+        if(i !in listOf(10,12,13,14)) {
           check(field?.moving!=true) { "请等本段停止，或点击停止" }
           field?.cancel("OTHER_OPERATION")
         }
@@ -74,6 +78,8 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
         10->stop("用户停止")
         11->calibrate("right")
         12->confirmFieldSegment()
+        13->confirmFieldSegment("left")
+        14->confirmFieldSegment("right")
       } }.onFailure { message(it.message ?: "操作未完成") }
     }.setNegativeButton("返回",null).show()
   }
@@ -170,21 +176,46 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
       }.onFailure { message(it.message ?: "无法准备标定") } }.show()
     }.onFailure { message(it.message ?: "标定条件已变化，请重新观察") }
   }
-  private fun confirmFieldSegment() {
+  private fun confirmFieldSegment(direction: String="back") {
+    validateFieldStart()
+    val newBatch=field?.phase!="READY"
+    val number=if(newBatch) 1 else field!!.segments+1
+    val movement=when(direction) { "left"->"左转350毫秒";"right"->"右转350毫秒";else->"朝后摄方向行驶450毫秒" }
+    AlertDialog.Builder(activity).setTitle("空地采集 · 第${number}/3段")
+      .setMessage("请确认实际地板平整、脖子最低，行驶方向约50厘米、转向两侧各约30厘米空地且线缆有余量。三声提示后${movement}并停止，记录相机与IMU；每段停稳后单独启动，最多三段。地图高度漂移仅作记录，不把未知深度当空地。")
+      .setNegativeButton("取消",null).setPositiveButton("场地已确认，采集一段") { _,_->runCatching {
+        prepareField(direction)
+      }.onFailure { message(it.message ?: "采集条件未满足") } }.show()
+  }
+  private fun validateFieldStart() {
     check(!motor.busy && calibration==null && teacher==null && follower?.phase !in listOf("FOLLOWING","FACING_USER")) { "请先停止其他动作" }
     check(field?.moving!=true) { "请等待本段停稳" }
     val s=requireNotNull(fieldSample) { "请先开始实时扫描和录像" }
     check(SystemClock.elapsedRealtime()-s.at in 0..500 && s.pose!=null && !s.playback && s.recording && motor.isConnected()) { "请开始实时相机/IMU录制并连接底座" }
     check(s.recordingRemainingMs>=6000) { "录像即将结束，请先保存并开始新一轮录像；本次未发动作" }
-    val newBatch=field?.phase!="READY"
-    val number=if(newBatch) 1 else field!!.segments+1
-    AlertDialog.Builder(activity).setTitle("空地采集 · 第${number}/3段")
-      .setMessage("请确认实际地板平整、脖子最低，后摄方向约50厘米空地且线缆有余量。三声提示后朝后摄方向行驶450毫秒并停止，记录相机与IMU；每段停稳后需再次选择下一段，最多三段。\n本项使用人工确认的场地，地图高度漂移仅作记录；仍监测倾斜、定位、断连和已见障碍。不启动自主导航，也不把未知深度当空地。")
-      .setNegativeButton("取消",null).setPositiveButton("场地已确认，采集一段") { _,_->runCatching {
-        if(newBatch) field=OperatorExploration(requireNotNull(fieldSample))
-        beginCountdown("back",450,true)
-      }.onFailure { message(it.message ?: "采集条件未满足") } }.show()
   }
+  private fun prepareField(direction: String) {
+    require(direction in setOf("back","back_step","left","right"));validateFieldStart()
+    if(field?.phase!="READY") {
+      field=OperatorExploration(requireNotNull(fieldSample));fieldAnnotatedResult=null
+      fieldMeasuredHeight=activity.getSharedPreferences("terrain-camera",0).getFloat("height",0f).takeIf { it in .03f.. .5f }
+    }
+    beginCountdown(direction,when(direction) { "back"->450;"back_step"->150;else->350 },true)
+  }
+  /** Only the DUMP-protected integration receiver uses this typed, bounded test entry. */
+  fun diagnosticField(direction: String,confirmed: Boolean,promise: expo.modules.kotlin.Promise) {
+    try {
+      check(confirmed) { "请先由操作者确认对应方向的空地、最低姿态和线缆" }
+      check(fieldDiagnostic==null) { "上一段采集尚未完成" }
+      fieldDiagnostic=promise;prepareField(direction)
+      Handler(Looper.getMainLooper()).postDelayed({
+        if(fieldDiagnostic===promise) stop("采集诊断超时")
+      },12_000)
+    } catch(e: Exception) { fieldDiagnostic=null;promise.reject("ERR_FIELD_PRECONDITION",e.message,e) }
+  }
+  private fun finishFieldDiagnostic() { val old=fieldDiagnostic;fieldDiagnostic=null;old?.resolve(fieldReport()) }
+  private fun fieldReport()=field?.report()?.plus(mapOf("lastSegment" to (fieldAnnotatedResult ?: field?.result)))
+  fun operatorFloorHeight(): Float?=fieldMeasuredHeight.takeIf { field?.phase in listOf("READY","RUNNING","SETTLING","COMPLETE") }
   private fun cancelCountdown() {
     countdown?.cancel();countdown=null
     val dialog=countdownDialog;countdownDialog=null;dialog?.dismiss()
@@ -194,20 +225,25 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     cancelCountdown()
     val handler=Handler(Looper.getMainLooper())
     countdownTone=runCatching { ToneGenerator(AudioManager.STREAM_MUSIC,75) }.getOrNull()
+    val userCancel={
+      cancelCountdown()
+      if(operatorTrial) { field?.cancel("COUNTDOWN_CANCELLED");finishFieldDiagnostic() }
+    }
     val dialog=AlertDialog.Builder(activity).setTitle("即将开始一次标定")
-      .setMessage("请看底座：3秒后短${if(direction=="back") "后退" else "转向"}，随后自动停止。")
-      .setNegativeButton("取消本次动作") { _,_->cancelCountdown() }.create()
-    countdownDialog=dialog;dialog.setOnCancelListener { cancelCountdown() };dialog.show()
+      .setMessage("请看底座：3秒后短${if(direction.startsWith("back")) "后退" else "转向"}，随后自动停止。")
+      .setNegativeButton("取消本次动作") { _,_->userCancel() }.create()
+    countdownDialog=dialog;dialog.setOnCancelListener { userCancel() };dialog.show()
     countdown=CalibrationStartTimer({delay,work -> val task=Runnable { work() };handler.postDelayed(task,delay);{handler.removeCallbacks(task)} },{remaining->
-      dialog.setMessage("${remaining}秒后${if(direction=="back") "后退" else "转向"}${ms}毫秒，随后自动停止。\n请留意三声提示音；无需估计距离。")
+      dialog.setMessage("${remaining}秒后${if(direction.startsWith("back")) "后退" else "转向"}${ms}毫秒，随后自动停止。\n请留意三声提示音；无需估计距离。")
       runCatching { countdownTone?.startTone(ToneGenerator.TONE_PROP_BEEP,130) }
     },{
       cancelCountdown()
       runCatching {
         if(operatorTrial) {
           check(motor.isConnected() && !motor.busy && calibration==null) { "连接或控制状态已变化" }
-          val trial=requireNotNull(field);trial.issue(SystemClock.elapsedRealtime())
-          motor.request("calibration_back",450) { ok,s->
+          val trial=requireNotNull(field);trial.issue(SystemClock.elapsedRealtime(),direction)
+          fieldFlowStart=floorFlow()
+          motor.request(if(direction=="back_step") "back" else "calibration_$direction",ms) { ok,s->
             trial.acknowledge(ok,SystemClock.elapsedRealtime())
             message(if(ok) "本段已限时停止，正在记录停稳后的画面。" else "采集动作未完成：$s")
           }
@@ -227,7 +263,10 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
           message(if(ok) "动作已停止，正在等待位姿稳定并记录余移。" else "校验动作未完成：$s")
         }
         }
-      }.onFailure { message(it.message ?: "倒计时后条件已变化，未开始动作") }
+      }.onFailure {
+        message(it.message ?: "倒计时后条件已变化，未开始动作")
+        if(operatorTrial) { field?.cancel("START_PRECONDITION_CHANGED");finishFieldDiagnostic() }
+      }
     }).also { it.start() }
   }
   private fun checkBinding(r: TaughtRoute) {
@@ -247,12 +286,13 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   }
   @Synchronized fun stop(reason: String) {
     activity.runOnUiThread { cancelCountdown() }
-    teacher=null;calibration=null;field?.cancel(reason);follower?.cancel();motor.stop(reason);message(reason)
+    teacher=null;calibration=null;field?.cancel(reason);follower?.cancel();motor.stop(reason);message(reason);finishFieldDiagnostic()
   }
   @Synchronized fun pause() {
     activity.runOnUiThread { cancelCountdown() }
     teacher?.observe(null,false);follower?.pause("界面或定位已暂停");calibration=null;field?.cancel("CAMERA_PAUSED");fieldSample=null;headFixed=false;poseLock.reset()
     backChecked=false;turnChecked=false;motor.stop("扫描已暂停")
+    finishFieldDiagnostic()
   }
   @Synchronized fun holdForUi() {
     val f=follower
@@ -271,10 +311,13 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
       if(moving && trial.phase=="STOPPED") { motor.stop("空地采集中断：${trial.reason}");message("采集已停止：${trial.reason}") }
       trial.result?.let { result -> if(result!==savedFieldResult) {
         savedFieldResult=result
-        val record=result+mapOf("atEpochMs" to System.currentTimeMillis(),"recordingSession" to session)
+        val record=result+mapOf("atEpochMs" to System.currentTimeMillis(),"recordingSession" to session,
+          "floorFlowBefore" to fieldFlowStart,"floorFlowAfter" to floorFlow(),"measuredCameraHeightMeters" to fieldMeasuredHeight)
+        fieldAnnotatedResult=record
         activity.getSharedPreferences("navigation-field-exploration",0).edit().putString("latest",org.json.JSONObject(record).toString()).apply()
         message(if(result["completed"]==true) "第${trial.segments}/3段已停止并记录；${if(trial.phase=="COMPLETE") "本轮采集结束" else "观察新画面后可选择下一段"}。地图数值仅作诊断。"
           else "第${trial.segments}/3段记录不完整：${trial.reason}；${if(result["motorStopAcknowledged"]==true) "已收到停止回执" else "已请求停止，请检查底座"}。")
+        finishFieldDiagnostic()
       } }
     }
   }
@@ -348,7 +391,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     "routeName" to (follower?.route?.name ?: selected?.name),"waypoint" to follower?.waypoint,"headFixed" to headFixed,
     "backDirectionChecked" to backChecked,"turnDirectionChecked" to turnChecked,"connected" to motor.isConnected(),
     "mountMeasurement" to mountSettings.report(),"poseLock" to poseLock.report(),"pulseMeasurementRunning" to (calibration!=null),"lastPulseMeasurement" to lastMeasurement,
-    "operatorExploration" to field?.report(),"reason" to (follower?.reason ?: notice))
+    "operatorExploration" to fieldReport(),"reason" to (follower?.reason ?: notice))
   companion object {
     fun referenceKey(map: RoomMapData): String {
       if(map.referenceJpeg.isEmpty() || map.imageFromMap==null) return ""

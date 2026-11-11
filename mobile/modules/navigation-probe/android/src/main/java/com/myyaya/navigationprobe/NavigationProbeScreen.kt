@@ -110,7 +110,12 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
   private val monocular=MonocularSnapshot(host) { running && resumed && !isDestroyed && !isFinishing }
   fun captureMonocular(promise: expo.modules.kotlin.Promise)=monocular.request(promise)
   fun showMonocular(id: String,data: String,inferenceMs: Double)=monocular.show(id,data,inferenceMs)
+  fun showFloor(id: String,data: String,summary: String)=monocular.showFloor(id,data,summary)
   fun analyzeUprightReference(id: String,height: Double,width: Double,promise: expo.modules.kotlin.Promise)=monocular.reference(id,height,width,promise)
+  fun diagnosticField(direction: String,confirmed: Boolean,promise: expo.modules.kotlin.Promise) {
+    if(!running || !resumed || isDestroyed || isFinishing) promise.reject("ERR_FIELD_CAMERA","请先开始实时扫描和录像",null)
+    else { monocular.dismissComparison();roomMap?.diagnosticField(direction,confirmed,promise) ?: promise.reject("ERR_FIELD_SCREEN","请打开教路线采集页面",null) }
+  }
 
   fun onCreate(savedInstanceState: Bundle?) {
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

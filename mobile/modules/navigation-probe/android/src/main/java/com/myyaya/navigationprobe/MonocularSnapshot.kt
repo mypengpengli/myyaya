@@ -149,9 +149,30 @@ internal class MonocularSnapshot(private val host: Activity,private val active: 
       }
     } catch(e: Exception) { promise.reject("ERR_REFERENCE_CAPTURE",e.message,e) }
   }
+  fun showFloor(id: String,encoded: String,summary: String) {
+    check(!closed && active() && lastId==id) { "拍摄已暂停或被替换" }
+    require(encoded.length<=85_000 && summary.length<=8000)
+    val labels=Base64.decode(encoded,Base64.NO_WRAP);require(labels.size==252*252 && labels.all { it.toInt() in 0..3 })
+    val report=JSONObject(summary)
+    check(report.optBoolean("manualFloorAssumption") && !report.optBoolean("autonomousMotionAuthorized",true))
+    val original=requireNotNull(BitmapFactory.decodeFile(File(cache,"live.jpg").path))
+    val colors=IntArray(labels.size) { when(labels[it].toInt()) { 1->Color.argb(90,0,240,100);2->Color.argb(150,255,40,40);3->Color.argb(150,255,160,0);else->Color.TRANSPARENT } }
+    val tiny=Bitmap.createBitmap(colors,252,252,Bitmap.Config.ARGB_8888)
+    val colored=Bitmap.createScaledBitmap(tiny,original.width,original.height,false);tiny.recycle()
+    val overlay=original.copy(Bitmap.Config.ARGB_8888,true);Canvas(overlay).drawBitmap(colored,0f,0f,null);colored.recycle()
+    File(cache,"live.labels").writeBytes(labels);File(cache,"live.floor.json").writeText(summary)
+    val row=LinearLayout(host)
+    for(bitmap in listOf(original,overlay)) row.addView(ImageView(host).apply { setImageBitmap(bitmap);scaleType=ImageView.ScaleType.FIT_CENTER },
+      LinearLayout.LayoutParams(0,(host.resources.displayMetrics.heightPixels*.5).toInt(),1f))
+    dialog?.dismiss()
+    dialog=AlertDialog.Builder(host).setTitle("地面与障碍观察 · 实验")
+      .setMessage("左：本次原图；右：绿为地板假设、红为高出平面的物体、橙为疑似低处。\n${report.getString("reason")}\n比例来自实测镜头高度和人工地板区域；不是通行许可。")
+      .setView(row).setPositiveButton("关闭对照",null).create();dialog?.show()
+  }
   @Synchronized fun cancel() {
     val old=pending;pending=null;copying=false;lastId=null
     old?.promise?.reject("ERR_MONOCULAR_CLOSED","相机界面已暂停",null)
   }
+  fun dismissComparison() { dialog?.dismiss();dialog=null }
   fun close() { closed=true;cancel();handler.removeCallbacksAndMessages(null);dialog?.dismiss();io.shutdown() }
 }

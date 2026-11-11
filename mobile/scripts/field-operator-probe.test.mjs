@@ -1,0 +1,11 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import {createRequire} from "node:module";
+const require=createRequire(import.meta.url),ts=require("typescript"),module={exports:{}},calls=[];
+const js=ts.transpileModule(fs.readFileSync("src/diagnostics/field-operator-probe.ts","utf8"),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText;
+new Function("require","module","exports",js)(name=>{assert.equal(name,"../../modules/navigation-probe");return {runNativeFieldDiagnostic:async (...args)=>{calls.push(args);return {phase:"COMPLETE"};}};},module,module.exports);
+for(const args of [undefined,{}, {direction:"left",operatorConfirmed:false},{direction:"forward",operatorConfirmed:true}]) await assert.rejects(module.exports.runFieldOperatorProbe(args));
+assert.equal(calls.length,0);
+for(const direction of ["left","right","back"]) await module.exports.runFieldOperatorProbe({direction,operatorConfirmed:true});
+assert.deepEqual(calls,[["left",true],["right",true],["back",true]]);
+console.log("Field test: explicit direction and operator clearance required; no forward or implicit confirmation: PASS");

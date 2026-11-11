@@ -685,6 +685,10 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       "depthCapture" to depthRecorder.report()))) }
   fun canStart() = mapper != null && !saving && !restoring
   fun stopTaughtRoute(reason: String) { taughtRoutes?.stop(reason) }
+  fun diagnosticField(direction: String,confirmed: Boolean,promise: expo.modules.kotlin.Promise) {
+    val panel=taughtRoutes
+    if(panel==null) promise.reject("ERR_FIELD_SCREEN","请打开教路线采集页面",null) else panel.diagnosticField(direction,confirmed,promise)
+  }
   fun openTaughtRoute(id: String) {
     runCatching {
       require(UUID.fromString(id).toString()==id)
@@ -700,13 +704,14 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   }
   /** Feed camera images independently of raw-depth polling; two cadence gates halve visual throughput. */
   fun offerOperatorFrame(frame: Frame,session: String,recording: Boolean,playback: Boolean,recordingRemainingMs: Long) {
-    val camera=if(active && frame.camera.trackingState==TrackingState.TRACKING)
+    val camera=if(frame.camera.trackingState==TrackingState.TRACKING)
       RigidPose(frame.camera.pose.translation,frame.camera.pose.rotationQuaternion) else null
     taughtRoutes?.operatorFrame(camera,session,recording,playback,localAssessment.clearance==RouteClearance.OBSTACLE,recordingRemainingMs)
   }
   fun offerVisualFrame(frame: Frame) {
-    if(!active || frame.camera.trackingState!=TrackingState.TRACKING) return
-    floorFlow.offer(frame,calibratedHeight?.takeIf { surfaceSource=="MEASURED_HEIGHT" && terrainSnapshot.floorConfirmed })
+    if(frame.camera.trackingState!=TrackingState.TRACKING) return
+    val mapHeight=calibratedHeight?.takeIf { active && surfaceSource=="MEASURED_HEIGHT" && terrainSnapshot.floorConfirmed }
+    floorFlow.offer(frame,mapHeight ?: taughtRoutes?.operatorFloorHeight())
   }
   /** GL thread, depth sampled at up to 10 Hz; view snapshots limited to 2 Hz. */
   fun frame(session: Session, frame: Frame, sample: DepthSamples.Result?, depthNs: Long,

@@ -259,7 +259,14 @@ export class ReactNativeBleLooiTransport implements LooiTransport {
     } finally { this.headPulseRunning = false; }
   }
 
-  private async readDiagnosticValue(short: "fed1" | "fed8" | "2a27" | "2a28"): Promise<{ status: string; hex?: string; error?: string }> {
+  /** Official client reads FED5/FED6 at connection; inspect raw values without enabling or writing anything. */
+  async inspectSensorChannels() {
+    this.requireDeviceId();
+    return { atEpochMs: Date.now(), cliff: await this.readDiagnosticValue("fed5"),
+      evade: await this.readDiagnosticValue("fed6"), events: await this.readDiagnosticValue("fed9"),
+      interpretation: "固定只读通道；原始值和方向需实物校准，不能据此放行自主行驶" };
+  }
+  private async readDiagnosticValue(short: "fed1" | "fed5" | "fed6" | "fed8" | "fed9" | "2a27" | "2a28"): Promise<{ status: string; hex?: string; error?: string }> {
     const deviceId = this.requireDeviceId();
     const characteristic = this.gattSnapshot.characteristics.find((c) => c.uuid.toLowerCase() === `0000${short}-0000-1000-8000-00805f9b34fb`);
     if (!characteristic?.readable) return { status: "unsupported" };

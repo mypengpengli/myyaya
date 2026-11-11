@@ -21,7 +21,12 @@ export function startIntegrationControl() {
       let result;
       if (command.kind === "head_probe") result = await (await import("./head-protocol-probe")).runHeadProtocolProbe(command);
       else if (command.kind === "chat") result = await replyToCompanion(String(command.text).slice(0, 10000), new AbortController().signal);
-      else if (command.kind === "probe") result = command.mode === "upright_reference"
+      else if (command.kind === "probe") result = command.mode === "field_operator"
+        ? await (await import("./field-operator-probe")).runFieldOperatorProbe(command.args)
+        : command.mode === "floor_vision" ? await (await import("./floor-vision-probe")).runFloorVisionProbe(command.args)
+        : command.mode === "near_step" ? await (await import("./near-step-probe")).runNearStepProbe(command.args)
+        : command.mode === "robot_sensors" ? await (await import("../device-tools/looi-robot")).inspectLooiSensorChannels()
+        : command.mode === "upright_reference"
         ? await (await import("./upright-reference-probe")).runUprightReferenceProbe(command.args)
         : command.mode === "monocular_depth"
         ? await (await import("./monocular-depth-benchmark")).runMonocularDepthBenchmark()

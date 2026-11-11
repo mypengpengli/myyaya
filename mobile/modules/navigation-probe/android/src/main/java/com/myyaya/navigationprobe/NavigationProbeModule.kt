@@ -20,6 +20,19 @@ class NavigationProbeModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("NavigationProbe")
     Events("onRouteMotion")
+    AsyncFunction("showFloorLabels") { id: String,data: String,summary: String,promise: Promise ->
+      val screen=routeScreen;val activity=appContext.currentActivity
+      if(screen==null || activity==null) promise.reject("ERR_FLOOR_SCREEN","相机界面已关闭",null)
+      else activity.runOnUiThread {
+        runCatching { screen.showFloor(id,data,summary) }.onSuccess { promise.resolve(null) }
+          .onFailure { promise.reject("ERR_FLOOR_SHOW",it.message,it) }
+      }
+    }
+    AsyncFunction("diagnosticField") { direction: String,confirmed: Boolean,promise: Promise ->
+      val screen=routeScreen;val activity=appContext.currentActivity
+      if(screen==null || activity==null) promise.reject("ERR_FIELD_SCREEN","请打开教路线采集页面",null)
+      else activity.runOnUiThread { screen.diagnosticField(direction,confirmed,promise) }
+    }
     AsyncFunction("analyzeUprightReference") { id: String,height: Double,width: Double,promise: Promise ->
       val screen=routeScreen;val activity=appContext.currentActivity
       if(screen==null || activity==null) promise.reject("ERR_REFERENCE_SCREEN","请打开教路线相机并开始扫描",null)
@@ -43,13 +56,13 @@ class NavigationProbeModule : Module() {
       val source=File(context.cacheDir,"monocular-benchmark")
       val destination=File(context.getExternalFilesDir("navigation-probe") ?: File(context.filesDir,"navigation-probe"),"monocular-outputs").apply { mkdirs() }
       val sizes=mapOf("can_before.depth" to 63504,"can_after.depth" to 63504,"turn_before.depth" to 63504,"turn_after.depth" to 63504,
-        "live.depth" to 63504,"live.rgb" to 196608)
+        "live.depth" to 63504,"live.labels" to 63504,"live.rgb" to 196608)
       val copied=ArrayList<String>()
       for((name,size) in sizes) {
         val input=File(source,name)
         if(input.isFile && input.length()==size.toLong()) { input.copyTo(File(destination,name),true);copied.add(name) }
       }
-      for(name in listOf("live.jpg","live.json")) {
+      for(name in listOf("live.jpg","live.json","live.floor.json")) {
         val input=File(source,name)
         val limit=if(name.endsWith("jpg")) 2_000_000L else 8_000L
         if(input.isFile && input.length() in 1L..limit) {
