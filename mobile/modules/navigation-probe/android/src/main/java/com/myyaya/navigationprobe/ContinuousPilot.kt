@@ -112,6 +112,7 @@ internal class ContinuousPilot(val gx: Double,val gy: Double,val width: Double,v
     fun ramp(current: Int,target: Double,rate: Double)=target.coerceIn(current-rate*dt,current+rate*dt).roundToInt()
     sentSpeed=if(v==0.0)0 else ramp(sentSpeed,v,65.0)
     sentTurn=ramp(sentTurn,w,90.0);wasMoving=sentSpeed!=0 || sentTurn!=0
+    if(!clearArc(sentSpeed.toDouble(),sentTurn.toDouble())){phase="WAITING_CLEARANCE";return brake("平滑后的实际运动进入障碍范围")}
     if(wasMoving)motionTicks++
     phase=if(v==0.0)"TURNING" else "DRIVING";reason="连续更新速度与方向"
     return sentSpeed to sentTurn

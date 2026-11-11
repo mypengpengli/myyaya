@@ -129,7 +129,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     mountSettings.edit { mountChanged() }
   }
   @Synchronized fun mountChanged() {
-    if(teacher!=null || follower?.phase in listOf("FOLLOWING","FACING_USER","PAUSED")) stop("安装偏移已改变，请重新教路线或恢复原安装")
+    if(motor.continuous?.pilot?.active==true || teacher!=null || follower?.phase in listOf("FOLLOWING","FACING_USER","PAUSED")) stop("安装偏移已改变，请重新教路线或恢复原安装")
     backChecked=false;turnChecked=false;headFixed=false;poseLock.reset();calibration=null
     message("实测偏移已保存，请重新固定最低姿态并做短动作校验。")
   }
