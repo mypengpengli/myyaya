@@ -699,10 +699,10 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     mapper?.snapshot()?.let { render(it,"录制回放，不驱动底座。点击开始扫描后可分析已录场景。") }
   }
   /** Feed camera images independently of raw-depth polling; two cadence gates halve visual throughput. */
-  fun offerOperatorFrame(frame: Frame,session: String,recording: Boolean,playback: Boolean) {
+  fun offerOperatorFrame(frame: Frame,session: String,recording: Boolean,playback: Boolean,recordingRemainingMs: Long) {
     val camera=if(active && frame.camera.trackingState==TrackingState.TRACKING)
       RigidPose(frame.camera.pose.translation,frame.camera.pose.rotationQuaternion) else null
-    taughtRoutes?.operatorFrame(camera,session,recording,playback,localAssessment.clearance==RouteClearance.OBSTACLE)
+    taughtRoutes?.operatorFrame(camera,session,recording,playback,localAssessment.clearance==RouteClearance.OBSTACLE,recordingRemainingMs)
   }
   fun offerVisualFrame(frame: Frame) {
     if(!active || frame.camera.trackingState!=TrackingState.TRACKING) return

@@ -5,7 +5,8 @@ import kotlin.math.abs
 /** Operator-confirmed flat area, bounded data collection. Never grants autonomous free space. */
 internal class OperatorExploration(initial: Sample) {
   data class Sample(val at: Long,val pose: RoutePose?,val cameraY: Float?,val session: String,
-    val connected: Boolean,val revision: Long,val recording: Boolean,val playback: Boolean,val hazard: Boolean)
+    val connected: Boolean,val revision: Long,val recording: Boolean,val playback: Boolean,val hazard: Boolean,
+    val recordingRemainingMs: Long=90_000)
   private val origin=initial
   private var latest=initial
   private var pulseStart: Sample?=null
@@ -29,26 +30,34 @@ internal class OperatorExploration(initial: Sample) {
     abs(wrapYaw(s.pose.pitch-origin.pose!!.pitch))>.12f || abs(wrapYaw(s.pose.roll-origin.pose.roll))>.12f->"TILT_CHANGED"
     else->null
   }
-  @Synchronized fun cancel(why: String) { phase="STOPPED";reason=why }
+  private fun snapshot(s: Sample,completed: Boolean,why: String): Map<String,Any?> {
+    val start=requireNotNull(pulseStart);val a=start.pose!!;val b=s.pose!!
+    return mapOf("segment" to segments,"durationMs" to 450,"direction" to "back",
+      "completed" to completed,"completionReason" to why,"motorStopAcknowledged" to (ackAt>0),
+      "lastPoseAtMs" to s.at,"rawPoseDisplacementMeters" to a.distance(b),"rawPoseYawRadians" to wrapYaw(b.yaw-a.yaw),
+      "rawCameraYDeltaMeters" to (s.cameraY!!-start.cameraY!!),
+      "pitchDeltaRadians" to wrapYaw(b.pitch-a.pitch),"rollDeltaRadians" to wrapYaw(b.roll-a.roll),
+      "clearAreaSource" to "operator-confirmed-flat-area","metricNavigationValidated" to false,
+      "depthClearanceClaimed" to false,"stopSource" to if(ackAt>0) "timed-pulse-acknowledged" else "stop-request-required")
+  }
+  @Synchronized fun cancel(why: String) {
+    if(moving) result=snapshot(latest,false,why)
+    phase="STOPPED";reason=why
+  }
   @Synchronized fun observe(s: Sample,now: Long) {
     if(phase in listOf("STOPPED","COMPLETE")) return
     failure(s,now)?.let { cancel(it);return }
     latest=s;lastAt=s.at
     if(phase=="SETTLING" && now-ackAt>=1500) {
-      val start=requireNotNull(pulseStart);val a=start.pose!!;val b=s.pose!!
-      result=mapOf("segment" to segments,"durationMs" to 450,"direction" to "back",
-        "rawPoseDisplacementMeters" to a.distance(b),"rawPoseYawRadians" to wrapYaw(b.yaw-a.yaw),
-        "rawCameraYDeltaMeters" to (s.cameraY!!-start.cameraY!!),
-        "pitchDeltaRadians" to wrapYaw(b.pitch-a.pitch),"rollDeltaRadians" to wrapYaw(b.roll-a.roll),
-        "clearAreaSource" to "operator-confirmed-flat-area","metricNavigationValidated" to false,
-        "depthClearanceClaimed" to false,"stopSource" to "timed-pulse-acknowledged")
+      result=snapshot(s,true,"SEGMENT_STOPPED")
       phase=if(segments>=3) "COMPLETE" else "READY";reason="SEGMENT_STOPPED"
     }
   }
   @Synchronized fun issue(now: Long) {
     check(phase=="READY" && segments<3) { "请等待上一段停止或重新确认空地" }
     failure(latest,now)?.let { cancel(it);error(it) }
-    segments++;pulseStart=latest;phase="RUNNING";reason="TIMED_PULSE"
+    check(latest.recordingRemainingMs>=2500) { "录像即将结束，请先保存并开始新一轮录像" }
+    segments++;pulseStart=latest;ackAt=0;phase="RUNNING";reason="TIMED_PULSE"
   }
   @Synchronized fun acknowledge(ok: Boolean,now: Long) {
     if(phase!="RUNNING") return

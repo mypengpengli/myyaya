@@ -37,5 +37,6 @@ internal class ARSessionDataset(context: Context) {
     if(SystemClock.elapsedRealtime()-started>90_000 || f.length()>100_000_000 || session.recordingStatus!=RecordingStatus.OK) stop(session)
   }
   fun recording()=active!=null
-  fun report(): Map<String,Any?> = mapOf("recording" to recording(),"file" to lastFile,"maxSeconds" to 90,"localOnly" to true)
+  fun remainingMs()=if(active!=null) (90_000-(SystemClock.elapsedRealtime()-started)).coerceAtLeast(0) else 0L
+  fun report(): Map<String,Any?> = mapOf("recording" to recording(),"file" to lastFile,"maxSeconds" to 90,"remainingMs" to remainingMs(),"localOnly" to true)
 }

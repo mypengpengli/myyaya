@@ -175,6 +175,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     check(field?.moving!=true) { "请等待本段停稳" }
     val s=requireNotNull(fieldSample) { "请先开始实时扫描和录像" }
     check(SystemClock.elapsedRealtime()-s.at in 0..500 && s.pose!=null && !s.playback && s.recording && motor.isConnected()) { "请开始实时相机/IMU录制并连接底座" }
+    check(s.recordingRemainingMs>=6000) { "录像即将结束，请先保存并开始新一轮录像；本次未发动作" }
     val newBatch=field?.phase!="READY"
     val number=if(newBatch) 1 else field!!.segments+1
     AlertDialog.Builder(activity).setTitle("空地采集 · 第${number}/3段")
@@ -260,10 +261,10 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
   fun basePose(camera: RigidPose)=RoutePose.fromCamera(camera,mount.right,mount.alongView)
   fun previewPoints()=selected?.points ?: emptyList()
   /** Live camera session coordinates, independent of map anchoring and floor-plane drift. */
-  @Synchronized fun operatorFrame(camera: RigidPose?,session: String,recording: Boolean,playback: Boolean,hazard: Boolean) {
+  @Synchronized fun operatorFrame(camera: RigidPose?,session: String,recording: Boolean,playback: Boolean,hazard: Boolean,recordingRemainingMs: Long) {
     val now=SystemClock.elapsedRealtime()
     val pose=camera?.let { runCatching { basePose(it) }.getOrNull() }
-    val sample=OperatorExploration.Sample(now,pose,camera?.t?.get(1),session,motor.isConnected(),motor.connectionRevision,recording,playback,hazard)
+    val sample=OperatorExploration.Sample(now,pose,camera?.t?.get(1),session,motor.isConnected(),motor.connectionRevision,recording,playback,hazard,recordingRemainingMs)
     fieldSample=sample
     field?.let { trial ->
       val moving=trial.moving;trial.observe(sample,now)
@@ -272,7 +273,8 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
         savedFieldResult=result
         val record=result+mapOf("atEpochMs" to System.currentTimeMillis(),"recordingSession" to session)
         activity.getSharedPreferences("navigation-field-exploration",0).edit().putString("latest",org.json.JSONObject(record).toString()).apply()
-        message("第${trial.segments}/3段已停止并记录；${if(trial.phase=="COMPLETE") "本轮采集结束" else "观察新画面后可选择下一段"}。地图数值仅作诊断。")
+        message(if(result["completed"]==true) "第${trial.segments}/3段已停止并记录；${if(trial.phase=="COMPLETE") "本轮采集结束" else "观察新画面后可选择下一段"}。地图数值仅作诊断。"
+          else "第${trial.segments}/3段记录不完整：${trial.reason}；${if(result["motorStopAcknowledged"]==true) "已收到停止回执" else "已请求停止，请检查底座"}。")
       } }
     }
   }

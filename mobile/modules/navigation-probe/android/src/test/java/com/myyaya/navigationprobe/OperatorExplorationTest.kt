@@ -36,6 +36,21 @@ class OperatorExplorationTest {
   }
   @Test fun failedAcknowledgementDoesNotReportMovementSuccess() {
     val f=OperatorExploration(sample());f.issue(1000);f.acknowledge(false,1200)
-    assertEquals("STOPPED",f.phase);assertNull(f.result)
+    assertEquals("STOPPED",f.phase);assertEquals(false,f.result!!["completed"])
+    assertEquals(false,f.result!!["motorStopAcknowledged"])
+  }
+  @Test fun insufficientRecordingTimeNeverIssuesNextPulse() {
+    val f=OperatorExploration(sample().copy(recordingRemainingMs=2000))
+    try { f.issue(1000);fail() } catch(_:IllegalStateException) {}
+    assertEquals(0,f.segments);assertFalse(f.moving)
+  }
+  @Test fun recordingExpiryAfterAcknowledgementRetainsPartialCurrentSegment() {
+    val f=OperatorExploration(sample());f.issue(1000);f.acknowledge(true,1450)
+    f.observe(sample(2000).copy(pose=RoutePose(0f,-.065f,0f)),2000)
+    f.observe(sample(2100).copy(recording=false),2100)
+    assertEquals("STOPPED",f.phase);assertEquals(1,f.result!!["segment"])
+    assertEquals(false,f.result!!["completed"]);assertEquals(true,f.result!!["motorStopAcknowledged"])
+    assertEquals(.065f,f.result!!["rawPoseDisplacementMeters"])
+    assertEquals("RECORDING_STOPPED",f.result!!["completionReason"])
   }
 }

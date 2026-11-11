@@ -613,7 +613,7 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
         }
         if (frame.timestamp == 0L) return
         monocular.offer(frame)
-        roomMap?.offerOperatorFrame(frame,System.identityHashCode(current).toString(),datasets.recording(),playbackName!=null)
+        roomMap?.offerOperatorFrame(frame,System.identityHashCode(current).toString(),datasets.recording(),playbackName!=null,datasets.remainingMs())
         vertices.position(0); uv.position(0)
         frame.transformCoordinates2d(Coordinates2d.OPENGL_NORMALIZED_DEVICE_COORDINATES, vertices, Coordinates2d.TEXTURE_NORMALIZED, uv)
         GLES20.glUseProgram(program)
