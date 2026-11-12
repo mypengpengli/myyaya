@@ -38,7 +38,7 @@ export async function runContinuousGoalMission(args:{operatorConfirmed?:unknown;
         const latest=await getContinuousStatus();if(latest.token!==token || !latest.active)break;
         controller.pose={...latest.pose!};controller.positionUncertaintyMeters=Number(latest.positionUncertaintyMeters ?? 0);
         const plan=controller.plan();
-        const obstacles=[...controller.cells.values()].filter(c=>c.label!==1).map(c=>({x:c.x*.05,y:c.y*.05,label:c.label}));
+        const obstacles=[...controller.cells.values()].filter(c=>c.label!==1).map(c=>({x:c.x*controller.cellMeters,y:c.y*controller.cellMeters,label:c.label}));
         await observeNativeContinuous(token,{imageNs:result.frame.imageTimestampNs,capture:capture.pose,cells:result.navigationCells,path:plan.path,obstacles});
         observations++;failures=0;
         if(history.length<700)history.push({atMs:Date.now()-started,pose:latest.pose,phase:latest.phase,remaining:latest.remainingMeters,perceptionMs:latest.perceptionAgeMs,plan:plan.phase,speed:latest.sentSpeed,turn:latest.sentTurn,timings:result.timings,path:plan.path.slice(0,15)});

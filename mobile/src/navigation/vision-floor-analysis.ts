@@ -57,7 +57,7 @@ export function analyzeFloorDepth(depth: Uint8Array, width: number, height: numb
   const labels=new Uint8Array(depth.length), sectors=Array.from({length:6},()=>({floor:0,other:0}));
   let floorPixels=0, obstaclePixels=0, dropPixels=0, nearestObstacle=Infinity, corridorDropPixels=0;
   const obstacleCandidates: number[]=[];
-  const mapCells=new Map<string,{x:number;y:number;counts:number[]}>();
+  const mapCells=new Map<string,{x:number;y:number;counts:number[];xs:number[];ys:number[]}>();
   for(let n=0;n<depth.length;n++) {
     const inv=scale*depth[n]+bias;if(inv<=.1 || rayY[n]>=-.02) continue;
     const distance=1/inv, h=cameraHeight+rayY[n]*distance;
@@ -78,15 +78,19 @@ export function analyzeFloorDepth(depth: Uint8Array, width: number, height: numb
     if(labels[n]===2 && right>=corridorLeft && right<=corridorRight && forward<2) obstacleCandidates.push(forward);
     if(labels[n] && Math.abs(right)<1.5 && forward<1.5) {
       const gx=Math.round(right/.05),gy=Math.round(forward/.05),key=`${gx},${gy}`;
-      let cell=mapCells.get(key);if(!cell) {cell={x:gx,y:gy,counts:[0,0,0,0]};mapCells.set(key,cell);}
+      let cell=mapCells.get(key);if(!cell) {cell={x:gx,y:gy,counts:[0,0,0,0],xs:[0,0,0,0],ys:[0,0,0,0]};mapCells.set(key,cell);}
       cell.counts[labels[n]]++;
+      cell.xs[labels[n]]+=right;cell.ys[labels[n]]+=forward;
     }
   }
   if(obstacleCandidates.length>=12) nearestObstacle=obstacleCandidates.sort((a,b)=>a-b)[Math.floor(obstacleCandidates.length*.1)];
   const coverage=sectors.map(s=>({ ...s, ratio:s.floor/(s.floor+s.other || 1) }));
   const nearFloorObserved=coverage.slice(0,3).every(s=>s.floor>=12 && s.ratio>=.8);
   const reason=corridorDropPixels>=12 ? "POSSIBLE_DROP_IN_CORRIDOR" : Number.isFinite(nearestObstacle) ? "OBSTACLE_IN_VIEW_CORRIDOR" : coverage.every(s=>s.floor>=12 && s.ratio>=.8) ? "FLOOR_STRIP_OBSERVED" : nearFloorObserved ? "NEAR_FLOOR_OBSERVED_FAR_UNKNOWN" : "INCOMPLETE_FLOOR_COVERAGE";
-  const navigationCells=Array.from(mapCells.values()).filter(c=>Math.max(...c.counts)>=3).map(c=>[c.x*.05,c.y*.05,c.counts[3]>=3?3:c.counts[2]>=3?2:1,Math.min(255,Math.max(...c.counts))] as [number,number,number,number]);
+  const navigationCells=Array.from(mapCells.values()).filter(c=>Math.max(...c.counts)>=3).map(c=>{
+    const label=c.counts[3]>=3?3:c.counts[2]>=3?2:1,count=c.counts[label];
+    return [c.xs[label]/count,c.ys[label]/count,label,Math.min(255,count)] as [number,number,number,number];
+  });
   return { labels,navigationCells, report:{ reason, cameraHeightMeters:cameraHeight, scale,bias,fitInlierRatio:best.length/train.length,
     heldoutFloorMedianHeightErrorMeters:validationMedian,heldoutFloorP90HeightErrorMeters:validationP90,
     floorPixels,obstaclePixels,dropPixels,uncertainEdgePixels:uncertainEdge.reduce((a,b)=>a+b,0),corridorDropPixels,sectors:coverage,

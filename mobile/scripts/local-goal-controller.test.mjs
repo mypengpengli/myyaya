@@ -19,6 +19,12 @@ assert.throws(()=>lostTurn.applyMotion({direction:'back_step',completed:true,mot
 const angle=.2,turn=rig(),dx=-(Math.cos(angle)*g.centerRightMeters+Math.sin(angle)*g.alongViewMeters-g.centerRightMeters),dz=(-Math.sin(angle)*g.centerRightMeters+Math.cos(angle)*g.alongViewMeters-g.alongViewMeters);
 turn.applyMotion({completed:true,motorStopAcknowledged:true,rawPoseYawRadians:angle,floorFlowBefore:flow(0,0),floorFlowAfter:flow(dx,dz)});assert.ok(Math.hypot(turn.pose.x,turn.pose.y)<1e-8);
 const arrived=rig();arrived.pose.y=.46;assert.equal(arrived.plan().phase,'AT_GOAL');
+// A 25cm gap must not disappear through two rounds of 5cm quantization.
+const narrow=new LocalGoalController({x:0,y:.2},{...g,marginMeters:.02},0);
+narrow.observe([[.15,.2,2,100],[.15,.25,2,100],[.15,.3,2,100],[-.1,.15,2,100],[-.1,.2,2,100]]);
+const narrowPlan=narrow.plan();assert.ok(['TURN','ADVANCE'].includes(narrowPlan.phase));
+assert.ok(narrowPlan.path.some(p=>p.x<-.02));
+const end=narrowPlan.path.at(-1);assert.ok(Math.hypot(end.x,end.y-.2)<=.06);
 assert.throws(()=>new LocalGoalController({x:0,y:5},g,0));
 const sim=rig();sim.observe([[.07,.3,2,30]]);let iterations=0;
 for(;iterations<80;iterations++) {

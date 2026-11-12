@@ -2,13 +2,14 @@ import type { NearStepGeometry } from "./near-step-guard";
 
 export type GoalPose={x:number;y:number;yaw:number};
 export type GroundCell=[number,number,number,number];
-const CELL=.05,wrap=(a:number)=>Math.atan2(Math.sin(a),Math.cos(a));
+const CELL=.025,wrap=(a:number)=>Math.atan2(Math.sin(a),Math.cos(a));
 export function cameraYaw(q:number[]) {
   if(q.length!==4 || !q.every(Number.isFinite) || Math.abs(Math.hypot(...q)-1)>.02) throw new Error("无效相机朝向");
   const [x,y,z,w]=q;return Math.atan2(-2*(x*z+y*w),1-2*(x*x+y*y));
 }
 /** Local grid plans through unknown at extra cost; every actual translation is observed again. */
 export class LocalGoalController {
+  readonly cellMeters=CELL;
   pose:GoalPose={x:0,y:0,yaw:0};
   positionUncertaintyMeters=0;
   readonly cells=new Map<string,{x:number;y:number;label:number;clearVotes:number}>();
@@ -63,20 +64,25 @@ export class LocalGoalController {
     const blocked=new Set<string>();
     for(const cell of this.cells.values()) if(cell.label!==1) {
       const r=Math.ceil(radius/CELL);
-      for(let x=-r;x<=r;x++) for(let y=-r;y<=r;y++) if(Math.hypot(x,y)*CELL<=radius+.025) blocked.add(`${cell.x+x},${cell.y+y}`);
+      for(let x=-r;x<=r;x++) for(let y=-r;y<=r;y++) if(Math.hypot(x,y)*CELL<=radius+CELL*Math.SQRT1_2) blocked.add(`${cell.x+x},${cell.y+y}`);
     }
     const sx=Math.round(this.pose.x/CELL),sy=Math.round(this.pose.y/CELL),tx=Math.round(this.goal.x/CELL),ty=Math.round(this.goal.y/CELL);
     const key=(x:number,y:number)=>`${x},${y}`,root=key(sx,sy),target=key(tx,ty);
+    const goalRadius=Math.ceil(.06/CELL);
+    let freeGoal=false;
+    for(let dx=-goalRadius;dx<=goalRadius;dx++)for(let dy=-goalRadius;dy<=goalRadius;dy++)
+      if(Math.hypot((tx+dx)*CELL-this.goal.x,(ty+dy)*CELL-this.goal.y)<=.06 && !blocked.has(key(tx+dx,ty+dy)))freeGoal=true;
+    if(!freeGoal)return {phase:"OBSERVE_SIDE",path:[]};
     const open=[{x:sx,y:sy,g:0,f:Math.hypot(tx-sx,ty-sy)}],cost=new Map([[root,0]]),parent=new Map<string,string>();
     let found:string|undefined,expanded=0;
     const steps=[[-1,0],[1,0],[0,1],[0,-1],[-1,1],[1,1],[-1,-1],[1,-1]];
-    while(open.length && expanded++<2500) {
+    while(open.length && expanded++<10000) {
       let best=0;for(let n=1;n<open.length;n++) if(open[n].f<open[best].f) best=n;
       const p=open.splice(best,1)[0],pk=key(p.x,p.y);if(p.g!==(cost.get(pk) ?? Infinity)) continue;
-      if(pk===target){found=pk;break;}
+      if(pk!==root && Math.hypot(p.x*CELL-this.goal.x,p.y*CELL-this.goal.y)<=.06){found=pk;break;}
       for(const [dx,dy] of steps) {
         const x=p.x+dx,y=p.y+dy,k=key(x,y);
-        if(Math.abs(x)>30||Math.abs(y)>30||blocked.has(k) || (dx&&dy&&(blocked.has(key(p.x+dx,p.y))||blocked.has(key(p.x,p.y+dy))))) continue;
+        if(Math.abs(x*CELL)>1.5||Math.abs(y*CELL)>1.5||blocked.has(k) || (dx&&dy&&(blocked.has(key(p.x+dx,p.y))||blocked.has(key(p.x,p.y+dy))))) continue;
         const g=p.g+Math.hypot(dx,dy)*(this.cells.get(k)?.label===1?1:2.5);
         if(g>=(cost.get(k) ?? Infinity)) continue;cost.set(k,g);parent.set(k,pk);open.push({x,y,g,f:g+Math.hypot(tx-x,ty-y)});
       }
