@@ -2,7 +2,7 @@
   "expo": {
     "name": "My LOOI",
     "slug": "my-looi",
-    "version": "2.1.206",
+    "version": "2.1.207",
     "orientation": "landscape",
     "icon": "./assets/images/icon.png",
     "scheme": "mylooi",
@@ -21,7 +21,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "io.github.razor79.mylooi",
-      "versionCode": 206
+      "versionCode": 207
     },
     "web": {
       "bundler": "metro",

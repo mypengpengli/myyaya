@@ -12,7 +12,7 @@ class ContinuousPilotTest {
   }
   private fun observe(p: ContinuousPilot,t:Long,obstacle:Boolean=false) {
     val points=(-3..3).flatMap { x-> (1..8).map { y->ContinuousPilot.Point(.07+x*.03,.05+y*.04,1) } }.toMutableList()
-    if(obstacle)points.add(ContinuousPilot.Point(.07,.15,2))
+    if(obstacle)points.add(ContinuousPilot.Point(.07,.10,2))
     p.observation(t,t*1_000_000,p.pose,points,listOf(ContinuousPilot.Pose(0.0,.4,0.0)))
   }
   @Test fun waitsForLinkAndPose() { val p=pilot();assertEquals(0 to 0,p.tick(1010,true));assertEquals("WAITING_LINK",p.phase) }
@@ -66,7 +66,7 @@ class ContinuousPilotTest {
   }
   @Test fun retainedObstacleIsNotForgottenOutsideCurrentImage() {
     val p=pilot();frame(p,1000)
-    p.observation(1000,1_000_000_000,p.pose,emptyList(),listOf(ContinuousPilot.Pose(0.0,.4,0.0)),listOf(ContinuousPilot.Point(0.0,.08,2)))
+    p.observation(1000,1_000_000_000,p.pose,emptyList(),listOf(ContinuousPilot.Pose(0.0,.4,0.0)),listOf(ContinuousPilot.Point(0.0,.04,2)))
     assertEquals(0 to 0,p.tick(1050,true));assertEquals("WAITING_CLEARANCE",p.phase)
   }
   @Test fun slowNeuralUpdatesPermitBoundedContinuousMotion() {
@@ -86,5 +86,11 @@ class ContinuousPilotTest {
     frame(p,1000);frame(p,1100,.11)
     p.observation(1100,1_100_000_000,p.pose,emptyList(),listOf(ContinuousPilot.Pose(-.05,.175,0.0)))
     assertTrue(p.tick(1150,true).second>0)
+  }
+  @Test fun rectangularBodyDoesNotInventCircularSideOverhang() {
+    val p=pilot();frame(p,1000);observe(p,1000)
+    val ground=(-3..3).flatMap {x->(1..8).map {y->ContinuousPilot.Point(.07+x*.03,.05+y*.04,1)}}
+    p.observation(1050,1_050_000_000,p.pose,ground,listOf(ContinuousPilot.Pose(0.0,.4,0.0)),listOf(ContinuousPilot.Point(.11,0.0,2)))
+    assertTrue(p.tick(1100,true).first<0)
   }
 }

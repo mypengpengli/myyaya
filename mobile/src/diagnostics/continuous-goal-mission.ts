@@ -30,7 +30,7 @@ export async function runContinuousGoalMission(args:{operatorConfirmed?:unknown;
     while(Date.now()-started<550_000) {
       const status=await getContinuousStatus();if(status.token!==token || !status.active)break;
       try {
-        const result=await runFloorVisionProbe({heightCm:settings.measuredCameraHeightMeters*100,roi:region,navigationCells:true,showOverlay:false,autoFloorRegion:false,liveOnly:true});
+        const result=await runFloorVisionProbe({heightCm:settings.measuredCameraHeightMeters*100,roi:region,navigationCells:true,showOverlay:false,autoFloorRegion:true,liveOnly:true});
         const capture=result.frame.navigationPose as typeof status|undefined;
         if(!capture || capture.token!==token || !capture.poseReady || !capture.pose || Math.abs(Number(result.frame.imageTimestampNs)-Number(capture.frameNs))>150_000_000) {await new Promise(r=>setTimeout(r,100));continue;}
         if(!result.navigationCells)throw new Error("缺少地面分类");

@@ -67,13 +67,13 @@ internal class ContinuousPilot(val gx: Double,val gy: Double,val width: Double,v
   @Synchronized fun reseeded() {if(!active || !needReseed)return;needReseed=false;anchorOrigin=0;odomAt=0;odomNs=0;lostSince=0;uncertainty+=.02;if(uncertainty>.1)cancel("位置不确定度过大")}
   @Synchronized fun cancel(why: String) {if(!active)return;phase="CANCELLED";reason=why;sentSpeed=0;sentTurn=0}
   private fun clearArc(speed: Double,turn: Double): Boolean {
-    val radius=hypot(width,length)/2+margin+.01
     val v=-speed/127*.30;val w=-turn/127*3.0
     for(i in 0..5) {
       val t=i*.1;val a=pose.yaw+w*t
       val x=pose.x+if(abs(w)<.001) sin(pose.yaw)*v*t else v/w*(cos(pose.yaw)-cos(a))
       val y=pose.y+if(abs(w)<.001) cos(pose.yaw)*v*t else v/w*(sin(a)-sin(pose.yaw))
-      if(obstacles.any {hypot(it.x-x,it.y-y)<radius}) return false
+      if(obstacles.any {p->val dx=p.x-x;val dy=p.y-y
+        abs(cos(a)*dx-sin(a)*dy)<width/2+margin && abs(sin(a)*dx+cos(a)*dy)<length/2+margin}) return false
     }
     if(abs(speed)>1) for(side in listOf(-1,0,1)) {
       val x=pose.x+sin(pose.yaw)*.18+cos(pose.yaw)*side*(width/2+margin)*.75
