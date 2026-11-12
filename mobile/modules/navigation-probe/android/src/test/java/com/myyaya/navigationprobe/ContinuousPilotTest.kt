@@ -81,4 +81,10 @@ class ContinuousPilotTest {
     val p=pilot();frame(p,1000);observe(p,1000);frame(p,1100,0.0,yaw=.65)
     assertEquals(0 to 0,p.tick(1100,true));assertEquals("WAITING_PERCEPTION",p.phase)
   }
+  @Test fun followsFreeGoalEndpointRatherThanCuttingBackIntoBlockedCenter() {
+    val p=ContinuousPilot(0.0,.2,.15,.10,.02,.07,.05,.08f,1000)
+    frame(p,1000);frame(p,1100,.11)
+    p.observation(1100,1_100_000_000,p.pose,emptyList(),listOf(ContinuousPilot.Pose(-.05,.175,0.0)))
+    assertTrue(p.tick(1150,true).second>0)
+  }
 }

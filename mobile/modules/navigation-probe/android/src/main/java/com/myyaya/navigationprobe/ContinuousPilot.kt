@@ -103,7 +103,7 @@ internal class ContinuousPilot(val gx: Double,val gy: Double,val width: Double,v
     val viewTurn=abs(atan2(sin(pose.yaw-perceptionPose.yaw),cos(pose.yaw-perceptionPose.yaw)))
     if(perceptionNs==0L || frameNs-perceptionNs>2_200_000_000L || viewTravel>.10 || viewTurn>.55){phase="WAITING_PERCEPTION";return brake("等待更新视野：时间、位移或转角达到上限")}
     if(path.isEmpty()){phase="WAITING_PATH";return brake("等待可执行路线")}
-    val target=path.firstOrNull {hypot(it.x-pose.x,it.y-pose.y)>=.10} ?: Pose(gx,gy,0.0)
+    val target=path.firstOrNull {hypot(it.x-pose.x,it.y-pose.y)>=.10} ?: path.last()
     val error=atan2(sin(atan2(target.x-pose.x,target.y-pose.y)-pose.yaw),cos(atan2(target.x-pose.x,target.y-pose.y)-pose.yaw))
     val speedLimit=if(frameNs-perceptionNs>650_000_000L)24.0 else 30.0
     var v=if(abs(error)>.70)0.0 else -min(speedLimit,max(20.0,d*180))*cos(error).coerceAtLeast(0.0)
