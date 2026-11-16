@@ -257,8 +257,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     }
     dialog.show()
   }
-  private fun clearTerrain(status: String="SELECT_GROUND") {
-    floorFlow.reset()
+  private fun clearTerrain(status: String="SELECT_GROUND",resetFlow: Boolean=true) {
+    if(resetFlow) floorFlow.reset()
     observedGround=null
     surfaceAnchor?.let { surfaceAnchorsToRelease.add(it) };surfaceAnchor=null;surfaceAnchorState="NONE"
     groundArmed=false; groundTap=null; pendingGround=null; pendingHeight=null;selectedGround=null;fittedGround=null;calibratedHeight=null;surfaceSource="NONE";terrain.reset()
@@ -799,7 +799,9 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     }
     hybridReport=mapOf("status" to if(located) "GROUND_REFERENCE_REQUIRED" else "LOCALIZATION_REQUIRED")
     if (located) analyzeTerrain(session,current,frame,sample,depthNs,token,dense,denseNs)
-    else clearTerrain("LOCALIZATION_REQUIRED")
+    // Map localization and camera-relative odometry have different lifetimes.
+    // A saved map without an anchor must not erase live local navigation every frame.
+    else clearTerrain("LOCALIZATION_REQUIRED",resetFlow=false)
     // Record inputs before initialization succeeds; do not feed unready data into navigation.
     if(located) current.poseInMap(sessionId,rigid(frame.camera.pose))?.let { camera ->
       val k=frame.camera.textureIntrinsics;val f=k.focalLength;val c=k.principalPoint;val d=k.imageDimensions
@@ -970,7 +972,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       else -> fittedGround
     }
     if ((plane!=null && (plane!!.trackingState!=TrackingState.TRACKING || plane!!.subsumedBy!=null)) || ground==null || camera==null) {
-      clearTerrain("GROUND_LOST"); return
+      clearTerrain("GROUND_LOST",resetFlow=false); return
     }
     observedGround=ground
     val points=ArrayList<FloatArray>()
