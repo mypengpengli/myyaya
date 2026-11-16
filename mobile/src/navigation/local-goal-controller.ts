@@ -2,6 +2,7 @@ import type { NearStepGeometry } from "./near-step-guard";
 
 export type GoalPose={x:number;y:number;yaw:number};
 export type GroundCell=[number,number,number,number];
+export type GoalPlan={phase:string;path:Array<{x:number;y:number}>;reason?:string;diagnostic?:{rootBlocked:boolean;freeNeighbors:number;expanded:number;goalBlockers:Array<{x:number;y:number;label:number}>;nearBlockers:Array<{x:number;y:number;label:number}>};turn?:"left_step"|"right_step";turnMs?:100|150;headingError?:number};
 const CELL=.025,wrap=(a:number)=>Math.atan2(Math.sin(a),Math.cos(a));
 export function cameraYaw(q:number[]) {
   if(q.length!==4 || !q.every(Number.isFinite) || Math.abs(Math.hypot(...q)-1)>.02) throw new Error("无效相机朝向");
@@ -12,7 +13,9 @@ export class LocalGoalController {
   readonly cellMeters=CELL;
   pose:GoalPose={x:0,y:0,yaw:0};
   positionUncertaintyMeters=0;
-  readonly cells=new Map<string,{x:number;y:number;label:number;clearVotes:number}>();
+  readonly cells=new Map<string,{x:number;y:number;label:number;clearVotes:number;obstacleFrame?:number;floorFrame?:number}>();
+  lastClearedCells=0;
+  private observationFrame=0;
   private originYaw:number;
   private bestDistance:number;
   private stagnant=0;
@@ -22,14 +25,24 @@ export class LocalGoalController {
   }
   setHeading(worldYaw:number) {this.pose.yaw=wrap(worldYaw-this.originYaw);}
   observe(cells:GroundCell[]) {
-    const c=Math.cos(this.pose.yaw),s=Math.sin(this.pose.yaw);
+    const c=Math.cos(this.pose.yaw),s=Math.sin(this.pose.yaw),frame=++this.observationFrame;
+    this.lastClearedCells=0;
+    const floors:Array<{x:number;y:number;count:number}>=[];
     for(const [cameraX,cameraY,label,count] of cells) {
       if(![cameraX,cameraY,label,count].every(Number.isFinite)||![1,2,3].includes(label)||count<3) continue;
       const x=cameraX-this.geometry.centerRightMeters,y=cameraY-this.geometry.alongViewMeters;
       const gx=Math.round((this.pose.x+c*x+s*y)/CELL),gy=Math.round((this.pose.y-s*x+c*y)/CELL),key=`${gx},${gy}`,old=this.cells.get(key);
-      // Re-observed floor can clear model ghosts; hidden cells receive no clearing votes.
-      if(!old || label!==1) this.cells.set(key,{x:gx,y:gy,label,clearVotes:0});
-      else if(old.label!==1 && count>=12) {old.clearVotes++;if(old.clearVotes>=2) old.label=1;}
+      if(!old || label!==1)this.cells.set(key,{x:gx,y:gy,label,clearVotes:0,obstacleFrame:label!==1?frame:undefined});
+      if(label===1 && count>=12)floors.push({x:gx,y:gy,count});
+    }
+    // A 5cm observation bucket moves between adjacent 2.5cm map cells as the camera
+    // moves. Clear that quantization footprint, once per image, after two images.
+    // Obstacles seen in this image and unseen parts of the map remain occupied.
+    for(const floor of floors)for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++){
+      const old=this.cells.get(`${floor.x+dx},${floor.y+dy}`);
+      if(!old || old.label===1 || old.obstacleFrame===frame || old.floorFrame===frame)continue;
+      old.floorFrame=frame;
+      if(++old.clearVotes>=2){old.label=1;this.lastClearedCells++;}
     }
   }
   applyMotion(segment:Record<string,any>) {
@@ -56,7 +69,7 @@ export class LocalGoalController {
     const d=this.distance();if(d<this.bestDistance-.01){this.bestDistance=d;this.stagnant=0;}else this.stagnant++;
   }
   distance(){return Math.hypot(this.goal.x-this.pose.x,this.goal.y-this.pose.y);}
-  plan():{phase:string;path:Array<{x:number;y:number}>;turn?:"left_step"|"right_step";turnMs?:100|150;headingError?:number} {
+  plan():GoalPlan {
     if(this.positionUncertaintyMeters>.1) return {phase:"LOCALIZATION_UNCERTAIN",path:[]};
     if(this.distance()<=.06) return {phase:"AT_GOAL",path:[]};
     if(this.stagnant>32) return {phase:"NO_PROGRESS",path:[]};
@@ -68,14 +81,19 @@ export class LocalGoalController {
     }
     const sx=Math.round(this.pose.x/CELL),sy=Math.round(this.pose.y/CELL),tx=Math.round(this.goal.x/CELL),ty=Math.round(this.goal.y/CELL);
     const key=(x:number,y:number)=>`${x},${y}`,root=key(sx,sy),target=key(tx,ty);
+    const blockers=[...this.cells.values()].filter(c=>c.label!==1);
+    const diagnostic={rootBlocked:blocked.has(root),freeNeighbors:0,expanded:0,
+      goalBlockers:blockers.filter(c=>Math.hypot(c.x*CELL-this.goal.x,c.y*CELL-this.goal.y)<=radius+.06+CELL*Math.SQRT1_2).slice(0,12).map(c=>({x:c.x*CELL,y:c.y*CELL,label:c.label})),
+      nearBlockers:blockers.filter(c=>Math.hypot(c.x*CELL-this.pose.x,c.y*CELL-this.pose.y)<=radius+.08).slice(0,12).map(c=>({x:c.x*CELL,y:c.y*CELL,label:c.label}))};
+    const steps=[[-1,0],[1,0],[0,1],[0,-1],[-1,1],[1,1],[-1,-1],[1,-1]];
+    diagnostic.freeNeighbors=steps.filter(([dx,dy])=>!blocked.has(key(sx+dx,sy+dy)) && !(dx&&dy&&(blocked.has(key(sx+dx,sy))||blocked.has(key(sx,sy+dy))))).length;
     const goalRadius=Math.ceil(.06/CELL);
     let freeGoal=false;
     for(let dx=-goalRadius;dx<=goalRadius;dx++)for(let dy=-goalRadius;dy<=goalRadius;dy++)
       if(Math.hypot((tx+dx)*CELL-this.goal.x,(ty+dy)*CELL-this.goal.y)<=.06 && !blocked.has(key(tx+dx,ty+dy)))freeGoal=true;
-    if(!freeGoal)return {phase:"OBSERVE_SIDE",path:[]};
+    if(!freeGoal)return {phase:"OBSERVE_SIDE",path:[],reason:"GOAL_REGION_OCCUPIED",diagnostic};
     const open=[{x:sx,y:sy,g:0,f:Math.hypot(tx-sx,ty-sy)}],cost=new Map([[root,0]]),parent=new Map<string,string>();
     let found:string|undefined,expanded=0;
-    const steps=[[-1,0],[1,0],[0,1],[0,-1],[-1,1],[1,1],[-1,-1],[1,-1]];
     while(open.length && expanded++<10000) {
       let best=0;for(let n=1;n<open.length;n++) if(open[n].f<open[best].f) best=n;
       const p=open.splice(best,1)[0],pk=key(p.x,p.y);if(p.g!==(cost.get(pk) ?? Infinity)) continue;
@@ -87,7 +105,8 @@ export class LocalGoalController {
         if(g>=(cost.get(k) ?? Infinity)) continue;cost.set(k,g);parent.set(k,pk);open.push({x,y,g,f:g+Math.hypot(tx-x,ty-y)});
       }
     }
-    if(!found) return {phase:"OBSERVE_SIDE",path:[]};
+    diagnostic.expanded=expanded;
+    if(!found) return {phase:"OBSERVE_SIDE",path:[],reason:open.length?"SEARCH_LIMIT":diagnostic.freeNeighbors===0?"START_ENCLOSED":"DISCONNECTED_GRID",diagnostic};
     const path:Array<{x:number;y:number}>=[];let k:string|undefined=found;
     while(k && k!==root){const [x,y]=k.split(",").map(Number);path.unshift({x:x*CELL,y:y*CELL});k=parent.get(k);}
     let look=path[0];
@@ -97,9 +116,9 @@ export class LocalGoalController {
       let clear=true;for(let t=0;t<=1;t+=.1) if(blocked.has(key(Math.round((this.pose.x+(p.x-this.pose.x)*t)/CELL),Math.round((this.pose.y+(p.y-this.pose.y)*t)/CELL)))) clear=false;
       if(clear) look=p;else break;
     }
-    if(!look) return {phase:"OBSERVE_SIDE",path:[]};
+    if(!look) return {phase:"OBSERVE_SIDE",path:[],reason:"EMPTY_PATH",diagnostic};
     const error=wrap(Math.atan2(look.x-this.pose.x,look.y-this.pose.y)-this.pose.yaw);
-    return Math.abs(error)>.16 ? {phase:"TURN",path,turn:error>0?"right_step":"left_step",turnMs:Math.abs(error)>.35?150:100,headingError:error}
-      : {phase:"ADVANCE",path,headingError:error};
+    return Math.abs(error)>.16 ? {phase:"TURN",path,diagnostic,turn:error>0?"right_step":"left_step",turnMs:Math.abs(error)>.35?150:100,headingError:error}
+      : {phase:"ADVANCE",path,diagnostic,headingError:error};
   }
 }

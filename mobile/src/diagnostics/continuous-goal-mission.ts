@@ -13,8 +13,14 @@ export async function runContinuousGoalMission(args:{operatorConfirmed?:unknown;
   const goal={x:args.goalRightMeters ?? 0,y:args.goalForwardMeters ?? .4};
   if(typeof goal.x!=="number" || typeof goal.y!=="number" || ![goal.x,goal.y].every(Number.isFinite) || Math.hypot(goal.x,goal.y)<.15 || Math.hypot(goal.x,goal.y)>1)throw new Error("目标应在15厘米至1米内");
   active=true;const started=Date.now();let prepared:Awaited<ReturnType<typeof prepareNativeNavigationDrive>>|undefined,token="",error:string|undefined;
-  const history:unknown[]=[];let observations=0,failures=0;
-  const save=async()=>{const runtime=await getContinuousStatus();const report={...runtime,started,observations,failures,history,error,mode:"native-feedback-continuous",speedCalibration:"provisional",globalLocalizationValidated:false};await saveContinuousReport(report);return report;};
+  const history:unknown[]=[];let observations=0,failures=0,lastPerception:unknown;
+  const save=async()=>{
+    const runtime=await getContinuousStatus();
+    const report={...runtime,started,observations,failures,history:[...history],lastPerception,error,mode:"native-feedback-continuous",speedCalibration:"provisional",globalLocalizationValidated:false};
+    // Keep the exact latest observation; trim older history before crossing the native bridge limit.
+    while(report.history.length>1 && JSON.stringify(report).length>240_000)report.history.shift();
+    await saveContinuousReport(report);return report;
+  };
   try {
     const owner=args.navigationOwner ?? getNavigationControlOwner();if(!owner)throw new Error("请先打开路线导航页面");
     const before=await getContinuousStatus(),settings=await getNavigationProbeStatus(),g=settings.navigationGeometry;
@@ -39,13 +45,15 @@ export async function runContinuousGoalMission(args:{operatorConfirmed?:unknown;
         const latest=await getContinuousStatus();if(latest.token!==token || !latest.active)break;
         controller.pose={...latest.pose!};controller.positionUncertaintyMeters=Number(latest.positionUncertaintyMeters ?? 0);
         const plan=controller.plan();
+        lastPerception={imageNs:result.frame.imageTimestampNs,capture:capture.pose,current:latest.pose,analysis:result.analysis,region,cells:result.navigationCells,planReason:plan.reason,diagnostic:plan.diagnostic};
         const obstacles=[...controller.cells.values()].filter(c=>c.label!==1).map(c=>({x:c.x*controller.cellMeters,y:c.y*controller.cellMeters,label:c.label}));
         await observeNativeContinuous(token,{imageNs:result.frame.imageTimestampNs,capture:capture.pose,cells:result.navigationCells,path:plan.path,obstacles});
         observations++;failures=0;
-        if(history.length<700)history.push({atMs:Date.now()-started,pose:latest.pose,phase:latest.phase,remaining:latest.remainingMeters,perceptionMs:latest.perceptionAgeMs,plan:plan.phase,speed:latest.sentSpeed,turn:latest.sentTurn,timings:result.timings,path:plan.path.slice(0,15)});
+        if(history.length>=80)history.shift();
+        history.push({atMs:Date.now()-started,pose:latest.pose,phase:latest.phase,remaining:latest.remainingMeters,perceptionMs:latest.perceptionAgeMs,plan:plan.phase,planReason:plan.reason,diagnostic:plan.diagnostic,speed:latest.sentSpeed,turn:latest.sentTurn,timings:result.timings,region:result.selectedFloorRegion,clearedCells:controller.lastClearedCells,path:plan.path.slice(0,15)});
         if(observations%3===0){await save();await publishNativeLocalMission(`连续绕障 · ${latest.phase} · 剩余估计${Math.round(Number(latest.remainingMeters)*100)}厘米 · 视觉更新${observations}次`);}
       } catch(e) {
-        failures++;if(history.length<700)history.push({atMs:Date.now()-started,error:e instanceof Error?e.message:String(e)});
+        failures++;if(history.length>=80)history.shift();history.push({atMs:Date.now()-started,error:e instanceof Error?e.message:String(e)});
         if(failures>=5)throw e;
       }
       await new Promise(r=>setTimeout(r,30));

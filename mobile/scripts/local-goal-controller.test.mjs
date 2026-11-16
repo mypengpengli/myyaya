@@ -10,6 +10,9 @@ const open=rig();assert.equal(open.plan().phase,'ADVANCE');
 const obstacle=rig();obstacle.observe([[.07,.3,2,30]]);const plan=obstacle.plan();assert.equal(plan.phase,'TURN');assert.ok(plan.path.some(p=>Math.abs(p.x)>=.15));
 const drop=rig();drop.observe([[.07,.3,3,30]]);assert.equal(drop.plan().phase,'TURN');
 const wall=rig();wall.observe(Array.from({length:61},(_,i)=>[(i-30)*.05,.3,2,40]));assert.equal(wall.plan().phase,'OBSERVE_SIDE');
+assert.equal(wall.plan().reason,'DISCONNECTED_GRID');
+const goalBlocked=rig();goalBlocked.observe([[.07,.55,2,30]]);assert.equal(goalBlocked.plan().reason,'GOAL_REGION_OCCUPIED');
+const enclosed=rig();enclosed.observe([[.07,.05,2,30]]);assert.equal(enclosed.plan().reason,'START_ENCLOSED');assert.equal(enclosed.plan().diagnostic.freeNeighbors,0);
 const flow=(x,z)=>({cumulativePoseAvailable:true,originContinuity:true,originTimestampNs:1,cumulativeCameraDxMeters:x,cumulativeCameraDzMeters:z});
 const move=rig();move.applyMotion({completed:true,motorStopAcknowledged:true,rawPoseYawRadians:0,floorFlowBefore:flow(0,0),floorFlowAfter:flow(0,-.05)});assert.ok(Math.abs(move.pose.y-.05)<1e-8);
 assert.throws(()=>move.applyMotion({completed:true,motorStopAcknowledged:true,rawPoseYawRadians:0,floorFlowBefore:flow(0,0),floorFlowAfter:{...flow(0,-.05),originTimestampNs:2}}));
@@ -19,6 +22,15 @@ assert.throws(()=>lostTurn.applyMotion({direction:'back_step',completed:true,mot
 const angle=.2,turn=rig(),dx=-(Math.cos(angle)*g.centerRightMeters+Math.sin(angle)*g.alongViewMeters-g.centerRightMeters),dz=(-Math.sin(angle)*g.centerRightMeters+Math.cos(angle)*g.alongViewMeters-g.alongViewMeters);
 turn.applyMotion({completed:true,motorStopAcknowledged:true,rawPoseYawRadians:angle,floorFlowBefore:flow(0,0),floorFlowAfter:flow(dx,dz)});assert.ok(Math.hypot(turn.pose.x,turn.pose.y)<1e-8);
 const arrived=rig();arrived.pose.y=.46;assert.equal(arrived.plan().phase,'AT_GOAL');
+const cleared=rig();cleared.observe([[.07,.3,2,30]]);
+cleared.observe([[.095,.3,1,30],[.095,.3,1,30]]);
+assert.equal(cleared.cells.get('0,10').label,2,'one image cannot count twice');
+cleared.observe([[.095,.3,1,30]]);assert.equal(cleared.cells.get('0,10').label,1);assert.equal(cleared.lastClearedCells,1);
+const retained=rig();retained.observe([[.07,.3,2,30]]);
+for(let i=0;i<3;i++)retained.observe([[.095,.3,1,30],[.07,.3,2,30]]);
+assert.equal(retained.cells.get('0,10').label,2,'current obstacle must beat nearby floor');
+for(let i=0;i<3;i++)retained.observe([[.5,.5,1,30]]);
+assert.equal(retained.cells.get('0,10').label,2,'unseen obstacle must not expire');
 // A 25cm gap must not disappear through two rounds of 5cm quantization.
 const narrow=new LocalGoalController({x:0,y:.2},{...g,marginMeters:.02},0);
 narrow.observe([[.15,.2,2,100],[.15,.25,2,100],[.15,.3,2,100],[-.1,.15,2,100],[-.1,.2,2,100]]);
