@@ -6,11 +6,11 @@
 
 ## 下载
 
-**[下载最新 APK](https://github.com/mypengpengli/myyaya/releases/latest)**
+**[下载稳定版 APK](https://github.com/mypengpengli/myyaya/releases/latest)** · **[下载 2.1.208 导航预览版](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.208)**
 
-导航联调另有 **[2.1.181 预览版](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.181)**：增加分层局部地图、按实际车身检查短段路线，以及点选目标后的局部路径预览。181已覆盖安装并完成无电机真机回放，127项原生测试和完整CI通过。路线预览尚未接入自主行驶；安装偏移、脉冲距离与停车仍需标定，稳定版保持177。见[181实测](docs/PHONE-CHECK-2026-11-09.md)、[分层地图说明](docs/LOCAL-NAVIGATION-LAYERS.md)与[教路线说明](docs/TAUGHT-ROUTES.md)。
+208预览版已完成连续行驶、局部目标到点及暂停恢复的真机验证。20厘米目标约10.3秒返回到达，视觉估计距目标5.95厘米，进入设定的6厘米容差，并自动停车；219项原生测试和完整CI通过。完整连续绕罐与跨房间导航仍待验收。下载页面提供APK、SHA256和构建记录。稳定版保持177。
 
-开发分支正在联调 **2.1.208 连续局部导航**。203 已在真实地板接续目标并绕过可乐罐，用户确认成功；207已完成一次局部目标到点及停车；208修复暂停恢复后旧地图误清空局部光流的问题，正在验证暂停恢复。仍不能直接把它当作跨房间“去客厅”导航。见[206联调](docs/LOCAL-GOAL-FIELD-206-2026-11-12.md)、[连续控制方案与参考资料](docs/CONTINUOUS-NAVIGATION-204.md)和[203实测记录](docs/LOCAL-GOAL-FIELD-203-2026-11-11.md)。
+203已在真实地板分段绕过可乐罐，用户确认成功；208进一步验证了连续局部控制及暂停恢复。相关范围和限制见[206—208联调](docs/LOCAL-GOAL-FIELD-206-2026-11-12.md)、[连续控制方案与参考资料](docs/CONTINUOUS-NAVIGATION-204.md)和[203实测记录](docs/LOCAL-GOAL-FIELD-203-2026-11-11.md)。
 
 支持 Android 7.0 及以上 ARM64 手机，横屏使用。在小米 12 Pro / HyperOS 3 和 LOOI 上联调，具体安装包与校验文件以 Release 页面为准。当前稳定发布版本为 **2.1.177**，改进扫描时的近处深度初始化，修复停稳后无法点选台面的流程；自主导航仍在开发。[实测记录](docs/PHONE-CHECK-2026-11-05.md)和[功能完成度](docs/FEATURE-COMPLETION-2026-10-28.md)列出已验证范围。
 
