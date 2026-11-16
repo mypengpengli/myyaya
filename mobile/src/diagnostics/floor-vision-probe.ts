@@ -31,7 +31,10 @@ export async function runFloorVisionProbe(args: { heightCm?: unknown; roi?: Floo
     const geometry=status.navigationGeometry;
     const corridor=geometry ? {centerRightMeters:geometry.centerRightMeters,widthMeters:geometry.widthMeters+2*geometry.marginMeters,
       frontReachMeters:Math.max(0,geometry.alongViewMeters+geometry.lengthMeters/2)} : undefined;
-    const candidates=[args.roi ?? {left:.05,top:.68,right:.28,bottom:.93},...(args.autoFloorRegion ? [{left:.05,top:.72,right:.28,bottom:.94},{left:.35,top:.75,right:.65,bottom:.94}] : [])];
+    const candidates=[args.roi ?? {left:.05,top:.68,right:.28,bottom:.93},...(args.autoFloorRegion ? [
+      {left:.05,top:.72,right:.28,bottom:.94},{left:.35,top:.75,right:.65,bottom:.94},
+      {left:.65,top:.72,right:.95,bottom:.96},{left:.4,top:.6,right:.85,bottom:.96},
+      {left:.3,top:.8,right:.8,bottom:.98},{left:.5,top:.55,right:.95,bottom:.94}] : [])];
     let analysis:ReturnType<typeof analyzeFloorDepth>|undefined,selectedFloorRegion=candidates[0],failure:unknown;
     for(const region of candidates) {
       try { const value=analyzeFloorDepth(values,252,252,{width:frame.imageDimensions[0],height:frame.imageDimensions[1],

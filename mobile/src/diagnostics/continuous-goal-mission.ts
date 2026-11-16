@@ -21,7 +21,7 @@ export async function runContinuousGoalMission(args:{operatorConfirmed?:unknown;
     if(!g || !settings.measuredCameraHeightMeters)throw new Error("请先填写车身和镜头实测参数");
     await publishNativeLocalMission("连续绕障：静止预热视觉，选择通过校验的地板区域。");
     const preflight=await runFloorVisionProbe({heightCm:settings.measuredCameraHeightMeters*100,roi:args.roi,navigationCells:false,showOverlay:false,autoFloorRegion:true,liveOnly:true});
-    const region=preflight.selectedFloorRegion ?? args.roi ?? {left:.05,top:.68,right:.28,bottom:.93};
+    let region=preflight.selectedFloorRegion ?? args.roi ?? {left:.05,top:.68,right:.28,bottom:.93};
     const controller=new LocalGoalController(goal as {x:number;y:number},g,0);
     prepared=await prepareNativeNavigationDrive(owner,()=>{void stopNativeContinuous("运动控制已停止").catch(()=>{});});
     const start=await startNativeContinuous(prepared.device,before.stopEpoch,goal.x as number,goal.y as number,settings.measuredCameraHeightMeters,region);
@@ -31,6 +31,7 @@ export async function runContinuousGoalMission(args:{operatorConfirmed?:unknown;
       const status=await getContinuousStatus();if(status.token!==token || !status.active)break;
       try {
         const result=await runFloorVisionProbe({heightCm:settings.measuredCameraHeightMeters*100,roi:region,navigationCells:true,showOverlay:false,autoFloorRegion:true,liveOnly:true});
+        region=result.selectedFloorRegion ?? region;
         const capture=result.frame.navigationPose as typeof status|undefined;
         if(!capture || capture.token!==token || !capture.poseReady || !capture.pose || Math.abs(Number(result.frame.imageTimestampNs)-Number(capture.frameNs))>150_000_000) {await new Promise(r=>setTimeout(r,100));continue;}
         if(!result.navigationCells)throw new Error("缺少地面分类");
