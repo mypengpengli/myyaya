@@ -59,7 +59,8 @@ export async function runNearbyPatrolMission(initial: HomePlan) {
           waitingForPhotoStop=distance<.08 && latest.phase!=="WAYPOINT_REACHED";
           if(latest.phase==="WAYPOINT_REACHED" && latest.stopAcknowledged===true)await inspection.capture(`point-${Math.round(lastGoal.x*10)}_${Math.round(lastGoal.y*10)}`,plan.roomName ?? "当前位置",localToHome(latest.pose,origin),token);
         }
-        const elapsed=Date.now()-started+offset,next=waitingForPhotoStop?{target:lastGoal,final:lastFinal,returning:tour.returning}:tour.select(controller,elapsed);returned=next.returning;
+        const elapsed=Date.now()-started+offset;
+        const next:ReturnType<NearbyPatrol["select"]>=waitingForPhotoStop?{target:lastGoal,final:lastFinal,returning:tour.returning}:tour.select(controller,elapsed);returned=next.returning;
         if(Math.hypot(next.target.x-lastGoal.x,next.target.y-lastGoal.y)>.01 || next.final!==lastFinal) {
           controller.setGoal(next.target);await retargetNativeContinuous(token,next.target,next.final);lastGoal=next.target;lastFinal=next.final;
         }
