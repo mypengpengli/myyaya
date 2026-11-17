@@ -6,9 +6,9 @@
 
 ## 下载
 
-213正在构建：区分待唤醒与实际对话收音，续聊窗口延长至60秒，加入即时回应、工具阶段和公开回答分句朗读，模型请求重试与拍照快捷入口；新增有范围的附近短巡游代码。尚未装机或实车验证，具体范围见[213说明](docs/VOICE-AND-NEARBY-PATROL-213.md)。
+213预览包已发布：区分待唤醒与实际对话收音，续聊窗口延长至60秒，加入即时回应、工具阶段和公开回答分句朗读，模型请求重试与拍照快捷入口；新增有范围的附近短巡游代码。241项原生及完整CI通过，尚未装机或实车验证，具体范围见[213说明](docs/VOICE-AND-NEARBY-PATROL-213.md)。
 
-**[下载 2.1.212 家庭导航审查修订包](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.212)** · **[2.1.210 局部绕障预览](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.210)** · **[稳定版 APK](https://github.com/mypengpengli/myyaya/releases/latest)**
+**[下载 2.1.213 语音反馈与附近短巡游预览](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.213)** · **[2.1.210 局部绕障预览](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.210)** · **[稳定版 APK](https://github.com/mypengpengli/myyaya/releases/latest)**
 
 211家庭导航集中验收包已发布：新增房间/门口命名、带领路线网络、地图编辑与禁行区、长路线自动衔接、语音控制和重开后的定位准备。237项原生单元测试和完整CI通过；跨房间尚未实车验收，本批按用户要求集中开发后一起测试。操作见[家庭导航与集中验收](docs/HOME-NAVIGATION-211.md)。
 
