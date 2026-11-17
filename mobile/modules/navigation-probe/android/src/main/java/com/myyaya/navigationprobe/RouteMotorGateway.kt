@@ -20,6 +20,10 @@ internal class RouteMotorGateway(val token: String=UUID.randomUUID().toString(),
   @Volatile var stopEpoch=0;private set
   @Volatile private var backAllowed=false
   @Volatile private var turnAllowed=false
+  @Synchronized fun homeNavigate() {
+    check(isConnected() && !busy && continuous?.pilot?.active!=true) { "请先停止当前动作" }
+    emit(mapOf("token" to token,"sequence" to ++sequence,"action" to "home_navigate","durationMs" to 0))
+  }
   @Synchronized fun continuousGoal() {
     check(isConnected() && !busy && continuous?.pilot?.active!=true)
     emit(mapOf("token" to token,"sequence" to ++sequence,"action" to "continuous_goal","durationMs" to 0))

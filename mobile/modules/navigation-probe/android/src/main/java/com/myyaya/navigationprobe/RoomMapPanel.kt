@@ -49,7 +49,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private lateinit var localState: TextView
   @Volatile private var mapper: RoomMapper? = null
   private val mountSettings=NavigationMountSettings(activity)
-  private val taughtRoutes=motor?.let { TaughtRoutePanel(activity,it,{ mapper?.metadata() },{save(true)},mountSettings,{floorFlow.report()},{floorFlow.reset()},{floorFlow.selectRegion(it)}) }
+  private val homeNavigation=motor?.let {HomeNavigationPanel(activity,it,{mapper?.metadata()},{save(true)},{mapper?.snapshot()})}
+  private val taughtRoutes=motor?.let { TaughtRoutePanel(activity,it,{ mapper?.metadata() },{save(true)},mountSettings,{floorFlow.report()},{homeNavigation?.expectFlowReset();floorFlow.reset()},{floorFlow.selectRegion(it)}) }
   @Volatile private var observedGround: GroundPlane?=null
   @Volatile private var freshMap = false
   @Volatile private var sessionId = ""
@@ -157,9 +158,10 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     first.addView(button("设置参照图") { chooseReference() },LinearLayout.LayoutParams(0,-2,1f))
     addView(first,1)
     taughtRoutes?.let { addView(it.buildView(),2) }
+    homeNavigation?.let {addView(it.buildView(),3)}
   }
   fun addActions(actions: LinearLayout) {
-    taughtRoutes?.let { panel->actions.addView(button("停止导航") { panel.stop("用户停止") }.apply {
+    taughtRoutes?.let { panel->actions.addView(button("停止导航") { stopTaughtRoute("用户停止") }.apply {
       setBackgroundColor(Color.rgb(180,38,38));setTextColor(Color.WHITE)
     },LinearLayout.LayoutParams(0,-2,1f)) }
     actions.addView(button("保存地图") { save() },LinearLayout.LayoutParams(0,-2,1f))
@@ -663,7 +665,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       } finally { bitmap.recycle() }
     }
   }
-  fun pause() { taughtRoutes?.pause();generation++; active=false; depthReadiness.reset();depthState=LocalDepthReadiness.State();mapper?.invalidate(); clearTerrain(); renderTerrain(); if (::mapView.isInitialized) { mapView.position=null; mapView.forward=null; mapView.invalidate(); state.text="扫描已暂停，当前位置无效。地图可保存或重新打开。" } }
+  fun pause() { homeNavigation?.stop("相机已暂停");taughtRoutes?.pause();generation++; active=false; depthReadiness.reset();depthState=LocalDepthReadiness.State();mapper?.invalidate(); clearTerrain(); renderTerrain(); if (::mapView.isInitialized) { mapView.position=null; mapView.forward=null; mapView.invalidate(); state.text="扫描已暂停，当前位置无效。地图可保存或重新打开。" } }
   fun close() { runCatching { sessionOriginAnchor?.detach() };sessionOriginAnchor=null;floorFlow.close();io.shutdown();localPlannerWorker.shutdown() }
   fun report(): Map<String,Any?>? = mapper?.summary()?.let { it + mapOf("lastSavedAt" to if (it["mapId"]==savedId) savedAt else 0L,
     "taughtRoute" to taughtRoutes?.report(),
@@ -684,7 +686,27 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       "depthReadiness" to depthState.report(),
       "depthCapture" to depthRecorder.report()))) }
   fun canStart() = mapper != null && !saving && !restoring
-  fun stopTaughtRoute(reason: String) { taughtRoutes?.stop(reason) }
+  fun stopTaughtRoute(reason: String) {homeNavigation?.stop(reason);taughtRoutes?.stop(reason) }
+  fun homeStatus()=requireNotNull(homeNavigation).status()
+  fun homeCommand(data: org.json.JSONObject)=requireNotNull(homeNavigation).command(data)
+  fun homePlan()=requireNotNull(homeNavigation).plan()
+  fun homeProgress(data: org.json.JSONObject) {requireNotNull(homeNavigation).progress(data)}
+  fun openHomeConfiguration(data: org.json.JSONObject): Boolean {
+    val id=data.optString("mapId","")
+    if(id.isNotEmpty()) {
+      require(UUID.fromString(id).toString()==id)
+      val map=read(File(directory,"$id.yayamap"));mapper=RoomMapper(map);freshMap=false;name=map.name
+      render(map,"请恢复固定参照图定位，再使用家庭导航。")
+    } else {
+      val map=RoomMapData(name="我的家",sessionId="pending");mapper=RoomMapper(map);freshMap=true;name=map.name
+      render(map,"先登记固定参照图，确认最低姿态，再带领经过房间和门口。")
+    }
+    data.optJSONObject("command")?.let {request->
+      if(request.optString("op") in setOf("pause","cancel","status","rename","remove","link_enabled","remove_zone"))requireNotNull(homeNavigation).command(request)
+      else requireNotNull(homeNavigation).queue(request)
+    }
+    return mapper?.snapshotReference()==true
+  }
   fun diagnosticField(direction: String,confirmed: Boolean,stepMs: Int,batchId: String,promise: expo.modules.kotlin.Promise) {
     val panel=taughtRoutes
     if(panel==null) promise.reject("ERR_FIELD_SCREEN","请打开教路线采集页面",null) else panel.diagnosticField(direction,confirmed,stepMs,batchId,promise)
@@ -697,8 +719,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     taughtRoutes?.beginLocalMission(confirmed,region,promise) ?: promise.reject("ERR_FIELD_SCREEN","未打开路线页",null)
   }
   fun continuousSnapshot()=taughtRoutes?.continuousSnapshot()
-  fun beginContinuous(ble: com.bleplx.BlePlxModule,device: String,epoch: Int,gx: Double,gy: Double,height: Float,region: FloorFlowRegion)=
-    requireNotNull(taughtRoutes).beginContinuous(ble,device,epoch,gx,gy,height,region)
+  fun beginContinuous(ble: com.bleplx.BlePlxModule,device: String,epoch: Int,gx: Double,gy: Double,height: Float,region: FloorFlowRegion,finalGoal: Boolean=true)=
+    requireNotNull(taughtRoutes).beginContinuous(ble,device,epoch,gx,gy,height,region,finalGoal)
   fun localMissionProgress(value: String) { taughtRoutes?.localMissionProgress(value) }
   fun localMissionRegion(token: String,region: FloorFlowRegion) { requireNotNull(taughtRoutes).localMissionRegion(token,region) }
   fun openTaughtRoute(id: String) {
@@ -719,11 +741,12 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     val camera=if(frame.camera.trackingState==TrackingState.TRACKING)
       RigidPose(frame.camera.pose.translation,frame.camera.pose.rotationQuaternion) else null
     taughtRoutes?.operatorFrame(camera,session,recording,playback,localAssessment.clearance==RouteClearance.OBSTACLE,recordingRemainingMs,frame.timestamp)
+    if(!playback)mapper?.metadata()?.let {m->homeNavigation?.frame(camera,camera?.let {mapper?.poseInMap(sessionId,it)},m.id,sessionId,frame.timestamp,floorFlow.report())}
   }
   fun offerVisualFrame(frame: Frame) {
     if(frame.camera.trackingState!=TrackingState.TRACKING) return
     val mapHeight=calibratedHeight?.takeIf { active && surfaceSource=="MEASURED_HEIGHT" && terrainSnapshot.floorConfirmed }
-    floorFlow.offer(frame,mapHeight ?: taughtRoutes?.operatorFloorHeight(),taughtRoutes?.operatorAllowsGapRecovery()==true)
+    floorFlow.offer(frame,mapHeight ?: taughtRoutes?.operatorFloorHeight() ?: homeNavigation?.floorHeight(),taughtRoutes?.operatorAllowsGapRecovery()==true)
   }
   /** GL thread, depth sampled at up to 10 Hz; view snapshots limited to 2 Hz. */
   fun frame(session: Session, frame: Frame, sample: DepthSamples.Result?, depthNs: Long,

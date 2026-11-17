@@ -125,12 +125,23 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
     datasets.extendForLocalMission()
     roomMap?.beginLocalMission(confirmed,region,promise) ?: promise.reject("ERR_FIELD_SCREEN","未打开路线页",null)
   }
-  fun beginContinuous(ble: com.bleplx.BlePlxModule,device: String,epoch: Int,gx: Double,gy: Double,height: Float,region: FloorFlowRegion): Map<String,Any?> {
+  fun beginContinuous(ble: com.bleplx.BlePlxModule,device: String,epoch: Int,gx: Double,gy: Double,height: Float,region: FloorFlowRegion,finalGoal: Boolean=true): Map<String,Any?> {
     check(running && resumed && playbackName==null && datasets.recording()) { "请开始实时扫描和录像" }
     datasets.extendForLocalMission()
-    return requireNotNull(roomMap).beginContinuous(ble,device,epoch,gx,gy,height,region)
+    return requireNotNull(roomMap).beginContinuous(ble,device,epoch,gx,gy,height,region,finalGoal)
   }
   fun localMissionProgress(value: String) { roomMap?.localMissionProgress(value) }
+  fun homeStatus()=requireNotNull(roomMap).homeStatus()
+  fun homeCommand(data: JSONObject)=requireNotNull(roomMap).homeCommand(data)
+  fun homePlan()=requireNotNull(roomMap).homePlan()
+  fun homeProgress(data: JSONObject) {requireNotNull(roomMap).homeProgress(data)}
+  fun prepareHomeCapture(promise: expo.modules.kotlin.Promise) {
+    if(!running || !resumed || playbackName!=null){promise.reject("ERR_HOME_CAMERA","请先开始实时扫描",null);return}
+    surface.queueEvent {runCatching {
+      val current=requireNotNull(session);if(!datasets.recording())datasets.start(current);datasets.extendForLocalMission()
+    }.onSuccess {runOnUiThread {datasetButton.text="停止录制";promise.resolve(null)}}
+      .onFailure {promise.reject("ERR_HOME_RECORDING",it.message,it)}}
+  }
   fun localMissionRegion(token: String,region: FloorFlowRegion) { check(running && resumed);requireNotNull(roomMap).localMissionRegion(token,region) }
 
   fun onCreate(savedInstanceState: Bundle?) {
@@ -157,6 +168,7 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
     }, motor)
     buildUi()
     if(playbackName!=null) roomMap?.newPlaybackMap() else roomMap?.restoreState(savedInstanceState)
+    intent.getStringExtra("homeConfig")?.let {userWantsRunning=roomMap?.openHomeConfiguration(JSONObject(it))==true}
     if(motor!=null) intent.getStringExtra("routeName")?.takeIf { it.isNotBlank() }?.let { roomMap?.openTaughtRoute(it) }
     record(JSONObject().put("event", "opened").put("trackingState", "NOT_STARTED"))
   }

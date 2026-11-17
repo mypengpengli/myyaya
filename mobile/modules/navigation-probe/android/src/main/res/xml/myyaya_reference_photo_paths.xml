@@ -1,3 +1,4 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
   <cache-path name="reference-photo" path="reference-photo/" />
+  <cache-path name="home-diagnostics" path="diagnostics/" />
 </paths>

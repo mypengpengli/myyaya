@@ -19,12 +19,29 @@ export class LocalGoalController {
   private originYaw:number;
   private bestDistance:number;
   private stagnant=0;
+  private forbidden:Array<{x:number;y:number;radius:number}>=[];
+  setGoal(goal:{x:number;y:number}) {
+    if(![goal.x,goal.y].every(Number.isFinite) || Math.hypot(goal.x-this.pose.x,goal.y-this.pose.y)>1.2)throw new Error("下一个路线点超出局部范围");
+    Object.assign(this.goal,goal);this.bestDistance=this.distance();this.stagnant=0;
+  }
+  setForbidden(zones:Array<{x:number;y:number;radius:number}>) {
+    if(zones.length>64 || zones.some(z=>![z.x,z.y,z.radius].every(Number.isFinite)||z.radius<.05||z.radius>3))throw new Error("无效禁行区域");
+    this.forbidden=zones;
+  }
+  occupiedCells() {
+    const out=[...this.cells.values()].filter(c=>c.label!==1).map(c=>({x:c.x*CELL,y:c.y*CELL,label:c.label}));
+    for(const z of this.forbidden)for(let x=Math.ceil(Math.max(z.x-z.radius,this.pose.x-1.8)/CELL);x*CELL<=Math.min(z.x+z.radius,this.pose.x+1.8);x++)
+      for(let y=Math.ceil(Math.max(z.y-z.radius,this.pose.y-1.8)/CELL);y*CELL<=Math.min(z.y+z.radius,this.pose.y+1.8);y++)
+        if(Math.hypot(x*CELL-z.x,y*CELL-z.y)<=z.radius+CELL*Math.SQRT1_2)out.push({x:x*CELL,y:y*CELL,label:2});
+    return out;
+  }
   constructor(readonly goal:{x:number;y:number},readonly geometry:NearStepGeometry,initialYaw:number) {
     if(![goal.x,goal.y,initialYaw].every(Number.isFinite) || Math.hypot(goal.x,goal.y)<.15 || Math.hypot(goal.x,goal.y)>1) throw new Error("局部目标应在15厘米至1米内");
     this.originYaw=initialYaw;this.bestDistance=Math.hypot(goal.x,goal.y);
   }
   setHeading(worldYaw:number) {this.pose.yaw=wrap(worldYaw-this.originYaw);}
   observe(cells:GroundCell[]) {
+    for(const [key,p] of this.cells)if(Math.abs(p.x*CELL-this.pose.x)>1.8 || Math.abs(p.y*CELL-this.pose.y)>1.8)this.cells.delete(key);
     const c=Math.cos(this.pose.yaw),s=Math.sin(this.pose.yaw),frame=++this.observationFrame;
     this.lastClearedCells=0;
     const floors:Array<{x:number;y:number;count:number}>=[];
@@ -75,13 +92,15 @@ export class LocalGoalController {
     if(this.stagnant>32) return {phase:"NO_PROGRESS",path:[]};
     const radius=Math.max(this.geometry.widthMeters,this.geometry.lengthMeters)/2+this.geometry.marginMeters+.01;
     const blocked=new Set<string>();
-    for(const cell of this.cells.values()) if(cell.label!==1) {
+    const occupied=this.occupiedCells();
+    for(const point of occupied) {
+      const cell={x:Math.round(point.x/CELL),y:Math.round(point.y/CELL)};
       const r=Math.ceil(radius/CELL);
       for(let x=-r;x<=r;x++) for(let y=-r;y<=r;y++) if(Math.hypot(x,y)*CELL<=radius+CELL*Math.SQRT1_2) blocked.add(`${cell.x+x},${cell.y+y}`);
     }
     const sx=Math.round(this.pose.x/CELL),sy=Math.round(this.pose.y/CELL),tx=Math.round(this.goal.x/CELL),ty=Math.round(this.goal.y/CELL);
     const key=(x:number,y:number)=>`${x},${y}`,root=key(sx,sy),target=key(tx,ty);
-    const blockers=[...this.cells.values()].filter(c=>c.label!==1);
+    const blockers=occupied.map(c=>({x:Math.round(c.x/CELL),y:Math.round(c.y/CELL),label:c.label}));
     const diagnostic={rootBlocked:blocked.has(root),freeNeighbors:0,expanded:0,
       goalBlockers:blockers.filter(c=>Math.hypot(c.x*CELL-this.goal.x,c.y*CELL-this.goal.y)<=radius+.06+CELL*Math.SQRT1_2).slice(0,12).map(c=>({x:c.x*CELL,y:c.y*CELL,label:c.label})),
       nearBlockers:blockers.filter(c=>Math.hypot(c.x*CELL-this.pose.x,c.y*CELL-this.pose.y)<=radius+.08).slice(0,12).map(c=>({x:c.x*CELL,y:c.y*CELL,label:c.label}))};
@@ -100,7 +119,7 @@ export class LocalGoalController {
       if(pk!==root && Math.hypot(p.x*CELL-this.goal.x,p.y*CELL-this.goal.y)<=.06){found=pk;break;}
       for(const [dx,dy] of steps) {
         const x=p.x+dx,y=p.y+dy,k=key(x,y);
-        if(Math.abs(x*CELL)>1.5||Math.abs(y*CELL)>1.5||blocked.has(k) || (dx&&dy&&(blocked.has(key(p.x+dx,p.y))||blocked.has(key(p.x,p.y+dy))))) continue;
+        if(Math.abs(x*CELL-this.pose.x)>1.5||Math.abs(y*CELL-this.pose.y)>1.5||blocked.has(k) || (dx&&dy&&(blocked.has(key(p.x+dx,p.y))||blocked.has(key(p.x,p.y+dy))))) continue;
         const g=p.g+Math.hypot(dx,dy)*(this.cells.get(k)?.label===1?1:2.5);
         if(g>=(cost.get(k) ?? Infinity)) continue;cost.set(k,g);parent.set(k,pk);open.push({x,y,g,f:g+Math.hypot(tx-x,ty-y)});
       }

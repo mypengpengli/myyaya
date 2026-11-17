@@ -41,6 +41,27 @@ class NavigationProbeModule : Module() {
       }.onFailure { promise.reject("ERR_FIELD_REGION",it.message,it) } }
     }
     AsyncFunction("continuousStatus") { (gateway?.continuous?.report() ?: emptyMap<String,Any?>())+mapOf("stopEpoch" to (gateway?.stopEpoch ?: -1)) }
+    AsyncFunction("retargetContinuous") { token: String,x: Double,y: Double,final: Boolean ->
+      val drive=requireNotNull(gateway?.continuous);check(drive.token==token && gateway?.foreground==true)
+      drive.pilot.retarget(x,y,final,android.os.SystemClock.elapsedRealtime())
+    }
+    AsyncFunction("homeStatus") {requireNotNull(routeScreen) {"请先打开家庭导航"}.homeStatus()}
+    AsyncFunction("homePlan") {requireNotNull(routeScreen) {"请先打开家庭导航"}.homePlan()}
+    AsyncFunction("homeCommand") {data: String,promise: Promise ->
+      val activity=appContext.currentActivity;val screen=routeScreen
+      if(activity==null || screen==null)promise.reject("ERR_HOME_SCREEN","请先打开家庭导航",null)
+      else activity.runOnUiThread {runCatching {require(data.length<=4000);screen.homeCommand(org.json.JSONObject(data))}
+        .onSuccess {promise.resolve(it)}.onFailure {promise.reject("ERR_HOME_COMMAND",it.message,it)}}
+    }
+    AsyncFunction("homeProgress") {data: String ->
+      require(data.length<=8000);requireNotNull(routeScreen).homeProgress(org.json.JSONObject(data))
+    }
+    AsyncFunction("prepareHomeCapture") {promise: Promise ->
+      val screen=routeScreen;val activity=appContext.currentActivity
+      if(screen==null || activity==null)promise.reject("ERR_HOME_SCREEN","请先打开家庭导航",null)
+      else activity.runOnUiThread {screen.prepareHomeCapture(promise)}
+    }
+    AsyncFunction("listHomes") {HomeAtlasStore(requireNotNull(appContext.reactContext)).list()}
     AsyncFunction("stopContinuous") { reason: String -> gateway?.cancelContinuous(reason.take(200)) }
     AsyncFunction("startContinuous") { device: String,epoch: Int,config: String,promise: Promise ->
       val activity=appContext.currentActivity
@@ -48,7 +69,7 @@ class NavigationProbeModule : Module() {
       else activity.runOnUiThread { runCatching {
         require(config.length<=2000);val c=org.json.JSONObject(config);val r=c.getJSONObject("region")
         val ble=requireNotNull((appContext.reactContext as? com.facebook.react.bridge.ReactContext)?.getNativeModule(com.bleplx.BlePlxModule::class.java))
-        requireNotNull(routeScreen).beginContinuous(ble,device,epoch,c.getDouble("gx"),c.getDouble("gy"),c.getDouble("height").toFloat(),FloorFlowRegion(r.getDouble("left").toFloat(),r.getDouble("top").toFloat(),r.getDouble("right").toFloat(),r.getDouble("bottom").toFloat()))
+        requireNotNull(routeScreen).beginContinuous(ble,device,epoch,c.getDouble("gx"),c.getDouble("gy"),c.getDouble("height").toFloat(),FloorFlowRegion(r.getDouble("left").toFloat(),r.getDouble("top").toFloat(),r.getDouble("right").toFloat(),r.getDouble("bottom").toFloat()),c.optBoolean("final",true))
       }.onSuccess { promise.resolve(it) }.onFailure { promise.reject("ERR_CONTINUOUS",it.message,it) } }
     }
     AsyncFunction("continuousObservation") { token: String,data: String ->
@@ -162,7 +183,10 @@ class NavigationProbeModule : Module() {
             val motor=RouteMotorGateway(token) { event->sendEvent("onRouteMotion",event) }
             gateway=motor;routeDialog=dialog
             var result: String?=null
-            val screen=NavigationProbeScreen(activity,Intent().putExtra("mapping",true).putExtra("routeName",name),
+            val config=Intent().putExtra("mapping",true)
+            if(name.startsWith("home:")){require(name.length<=2000);org.json.JSONObject(name.drop(5));config.putExtra("homeConfig",name.drop(5))}
+            else config.putExtra("routeName",name)
+            val screen=NavigationProbeScreen(activity,config,
               {dialog.setContentView(it)},{report->result=report;dialog.dismiss()},motor)
             routeScreen=screen
             dialog.setOnDismissListener {

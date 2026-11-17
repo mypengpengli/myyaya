@@ -241,7 +241,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
       promise.resolve(mapOf("batchId" to id,"maximumSteps" to 80,"maximumSeconds" to 600))
     } catch(e: Exception) { promise.reject("ERR_LOCAL_MISSION",e.message,e) }
   }
-  fun beginContinuous(ble: com.bleplx.BlePlxModule,device: String,expectedEpoch: Int,gx: Double,gy: Double,height: Float,region: FloorFlowRegion): Map<String,Any?> {
+  fun beginContinuous(ble: com.bleplx.BlePlxModule,device: String,expectedEpoch: Int,gx: Double,gy: Double,height: Float,region: FloorFlowRegion,finalGoal: Boolean=true): Map<String,Any?> {
     validateFieldStart();check(motor.stopEpoch==expectedEpoch) { "启动已被停止操作取消" }
     check(mountSettings.value!=null) { "缺少安装偏移" }
     val envelope=activity.getSharedPreferences("terrain-envelope",0)
@@ -249,6 +249,7 @@ internal class TaughtRoutePanel(private val activity: Activity,private val motor
     require(height in .03f.. .5f && abs(height-measured)<=.005f)
     val pilot=ContinuousPilot(gx,gy,envelope.getFloat("width",0f).toDouble(),envelope.getFloat("length",0f).toDouble(),
       envelope.getFloat("margin",.05f).toDouble(),mount.right.toDouble(),mount.alongView.toDouble(),height,SystemClock.elapsedRealtime())
+    if(!finalGoal)pilot.retarget(gx,gy,false,SystemClock.elapsedRealtime())
     field?.cancel("CONTINUOUS_TASK");fieldBatchId=null;motor.continuous?.close()
     continuousMountPose=requireNotNull(fieldSample?.pose)
     resetFloorFlow();selectFloorRegion(region)

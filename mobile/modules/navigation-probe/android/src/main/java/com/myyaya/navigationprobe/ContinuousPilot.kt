@@ -32,8 +32,14 @@ internal class ContinuousPilot(val gx: Double,val gy: Double,val width: Double,v
   private var lastTick=started
   private var lostSince=0L;private var wasMoving=false
   private var best=hypot(gx,gy);private var progressedAt=started
+  private var targetX=gx;private var targetY=gy;private var finalTarget=true
+  @Synchronized fun retarget(x: Double,y: Double,final: Boolean,now: Long) {
+    check(active) { "已停止的任务不能换目标重新发车" }
+    require(x.isFinite() && y.isFinite() && abs(x)<=50 && abs(y)<=50 && hypot(x-pose.x,y-pose.y)<=1.2)
+    targetX=x;targetY=y;finalTarget=final;best=hypot(x-pose.x,y-pose.y);progressedAt=now;path=emptyList()
+  }
   val active get()=phase !in setOf("AT_GOAL","CANCELLED","FAILED")
-  init {require(listOf(gx,gy,width,length,margin,mountRight,mountForward).all {it.isFinite()} && abs(mountRight)<=.3 && abs(mountForward)<=.3 && height in .03f.. .5f && hypot(gx,gy) in .15..1.0 && width in .1..1.0 && length in .1..1.0 && margin in .019999.. .3)}
+  init {require(listOf(gx,gy,width,length,margin,mountRight,mountForward).all {it.isFinite()} && abs(mountRight)<=.3 && abs(mountForward)<=.3 && height in .03f.. .5f && hypot(gx,gy) in .03..1.0 && width in .1..1.0 && length in .1..1.0 && margin in .019999.. .3)}
   @Synchronized fun sensors(now: Long,link: Boolean,back: Boolean,turn: Boolean) {sensorAt=now;connected=link;backAllowed=back;turnAllowed=turn}
   private fun offset(yaw: Double)=Pair(cos(yaw)*mountRight+sin(yaw)*mountForward,-sin(yaw)*mountRight+cos(yaw)*mountForward)
   @Synchronized fun frame(now: Long,ns: Long,worldYaw: Double,flow: Map<String,Any?>) {
@@ -95,9 +101,9 @@ internal class ContinuousPilot(val gx: Double,val gy: Double,val width: Double,v
       phase="WAITING_POSE";return brake("等待新的地板定位")
     }
     lostSince=0
-    val d=hypot(gx-pose.x,gy-pose.y)
+    val d=hypot(targetX-pose.x,targetY-pose.y)
     if(d<best-.01){best=d;progressedAt=now}
-    if(d<=.06){phase="AT_GOAL";return brake("到达局部目标范围")}
+    if(d<=.06){phase=if(finalTarget) "AT_GOAL" else "WAYPOINT_REACHED";return brake(if(finalTarget) "到达局部目标范围" else "正在衔接下一个路线点")}
     if(now-progressedAt>35_000){phase="FAILED";return brake("持续无进展")}
     val viewTravel=hypot(pose.x-perceptionPose.x,pose.y-perceptionPose.y)
     val viewTurn=abs(atan2(sin(pose.yaw-perceptionPose.yaw),cos(pose.yaw-perceptionPose.yaw)))
@@ -124,7 +130,7 @@ internal class ContinuousPilot(val gx: Double,val gy: Double,val width: Double,v
   }
   @Synchronized fun report(now: Long): Map<String,Any?> = mapOf("phase" to phase,"reason" to reason,"active" to active,
     "pose" to mapOf("x" to pose.x,"y" to pose.y,"yaw" to pose.yaw),"poseReady" to (odomAt>0 && now-odomAt<=300),
-    "remainingMeters" to hypot(gx-pose.x,gy-pose.y),"goal" to listOf(gx,gy),"positionUncertaintyMeters" to uncertainty,
+    "remainingMeters" to hypot(targetX-pose.x,targetY-pose.y),"goal" to listOf(targetX,targetY),"finalTarget" to finalTarget,"positionUncertaintyMeters" to uncertainty,
     "ticks" to ticks,"motionTicks" to motionTicks,"brakeCount" to brakeCount,"perceptionCount" to perceptionCount,
     "sentSpeed" to sentSpeed,"sentTurn" to sentTurn,"elapsedMs" to now-started,"frameNs" to frameNs,"frameAgeMs" to now-frameAt,
     "odomAgeMs" to now-odomAt,"perceptionAgeMs" to if(perceptionNs>0)(frameNs-perceptionNs)/1_000_000 else null,

@@ -13,7 +13,7 @@ const lease = load("src/core/navigation-control-lease.ts");
 const chinese = load("src/voice/chinese-command.ts");
 const app = { currentState:"active", addEventListener:(_event,cb)=>{ lifecycle=cb;return {remove(){ lifecycle=undefined; }}; } };
 let event, token, close, lifecycle, voiceResult, voiceStops=0, releasedCamera=0, releasedMic=0;
-let deferredStop, connected=true;
+let deferredStop, connected=true,homeStarts=0;
 const pulses=[],acks=[],pending=[],nativeStops=[],heads=[];
 const native = {
   subscribeRouteMotion(cb){event=cb;return {remove(){event=undefined;}};},
@@ -42,6 +42,8 @@ const session=load("src/navigation/route-robot-session.ts",{
   "../device-tools/looi-robot":robot,
   "../device-tools/looi-robot-autoconnect":{forceReconnectSavedLooiRobot:async()=>({ok:true})},
   "../voice/chinese-command":chinese,
+  "./home-voice":load("src/navigation/home-voice.ts",{"../voice/chinese-command":chinese}),
+  "./home-mission":{waitForHomeMission:async()=>{},runHomeMission:async()=>{homeStarts++;}},
   "../voice/chinese-voice-runtime":{chineseVoice:voice,resumeAutomaticChineseVoice(){}},
   "../../modules/vosk-command-recognizer":{default:vosk,__esModule:true},
 });
@@ -66,4 +68,11 @@ app.currentState="background";lifecycle("background");await drain();assert.ok(vo
 event({token,sequence:7,action:"back",durationMs:100});await drain();assert.equal(pulses.length,3,"background cannot drive");
 close(null);await task;assert.equal(lease.hasNavigationControl(),false);assert.equal(event,undefined);
 assert.equal(releasedCamera,1);assert.equal(releasedMic,1);
+app.currentState="active";deferredStop=undefined;
+const second=session.openTaughtRouteSession();await drain();
+deferredStop=true;event({token,sequence:1,action:"stop",durationMs:0});await drain();
+event({token,sequence:2,action:"home_navigate",durationMs:0});await drain();
+event({token,sequence:3,action:"head_down",durationMs:0});await drain();
+deferredStop();await drain();assert.equal(homeStarts,0,"queued navigation superseded during STOP must never start later");
+close(null);await second;
 console.log("Route session: ownership, STOP serialization, late ack, foreground, Chinese stop and cleanup: PASS");

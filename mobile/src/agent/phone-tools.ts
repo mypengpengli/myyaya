@@ -16,10 +16,12 @@ import { viewerControlTool } from "./viewer-tools";
 import { resultPresentation } from "../artifacts/presentation";
 import { IMAGE_ASPECT_RATIOS, IMAGE_RESOLUTIONS, type MediaAspectRatio, type ImageResolution } from "../artifacts/agnes-protocol";
 import { createSkillTools } from "../skills/skill-tools";
+import {createHomeTools} from "./home-tools";
 
 const text = (value: unknown) => ({ content: [{ type: "text" as const, text: typeof value === "string" ? value : JSON.stringify(value) }], details: {} });
 // Pi validates unknown arguments against each TypeBox schema before execute.
 export const phoneTools: AgentTool[] = [
+  ...createHomeTools(),
   ...createSkillTools(() => phoneTools.map((tool) => tool.name)),
   webSearchTool, connectRobotTool, robotActionTool, viewerControlTool,
   { name: "list_taught_routes", label: "正在查看已教路线", description: "列出手机保存的人工教学路线。去客厅等请求先查真实路线，不能编造路线或声称已到达。",

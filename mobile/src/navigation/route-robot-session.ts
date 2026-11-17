@@ -1,11 +1,18 @@
 import { AppState, PermissionsAndroid } from "react-native";
-import { openNativeTaughtRoutes, subscribeRouteMotion, publishRouteRobotState, acknowledgeRouteMotion, stopNativeTaughtRoute } from "../../modules/navigation-probe";
+import { openNativeTaughtRoutes, subscribeRouteMotion, publishRouteRobotState, acknowledgeRouteMotion, stopNativeTaughtRoute,sendHomeCommand,listHomeAtlases } from "../../modules/navigation-probe";
 import { withExternalActivityLease } from "../core/background-process-exit";
 import { acquireNavigationControl, releaseNavigationControl, assertNavigationControl } from "../core/navigation-control-lease";
 import { pauseSocialCamera } from "../core/social-attention";
 import { getLooiRobotRuntimeState, navigationDrivePermits, subscribeLooiRobotRuntimeState, moveLooiNavigationPulse, moveLooiOperatorBackCalibration, moveLooiOperatorTurnCalibration, setLooiHead, stopLooiMotion } from "../device-tools/looi-robot";
 import { forceReconnectSavedLooiRobot } from "../device-tools/looi-robot-autoconnect";
 import { compactChinese, isChineseStop } from "../voice/chinese-command";
+import {parseHomeVoice} from "./home-voice";
+
+export async function openHomeNavigation(options:{mapId?:string;command?:Record<string,unknown>}={}) {
+  const homes=await listHomeAtlases();
+  const mapId=options.mapId ?? homes[0]?.mapId;
+  return openTaughtRouteSession("home:"+JSON.stringify({...options,...(mapId?{mapId}:{})}));
+}
 
 let opening = false;
 export async function openTaughtRouteSession(name = ""): Promise<string | null> {
@@ -42,14 +49,23 @@ export async function openTaughtRouteSession(name = ""): Promise<string | null> 
           try {
             const model = await vosk.prepareChinese();
             let lastStop = 0;
+            let lastHomeSequence="";
             const sub = vosk.addListener("onCommandResult", (event) => {
               if (closed || event.sessionId !== model.sessionId || AppState.currentState !== "active") return;
               const value = compactChinese(event.text);
-              if (!isChineseStop(event.text) && !/^(?:小丫小丫)?(?:请)?(?:停止导航|停止复走|取消导航|别走了)$/u.test(value)) return;
+              const home=parseHomeVoice(event.text);
+              if(home && !["pause","cancel"].includes(String(home.op))) {
+                const sequence=`${event.resetGeneration}:${event.sequence}`;
+                if(event.partial || sequence===lastHomeSequence)return;lastHomeSequence=sequence;
+                void sendHomeCommand(home).then(()=>vosk.speakChinese(["remember","rename"].includes(String(home.op))?"地点已保存":"指令已收到"))
+                  .catch(error=>import("../../modules/navigation-probe").then(n=>n.publishNativeLocalMission(error instanceof Error?error.message:String(error))));return;
+              }
+              if (!home && !isChineseStop(event.text) && !/^(?:小丫小丫)?(?:请)?(?:停止导航|停止复走|取消导航|别走了)$/u.test(value)) return;
               if (Date.now() - lastStop < 800) return;
               lastStop = Date.now();
               void stopLooiMotion("navigation-voice-stop").catch(() => {});
               void stopNativeTaughtRoute(token).catch(() => {});
+              if(home?.op==="cancel")void sendHomeCommand({op:"cancel"}).catch(()=>{});
             });
             const lifecycle = AppState.addEventListener("change", (state) => {
               if (state !== "active") { voiceReady=false;void vosk.stopChineseCapture().catch(() => {}); }
@@ -66,12 +82,17 @@ export async function openTaughtRouteSession(name = ""): Promise<string | null> 
           void (async () => {
             try {
               if (event.action === "stop") { stopping=stopLooiMotion("navigation-stop").catch(() => {});await stopping;return; }
+              if(event.action === "home_navigate") {
+                await stopping;const home=await import("./home-mission");await home.waitForHomeMission();
+                if(closed || requestSequence!==lastSequence || AppState.currentState!=="active")return;
+                assertNavigationControl(token);await home.runHomeMission();return;
+              }
               if(event.action === "continuous_goal") {
-                await stopping;assertNavigationControl(token);
+                await stopping;if(closed || requestSequence!==lastSequence)return;assertNavigationControl(token);
                 await (await import("../diagnostics/continuous-goal-mission")).runContinuousGoalMission({operatorConfirmed:true,navigationOwner:token});return;
               }
               if(event.action === "local_goal") {
-                await stopping;assertNavigationControl(token);
+                await stopping;if(closed || requestSequence!==lastSequence)return;assertNavigationControl(token);
                 const {getNavigationProbeStatus}=await import("../../modules/navigation-probe");
                 const status=await getNavigationProbeStatus();
                 await (await import("../diagnostics/local-goal-mission")).runLocalGoalMission({operatorConfirmed:true,heightCm:(status.measuredCameraHeightMeters ?? 0)*100,goalForwardMeters:.4,goalRightMeters:0});

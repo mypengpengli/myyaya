@@ -9,7 +9,7 @@ import { pauseSocialCamera } from "../core/social-attention";
 import { stopLooiMotion } from "../device-tools/looi-robot";
 import { recordDiagnosticEvent } from "../diagnostics/diagnostic-log";
 import { looiTheme as theme } from "../ui/looi-theme";
-import { openTaughtRouteSession } from "./route-robot-session";
+import { openTaughtRouteSession,openHomeNavigation } from "./route-robot-session";
 
 let probeOpening = false;
 
@@ -60,10 +60,18 @@ export function NavigationProbeSettings() {
     catch (error) { Alert.alert("路线导航",error instanceof Error ? error.message : String(error)); }
     finally { probeOpening=false;setBusy(false);void refresh(); }
   };
+  const openHome=async()=>{
+    if(busy || probeOpening)return;probeOpening=true;setBusy(true);
+    try {await openHomeNavigation();setMessage("家庭地图、路线和任务记录已保存在手机。");}
+    catch(error){Alert.alert("家庭导航",error instanceof Error?error.message:String(error));}
+    finally {probeOpening=false;setBusy(false);void refresh();}
+  };
 
   return <View style={styles.card}>
     <Text style={styles.title}>房间地图</Text>
-    <Text style={styles.text}>人工带领扫描房间，保存表面地图和命名地点，之后重新打开查看。设置固定参照图后可辅助恢复旧地图位置；当前不会自动行驶。</Text>
+    <Text style={styles.text}>家庭导航：先登记固定参照图，带领经过房间与门口并记名。保存后可选择目的地，途中自动绕障；支持暂停、继续、地图编辑和导出记录。本批功能待集中实车验收。</Text>
+    <Pressable accessibilityRole="button" accessibilityLabel="打开家庭导航" disabled={busy} onPress={()=>void openHome()} style={styles.button}><Text style={styles.label}>家庭导航与地图编辑</Text></Pressable>
+    <Text style={styles.text}>表面地图可保存观测与命名地点；固定参照图用于重开后的定位。需要行驶与地图编辑，请使用上方家庭导航入口。</Text>
     <Text style={styles.text}>{status ? (status.serviceInstalled ? `AR 服务：${status.serviceVersion || "已安装"}` : "AR 服务：尚未安装，打开探针可查看安装指引") : "正在检查 AR 服务…"}</Text>
     <Text style={styles.text}>路线试验：固定头部，在真实平整地面教路线；从指定起点低速复走，遇障停车，到点后转身。首次需做短动作方向校验。</Text>
     <Pressable accessibilityRole="button" accessibilityLabel="打开教路线与复走" disabled={busy} onPress={() => void openRoutes()} style={styles.button}>

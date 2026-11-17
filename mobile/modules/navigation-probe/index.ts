@@ -13,7 +13,18 @@ export type NavigationProbeStatus = {
 };
 
 export type ContinuousStatus={token?:string;stopEpoch:number;phase?:string;reason?:string;active?:boolean;pose?:{x:number;y:number;yaw:number};poseReady?:boolean;frameNs?:number;[key:string]:unknown};
+export type HomePose={x:number;y:number;yaw:number};
+export type HomeAtlas={mapId:string;revision:number;requiresReference:boolean;task?:string;places:Array<{id:string;name:string;room:string;kind:string;pose:HomePose}>;links:Array<{id:string;from:string;to:string;taught:boolean;enabled:boolean;points:HomePose[]}>;zones:Array<{id:string;name:string;x:number;y:number;radius:number}>};
+export type HomeStatus={atlas:Pick<HomeAtlas,"mapId"|"revision"|"requiresReference">|null;pose:HomePose|null;localized:boolean;poseRevision:number;connectionConfirmed:boolean;teaching:boolean;task:string;notice:string;localizationReason:string};
+export type HomePlan={taskId:string;mapId:string;revision:number;poseRevision:number;origin:HomePose;targetName:string;points:HomePose[];zones:Array<{x:number;y:number;radius:number}>;robotRadius:number};
 type Native = {
+  homeStatus():Promise<HomeStatus>;
+  homePlan():Promise<HomePlan>;
+  homeCommand(data:string):Promise<HomeStatus>;
+  homeProgress(data:string):Promise<void>;
+  listHomes():Promise<HomeAtlas[]>;
+  prepareHomeCapture():Promise<void>;
+  retargetContinuous(token:string,x:number,y:number,final:boolean):Promise<void>;
   continuousStatus():Promise<ContinuousStatus>;
   startContinuous(device:string,epoch:number,config:string):Promise<ContinuousStatus>;
   continuousObservation(token:string,data:string):Promise<void>;
@@ -48,7 +59,14 @@ function getNative(): Native {
   return native ??= requireNativeModule<Native>("NavigationProbe");
 }
 export const getContinuousStatus=()=>getNative().continuousStatus();
-export const startNativeContinuous=(device:string,epoch:number,gx:number,gy:number,height:number,region:{left:number;top:number;right:number;bottom:number})=>getNative().startContinuous(device,epoch,JSON.stringify({gx,gy,height,region}));
+export const getHomeStatus=()=>getNative().homeStatus();
+export const getHomePlan=()=>getNative().homePlan();
+export const sendHomeCommand=(data:Record<string,unknown>)=>getNative().homeCommand(JSON.stringify(data));
+export const publishHomeProgress=(data:Record<string,unknown>)=>getNative().homeProgress(JSON.stringify(data));
+export const listHomeAtlases=()=>getNative().listHomes();
+export const prepareHomeCapture=()=>getNative().prepareHomeCapture();
+export const retargetNativeContinuous=(token:string,target:HomePose,final:boolean)=>getNative().retargetContinuous(token,target.x,target.y,final);
+export const startNativeContinuous=(device:string,epoch:number,gx:number,gy:number,height:number,region:{left:number;top:number;right:number;bottom:number},final=true)=>getNative().startContinuous(device,epoch,JSON.stringify({gx,gy,height,region,final}));
 export const observeNativeContinuous=(token:string,data:unknown)=>getNative().continuousObservation(token,JSON.stringify(data));
 export const stopNativeContinuous=(reason:string)=>getNative().stopContinuous(reason);
 export const saveContinuousReport=(value:unknown)=>getNative().saveContinuousReport(JSON.stringify(value));

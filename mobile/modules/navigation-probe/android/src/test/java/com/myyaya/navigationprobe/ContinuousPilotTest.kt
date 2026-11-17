@@ -93,4 +93,13 @@ class ContinuousPilotTest {
     p.observation(1050,1_050_000_000,p.pose,ground,listOf(ContinuousPilot.Pose(0.0,.4,0.0)),listOf(ContinuousPilot.Point(.11,0.0,2)))
     assertTrue(p.tick(1100,true).first<0)
   }
+  @Test fun intermediateGoalKeepsOneTaskAliveThenRetargets() {
+    val p=pilot();frame(p,1000);p.retarget(0.0,.1,false,1000);observe(p,1000);frame(p,1100,.05)
+    assertEquals(0 to 0,p.tick(1100,true));assertEquals("WAYPOINT_REACHED",p.phase);assertTrue(p.active)
+    p.retarget(0.0,.5,true,1150);frame(p,1200,.1);observe(p,1200);assertTrue(p.tick(1200,true).first<0)
+  }
+  @Test fun retargetCannotResurrectStoppedTaskOrJumpAcrossRoom() {
+    val p=pilot();assertThrows(IllegalArgumentException::class.java){p.retarget(0.0,10.0,false,1000)}
+    p.cancel("STOP");assertThrows(IllegalStateException::class.java){p.retarget(0.0,.5,true,1100)}
+  }
 }
