@@ -63,3 +63,11 @@
 - **墙体双影、整张图漂移：** 先校正定位/地图对齐，必要时补扫局部。单纯拖动房间名称或涂白障碍格不能修复几何错误。
 
 这是下一版自主探索/区域编辑的目标方案，目前还没有这些功能的实车结论。
+
+## 212修订构建结果
+
+241项原生单元测试、TypeScript、家庭/旧导航行为回归及[完整Linux CI](https://github.com/mypengpengli/myyaya/actions/runs/43998897909)通过。签名、中文模型、43个ARM64库16KB对齐和凭据排除检查通过。全程没有安装手机、操作底座或实车跑图。
+
+源码`64927162fdfbeae508e57088ddf94818c3c4a3ea`，APK198985320字节，SHA256 `270c603d7b3a2b010169b6748303a48ed07d39de1ebd28ae27f879fb48d0f5f7`，源快照`449ce20fa114e176bf334dcc2bb26d9a1fbfb65ff143f164fe221cd351a6785a`。构建记录`phoneInstallationValidated=false`。212只修补上述边界，不包含自主探索或区域分割。
+
+[下载212审查修订预览包](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.212)。APK、SHA256文件、构建记录、源快照清单四个附件的大小与服务端SHA256均已核验；稳定版latest仍保持177。本次没有手机端安装验收。

@@ -6,11 +6,11 @@
 
 ## 下载
 
-**[下载 2.1.211 家庭导航验收包](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.211)** · **[2.1.210 局部绕障预览](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.210)** · **[稳定版 APK](https://github.com/mypengpengli/myyaya/releases/latest)**
+**[下载 2.1.212 家庭导航审查修订包](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.212)** · **[2.1.210 局部绕障预览](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.210)** · **[稳定版 APK](https://github.com/mypengpengli/myyaya/releases/latest)**
 
 211家庭导航集中验收包已发布：新增房间/门口命名、带领路线网络、地图编辑与禁行区、长路线自动衔接、语音控制和重开后的定位准备。237项原生单元测试和完整CI通过；跨房间尚未实车验收，本批按用户要求集中开发后一起测试。操作见[家庭导航与集中验收](docs/HOME-NAVIGATION-211.md)。
 
-复核发现211仍有准备指令取消、模式互斥与恢复边界遗漏，212正在修补。当前“房间编辑”是命名点/通道/禁行区编辑，尚无自主全屋探索、自动分房和房间区域拆分/合并。范围与补齐方案见[六项复核](docs/HOME-NAVIGATION-AUDIT-212.md)。
+复核发现的准备指令取消、模式互斥与恢复边界遗漏已在212修补，241项原生及完整CI通过，修订预览包已发布。当前“房间编辑”是命名点/通道/禁行区编辑，尚无自主全屋探索、自动分房和房间区域拆分/合并。范围与补齐方案见[六项复核](docs/HOME-NAVIGATION-AUDIT-212.md)。
 
 210预览版已在真实地板从罐前起点自主绕过可乐罐并到点停车，用户确认实际绕行正常。50厘米局部目标约30.3秒完成，视觉估计距目标5.69厘米，满足设定的6厘米容差。任务自动规划和连续更新速度，途中仍有短暂停等新观测；跨房间导航尚未完成。219项原生测试和完整CI通过，下载页面提供APK、SHA256和构建记录。稳定版保持177。
 
