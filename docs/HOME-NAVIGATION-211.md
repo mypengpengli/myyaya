@@ -72,3 +72,11 @@
 参考[Nav2 Route Server的节点/边路线网络](https://docs.nav2.org/rolling/configuration_and_development/configuration_guide/core_servers/route_server/configuring_route_server/)及[路线图编辑工具](https://docs.nav2.org/rolling/tutorials/general_tutorials/route_server_tools/)，复用其分工思路，未在APK安装ROS。跨会话位置仍需明确恢复；[ARCore官方说明普通本地锚点只在本次应用实例有效](https://developers.google.com/ar/develop/anchors)，因此保存坐标本身不算重定位。
 
 相关实现：`HomeAtlas`/`HomePoseTracker`/`HomeNavigationPanel`、`home-route.ts`/`home-mission.ts`、Pi家庭工具和导航页中文命令。自动检查覆盖图规划、禁行区、损坏文件、重新定位边界、转角、单任务三米路线、地图变化取消和失败清理。最终APK身份与实测状态见发布页，不把自动检查标成实车通过。
+
+## 本批构建核对
+
+2026-11-17最终包：237项原生单元测试、TypeScript/导航行为/家庭路线自动编排和[完整Linux CI](https://github.com/mypengpengli/myyaya/actions/runs/43992675226)通过。43个ARM64库16KB对齐、签名、中文模型和凭据排除检查通过；没有安装到手机或发出实车动作。
+
+源码`276eb001d66f6e5b2a6595217cf267ec15ee3805`；APK198984728字节，SHA256 `1e92ca943c3ac19f299482ab0b06ee24eef6ea28e19639262d573b2428696b05`；源快照`ddde4a97ed66fcdda6cb63c9fcec84de96756807f670cbea98ab7c22dc1f5165`。构建记录明确保留`phoneInstallationValidated=false`，首次装机与上方现场清单由用户集中完成。
+
+[下载211集中验收包](https://github.com/mypengpengli/myyaya/releases/tag/v2.1.211)。APK、SHA256、构建记录和源码摘要4个附件均已上传，远端大小与SHA256和本地匹配。该版本为预览，稳定latest保持177。
