@@ -37,7 +37,7 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
   private var lastRender=0L;private var lastTeachingFrame=0L
   private var frameTimestampNs=0L;private var frameAtMs=0L;private var frameSession=""
   private var pendingTarget=""
-  private var pendingCommand: JSONObject?=null
+  private val pendingCommands=HomeCommandInbox<JSONObject>()
   private var currentMap=""
   private var selected: String?=null
   private var activeRoute=emptyList<HomePose>()
@@ -56,7 +56,7 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
       stop("切换家庭地图");if(tracker.mapIdentifier!=m.id)tracker.reset();currentMap=m.id;atlas=null;loadError=null
       runCatching {store.load(m.id)}.onSuccess {atlas=it ?: HomeAtlas(m.id,referenceKey(m))}
         .onFailure {loadError="家庭路线文件损坏，请导出记录后恢复备份：${it.message}"}
-      task=runCatching {store.task(m.id)}.getOrNull() ?: JSONObject().put("phase","IDLE")
+      task=runCatching {store.task(m.id)}.getOrElse {JSONObject().put("phase","RECOVERY_REQUIRED").put("reason","旧任务无法读取，请导出记录；家庭地图仍可使用")} ?: JSONObject().put("phase","IDLE")
       if(task.optString("phase") in setOf("RUNNING","PREPARING","PAUSED","WAITING_LOCALIZATION")) {
         task.put("phase","PAUSED_RESTART").put("reason","已恢复旧任务；请重新定位并选择继续，不会自动发车")
       }
@@ -94,9 +94,9 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
   @Synchronized fun confirm() {check(motor.isConnected()){ "请先连接LOOI" };check(floorHeight()!=null){"请填写镜头高度"}
     check(mountAngles!=null){"请先打开实时相机"};confirmedAngles=mountAngles
     confirmedConnection=motor.connectionRevision;say("已记录最低姿态确认；断连后需要再次确认。")
-    pendingCommand?.let {request->command(request);pendingCommand=null}
+    pendingCommands.pending?.let {request->command(request);pendingCommands.completed(request)}
   }
-  @Synchronized fun queue(request: JSONObject) {pendingCommand=request;say("已打开所需操作，请恢复地图定位并确认最低姿态后执行。")}
+  @Synchronized fun queue(request: JSONObject) {sync();pendingCommands.queue(request);say("已打开所需操作，请恢复地图定位并确认最低姿态后执行。")}
   private fun freshPose()=frameAtMs>0 && SystemClock.elapsedRealtime()-frameAtMs in 0..300 && tracker.ready(frameTimestampNs)
   @Synchronized private fun pose(): HomePose {check(freshPose()){tracker.reason};return requireNotNull(tracker.pose)}
   @Synchronized fun status(): Map<String,Any?> {
@@ -133,7 +133,7 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
   }
   @Synchronized fun expectFlowReset() {tracker.expectFlowReset()}
   @Synchronized fun beginTeaching(name: String) {
-    check(task.optString("phase")!="RUNNING"){"请先暂停导航"};val a=sync();val at=pose()
+    val a=sync();HomeWorkflow.requireTeaching(task.optString("phase"),teaching);val at=pose()
     check(metadata()?.referenceJpeg?.isNotEmpty()==true){"家庭路线重开后需要固定参照图；请在新地图首次扫描前登记"}
     check(confirmedConnection==motor.connectionRevision && motor.isConnected()){ "请确认连接和最低姿态" }
     val old=a.named(name);check(old==null || old.pose.distance(at)<=.15){"请回到这个起点，或使用新起点名称"}
@@ -161,8 +161,9 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
     teaching=false;endHold();saveMap();say("带领路线已保存，可选择目的地试运行。")
   }
   @Synchronized fun command(v: JSONObject): Map<String,Any?> {
-    sync()
     val op=v.getString("op")
+    if(op=="export"){export();return status()}
+    sync()
     when(op) {
       "status"->Unit
       "confirm"->confirm()
@@ -182,19 +183,21 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
       "cancel"->{stop("用户取消");task.put("phase","CANCELLED");saveTask();pendingTarget=""}
       "resume"->{check(task.has("destination") && task.optString("phase") in setOf("PAUSED","PAUSED_RESTART","WAITING_LOCALIZATION","BLOCKED","FAILED")){"没有可继续的任务"};pendingTarget=task.getString("destination");launch()}
       "relocalize"->{stop("重新定位");tracker.reset();say("请让后摄看见原位置的固定参照图；未恢复定位不会发车")}
-      "export"->export()
       else->error("不支持的家庭地图操作")
     }
     render();return status()
   }
   @Synchronized private fun launch() {
-    check(task.optString("phase") !in setOf("RUNNING","PREPARING")){"已有导航任务，请先暂停或取消"}
-    val a=sync();val n=requireNotNull(a.named(pendingTarget)){"还没有这个目的地，请先带领并记名"}
+    val a=sync();HomeWorkflow.requireNavigation(task.optString("phase"),teaching)
+    check(!motor.busy && motor.continuous?.pilot?.active!=true){"上一动作尚未停车，请稍后重试"}
+    val n=requireNotNull(a.named(pendingTarget)){"还没有这个目的地，请先带领并记名"}
     check(confirmedConnection==motor.connectionRevision && motor.isConnected()){ "请确认连接和最低姿态" }
     val route=HomeRoutePlanner.plan(a,pose(),n.id,robotRadius())
     task=JSONObject().put("id",UUID.randomUUID().toString()).put("phase","PREPARING").put("destination",n.id)
       .put("destinationName",n.name).put("mapRevision",a.revision).put("meters",route.meters).put("startedAt",System.currentTimeMillis())
-    saveTask();motor.homeNavigate();say("准备前往${n.name}，正在检查实时地板与定位。")
+    saveTask()
+    try {motor.homeNavigate()}catch(e: Exception){task.put("phase","BLOCKED").put("reason",e.message ?: "控制通道未就绪");saveTask();throw e}
+    say("准备前往${n.name}，正在检查实时地板与定位。")
   }
   fun robotRadius(): Double {val p=activity.getSharedPreferences("terrain-envelope",0);return (max(p.getFloat("width",.15f),p.getFloat("length",.1f))/2+p.getFloat("margin",.02f)).toDouble()}
   @Synchronized fun plan(): Map<String,Any?> {
@@ -213,7 +216,7 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
     store.event(currentMap,mapOf("task" to task.toString()));saveTask();render()
   }
   private fun saveTask() {if(currentMap.isNotEmpty())store.task(currentMap,task)}
-  @Synchronized fun stop(why: String) {held=null;teaching=false;if(task.optString("phase") in setOf("RUNNING","PREPARING")){task.put("phase","PAUSED").put("reason",why);saveTask()};motor.stop(why);render()}
+  @Synchronized fun stop(why: String) {pendingCommands.clear();held=null;teaching=false;if(task.optString("phase") in setOf("RUNNING","PREPARING")){task.put("phase","PAUSED").put("reason",why);saveTask()};motor.stop(why);render()}
   private fun startHold(direction: String) {check(teaching){"请先开始带领"};pose();check(confirmedConnection==motor.connectionRevision){"请重新确认最低姿态"}
     held=direction;holdUntil=SystemClock.elapsedRealtime()+3000;stepHold()}
   private fun stepHold() {
@@ -241,12 +244,13 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
       when(i){0->ask("地点名称",p.name){command(JSONObject().put("op","rename").put("id",p.id).put("name",it))};1->command(JSONObject().put("op","move").put("id",p.id));2->command(JSONObject().put("op","remove").put("id",p.id))}
     }}.setNegativeButton("取消",null).show()}
   private fun render() {if(Looper.myLooper()!=Looper.getMainLooper()){activity.runOnUiThread {render()};return};if(!::label.isInitialized)return
-    val phase=mapOf("IDLE" to "待命","PREPARING" to "准备出发","RUNNING" to "正在前往","PAUSED" to "已暂停","PAUSED_RESTART" to "待恢复定位","BLOCKED" to "等待处理","COMPLETED" to "已经到达","CANCELLED" to "已取消")[task.optString("phase")] ?: "等待定位"
+    val phase=mapOf("IDLE" to "待命","PREPARING" to "准备出发","RUNNING" to "正在前往","PAUSED" to "已暂停","PAUSED_RESTART" to "待恢复定位","BLOCKED" to "等待处理","COMPLETED" to "已经到达","CANCELLED" to "已取消","RECOVERY_REQUIRED" to "旧记录待恢复")[task.optString("phase")] ?: "等待定位"
     label.text="$notice\n${tracker.reason} · ${if(teaching) "正在带领 ${trace.size}点" else phase} ${task.optString("destinationName","")} ${task.optString("reason","")}";view.invalidate()}
   private fun export() {
-    val a=sync();val folder=File(activity.cacheDir,"diagnostics").apply {mkdirs()};val out=File(folder,"home-navigation-${System.currentTimeMillis()}.zip")
-    val sources=store.directory.listFiles().orEmpty().filter {it.name.startsWith(a.mapId+".")}
-    ZipOutputStream(out.outputStream()).use {zip->zip.putNextEntry(ZipEntry(a.mapId+".yayamap"));zip.write(RoomMapCodec.encode(requireNotNull(snapshot())));zip.closeEntry()
+    val map=requireNotNull(snapshot()) {"请先打开家庭地图"};require(UUID.fromString(map.id).toString()==map.id)
+    val folder=File(activity.cacheDir,"diagnostics").apply {mkdirs()};val out=File(folder,"home-navigation-${System.currentTimeMillis()}.zip")
+    val sources=store.directory.listFiles().orEmpty().filter {it.name.startsWith(map.id+".")}
+    ZipOutputStream(out.outputStream()).use {zip->zip.putNextEntry(ZipEntry(map.id+".yayamap"));zip.write(RoomMapCodec.encode(map));zip.closeEntry()
       for(f in sources.filter {it.isFile && it.length()<=8_000_000}){zip.putNextEntry(ZipEntry(f.name));f.inputStream().use {it.copyTo(zip)};zip.closeEntry()}
       zip.putNextEntry(ZipEntry("status.json"));zip.write(JSONObject(status()).toString().toByteArray());zip.closeEntry()}
     val uri=FileProvider.getUriForFile(activity,activity.packageName+".myyaya.reference-photo",out)

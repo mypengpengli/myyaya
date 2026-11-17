@@ -12,6 +12,9 @@ export async function waitForHomeMission(){while(active)await new Promise(r=>set
 export async function runHomeMission() {
   if(active)throw new Error("家庭导航已经启动");active=true;
   let prepared:Awaited<ReturnType<typeof prepareNativeNavigationDrive>>|undefined,token="",taskId="",failure="",targetName="",completed=false;
+  const stopOwn=async(reason:string)=>{
+    if(token && (await getContinuousStatus()).token===token)await stopNativeContinuous(reason);
+  };
   const started=Date.now();
   try {
     const owner=getNavigationControlOwner();if(!owner)throw new Error("请打开家庭导航");
@@ -29,7 +32,7 @@ export async function runHomeMission() {
     const controller=new LocalGoalController({x:0,y:.15},g,0);controller.setGoal(first.target);
     controller.setForbidden(plan.zones.map(z=>({...homeToLocal({...z,yaw:0},origin),radius:z.radius})));
     let region=preflight.selectedFloorRegion!,previous=first.target,previousFinal=first.final;
-    prepared=await prepareNativeNavigationDrive(owner,()=>{void stopNativeContinuous("家庭导航控制已停止").catch(()=>{});});
+    prepared=await prepareNativeNavigationDrive(owner,()=>{void stopOwn("家庭导航控制已停止").catch(()=>{});});
     const start=await startNativeContinuous(prepared.device,before.stopEpoch,first.target.x,first.target.y,settings.measuredCameraHeightMeters,region,first.final);
     token=start.token!;
     await publishHomeProgress({taskId,phase:"RUNNING",nativeToken:token,total:cursor.total,waypoint:0});
@@ -67,7 +70,7 @@ export async function runHomeMission() {
     if(!completed && !failure)failure="本轮导航达到时间上限，可定位后继续原目的地";
   } catch(e){failure=e instanceof Error?e.message:String(e);}
   finally {
-    await stopNativeContinuous(failure || "家庭任务已结束").catch(()=>{});
+    await stopOwn(failure || "家庭任务已结束").catch(()=>{});
     let stopped=false;
     for(let i=0;i<15;i++){const status=await getContinuousStatus().catch(()=>null);if(status?.stopAcknowledged===true || !token){stopped=true;break;}await new Promise(r=>setTimeout(r,100));}
     prepared?.finish();await releaseContinuousVision().catch(()=>{});active=false;

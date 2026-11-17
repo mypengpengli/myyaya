@@ -38,7 +38,7 @@ function rig(mode='success') {
  const native={
   getHomePlan:async()=>{planCalls++;return {...plan,revision:mode==='changed-before-start'&&planCalls>1?2:1};},
   prepareHomeCapture:async()=>{},getNavigationProbeStatus:async()=>({measuredCameraHeightMeters:.08,navigationGeometry:g}),
-  getHomeStatus:async()=>{homeCalls++;return {atlas:{mapId:'home',revision:mode==='changed-during-run'&&homeCalls>1?2:1},poseRevision:2,connectionConfirmed:true,localized:true};},
+  getHomeStatus:async()=>{homeCalls++;if(mode==='replacement-task'){state={...state,token:'replacement',stopAcknowledged:true};throw new Error('session replaced');}return {atlas:{mapId:'home',revision:mode==='changed-during-run'&&homeCalls>1?2:1},poseRevision:2,connectionConfirmed:true,localized:true};},
   getContinuousStatus:async()=>({...state,pose:state.pose?{...state.pose}:undefined}),
   startNativeContinuous:async(_device,epoch,x,y)=>{
    assert.equal(epoch,3);assert.ok(Math.hypot(x,y)<=1);calls.starts++;state={...state,token:'one-task',active:true,poseReady:true,frameNs:1e9,pose:{x:0,y:0,yaw:0}};return state;
@@ -63,9 +63,10 @@ function rig(mode='success') {
 const good=rig();await good.run();assert.equal(good.calls.starts,1,'whole multi-meter route must share one native task');
 assert.ok(good.calls.retargets>5);assert.ok(good.calls.observes>20);assert.equal(good.calls.reports.at(-1).phase,'COMPLETED');assert.equal(good.calls.stops,1);assert.equal(good.calls.releases,1);assert.equal(good.calls.finishes,1);
 for(const mode of ['changed-before-start','changed-during-run','inference-error']){
- const bad=rig(mode);await bad.run();assert.equal(bad.calls.reports.at(-1).phase,'BLOCKED');assert.equal(bad.calls.stops,1);assert.equal(bad.calls.releases,1);
+ const bad=rig(mode);await bad.run();assert.equal(bad.calls.reports.at(-1).phase,'BLOCKED');assert.equal(bad.calls.stops,mode==='changed-during-run'?1:0);assert.equal(bad.calls.releases,1);
  if(mode!=='changed-during-run')assert.equal(bad.calls.starts,0,'failure before arming must not start motors');
 }
+const replaced=rig('replacement-task');await replaced.run();assert.equal(replaced.calls.stops,0,'old finally must never stop a replacement native task');
 let owner='navigation',currentMap='home';const commands=[];
 const atlas={mapId:'home',revision:1,requiresReference:true,places:[{id:'living',name:'客厅',room:'客厅',kind:'room',pose:{x:0,y:1,yaw:0}}],links:[],zones:[]};
 const tools=load('src/agent/home-tools.ts',{'typebox':await import('typebox'),'react-native':{AppState:{currentState:'active'},Alert:{}},
