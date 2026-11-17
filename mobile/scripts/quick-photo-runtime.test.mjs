@@ -9,6 +9,7 @@ const logs=[],stages=[];
 const runtime=load("src/agent/companion-runtime.ts",{
   "expo/fetch":{},"./companion-agent":{CompanionAgent:class {constructor(){throw new Error("shortcut must not create Pi");}}},
   "./newapi-config":{readNewApiConfig:async()=>{reads++;throw new Error("shortcut must not read a model key");}},"./newapi-stream":{},
+  "../memory/recent-dialogue":load("src/memory/recent-dialogue.ts"),
   "../diagnostics/diagnostic-log":{},"./phone-tools":{phoneTools:[]},"../memory/memory-service":{mirrorSessionTouch(){},mirrorSessionMessage:(_id,m)=>logs.push(m)},
   "../hermes/task-runtime":{},"../artifacts/artifact-store":{},"../artifacts/artifact-focus":{},"../artifacts/presentation":{resultPresentation:{holdCountdown:()=>()=>{releases++;}}},
   "../artifacts/media-jobs":{},"expo-crypto":{},"./restored-context":{},"../skills/skill-runtime":{observeSkillTool:(...args)=>{learned=args;}},

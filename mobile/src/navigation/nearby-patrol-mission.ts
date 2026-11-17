@@ -12,6 +12,7 @@ export async function runNearbyPatrolMission(initial: HomePlan) {
   const started=Date.now();let token="",failure="",completed=false,returned=false;
   let prepared:Awaited<ReturnType<typeof prepareNativeNavigationDrive>>|undefined;
   let checkpoint:Record<string,unknown>={};
+  let inspection:Awaited<ReturnType<typeof import("../inspection/inspection-mission").beginInspection>>;
   const stopOwn=async(reason:string)=>{if(token && (await getContinuousStatus()).token===token)await stopNativeContinuous(reason);};
   try {
     const owner=getNavigationControlOwner();if(!owner)throw new Error("请打开家庭地图");
@@ -21,6 +22,7 @@ export async function runNearbyPatrolMission(initial: HomePlan) {
     const warm=await runFloorVisionProbe({heightCm:settings.measuredCameraHeightMeters*100,autoFloorRegion:true,navigationCells:false,showOverlay:false,liveOnly:true});
     const plan=await getHomePlan();
     if(plan.taskId!==initial.taskId || plan.revision!==initial.revision || plan.mode!=="patrol")throw new Error("巡游任务或地图已变化");
+    if(plan.inspectionId)inspection=await (await import("../inspection/inspection-mission")).beginInspection(plan);
     const origin=plan.origin,returnPoint=homeToLocal(JSON.parse(plan.patrolStart!),origin);
     const trail=(JSON.parse(plan.patrolTrail!) as HomePose[]).map(p=>homeToLocal(p,origin));
     const saved=JSON.parse(plan.coverage ?? "[]") as Array<[number,number,number]>;
@@ -51,7 +53,13 @@ export async function runNearbyPatrolMission(initial: HomePlan) {
         if(!result.navigationCells || !latest.pose)throw new Error("缺少实时地面或位姿");
         controller.pose={...capture.pose};controller.observe(result.navigationCells);controller.pose={...latest.pose};
         controller.positionUncertaintyMeters=Number(latest.positionUncertaintyMeters ?? 0);
-        const elapsed=Date.now()-started+offset,next=tour.select(controller,elapsed);returned=next.returning;
+        let waitingForPhotoStop=false;
+        if(inspection && !tour.returning && inspection.count()<4) {
+          const distance=Math.hypot(latest.pose.x-lastGoal.x,latest.pose.y-lastGoal.y);
+          waitingForPhotoStop=distance<.08 && latest.phase!=="WAYPOINT_REACHED";
+          if(latest.phase==="WAYPOINT_REACHED" && latest.stopAcknowledged===true)await inspection.capture(`point-${Math.round(lastGoal.x*10)}_${Math.round(lastGoal.y*10)}`,plan.roomName ?? "当前位置",localToHome(latest.pose,origin),token);
+        }
+        const elapsed=Date.now()-started+offset,next=waitingForPhotoStop?{target:lastGoal,final:lastFinal,returning:tour.returning}:tour.select(controller,elapsed);returned=next.returning;
         if(Math.hypot(next.target.x-lastGoal.x,next.target.y-lastGoal.y)>.01 || next.final!==lastFinal) {
           controller.setGoal(next.target);await retargetNativeContinuous(token,next.target,next.final);lastGoal=next.target;lastFinal=next.final;
         }
@@ -79,6 +87,7 @@ export async function runNearbyPatrolMission(initial: HomePlan) {
     for(let i=0;token && i<15;i++){const s=await getContinuousStatus().catch(()=>null);if(s?.token===token && s.stopAcknowledged===true){stopped=true;break;}await new Promise(r=>setTimeout(r,100));}
     prepared?.finish();await releaseContinuousVision().catch(()=>{});
     const success=completed && stopped;
+    if(inspection){const home=await getHomeStatus().catch(()=>null);const phase=home?JSON.parse(home.task).phase:"";inspection.finish(success,failure || "已返回出发位置并停车",phase==="CANCELLED");}
     await publishHomeProgress({taskId:initial.taskId,phase:success?"COMPLETED":"BLOCKED",...checkpoint,
       reason:success?"附近短巡游已返回起点并停车，不代表整个房间探索完毕":!stopped?"已请求停车，尚未收到回执":failure}).catch(()=>{});
     await import("react-native").then(async n=>{

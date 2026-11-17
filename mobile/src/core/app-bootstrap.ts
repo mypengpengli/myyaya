@@ -101,6 +101,7 @@ export async function bootstrapApp(): Promise<void> {
 
   runOptInOwnerEnrollmentOnBoot();
   runOptInLiveVoiceAcceptanceOnBoot();
+  void import("../inspection/inspection-runtime").then(m=>m.startInspectionMonitor()).catch(()=>{});
 }
 
 export async function pauseAppRuntime(reason: "background" | "sleep" | "navigation" = "background"): Promise<void> {

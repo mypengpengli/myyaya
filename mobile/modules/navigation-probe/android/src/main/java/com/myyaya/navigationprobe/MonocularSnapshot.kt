@@ -19,7 +19,7 @@ import org.json.JSONObject
 
 /** One explicit camera sample, not a live feed or a motor/perception authority. */
 internal class MonocularSnapshot(private val host: Activity,private val active: ()->Boolean,private val navigationPose: ()->Map<String,Any?>?={null}) {
-  private data class Request(val id: String,val promise: Promise)
+  private data class Request(val id: String,val promise: Promise,val scene: Boolean)
   private val io=Executors.newSingleThreadExecutor()
   private val handler=Handler(Looper.getMainLooper())
   @Volatile private var pending: Request?=null
@@ -28,10 +28,10 @@ internal class MonocularSnapshot(private val host: Activity,private val active: 
   @Volatile private var closed=false
   private var dialog: AlertDialog?=null
   private val cache=File(host.cacheDir,"monocular-benchmark")
-  @Synchronized fun request(promise: Promise) {
+  @Synchronized fun request(promise: Promise,scene: Boolean=false) {
     if(closed || !active()) { promise.reject("ERR_MONOCULAR_CAMERA","请先开始相机扫描",null);return }
     if(pending!=null) { promise.reject("ERR_MONOCULAR_BUSY","上一帧仍在取样",null);return }
-    val request=Request(UUID.randomUUID().toString(),promise);pending=request;lastId=null
+    val request=Request(UUID.randomUUID().toString(),promise,scene);pending=request;lastId=null
     handler.postDelayed({ synchronized(this) {
       if(pending===request) { pending=null;copying=false;request.promise.reject("ERR_MONOCULAR_TIMEOUT","相机取样超时",null) }
     } },5000)
@@ -68,12 +68,13 @@ internal class MonocularSnapshot(private val host: Activity,private val active: 
             // Derivatives belong to one exact camera sample, never to the next photo.
             for(name in listOf("live.depth","live.labels","live.floor.json")) File(cache,name).delete()
             File(cache,"live.jpg").writeBytes(jpeg);File(cache,"live.rgb").writeBytes(rgb)
+            val sceneFile=if(request.scene)File(cache,"${request.id}.jpg").also {it.writeBytes(jpeg)} else null
             File(cache,"live.json").writeText(JSONObject(metadata).toString())
             host.runOnUiThread { synchronized(this) {
-              if(pending!==request) return@synchronized
+              if(pending!==request) {sceneFile?.delete();return@synchronized}
               pending=null;copying=false
-              if(closed || !active()) request.promise.reject("ERR_MONOCULAR_CLOSED","相机界面已暂停",null)
-              else { lastId=request.id;request.promise.resolve(metadata+mapOf("inputUri" to "file://${File(cache,"live.rgb").absolutePath}")) }
+              if(closed || !active()) {sceneFile?.delete();request.promise.reject("ERR_MONOCULAR_CLOSED","相机界面已暂停",null)}
+              else { lastId=request.id;request.promise.resolve(metadata+mapOf("inputUri" to "file://${File(cache,"live.rgb").absolutePath}","jpegUri" to sceneFile?.let {"file://${it.absolutePath}"})) }
             } }
           } catch(e: Exception) { fail(request,e) }
         }

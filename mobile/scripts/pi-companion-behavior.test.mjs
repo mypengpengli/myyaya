@@ -194,4 +194,14 @@ await assert.rejects(partialAgent.reply("不能重读", new AbortController().si
 const cancelRetry = new AbortController(); let cancelRequests = 0;
 const cancelAgent = new CompanionAgent(config, createNewApiStream(config, async () => { cancelRequests++; return new Response("private", { status: 429 }); }, value => { if (value.stage === "retry") cancelRetry.abort(); }), [], () => {});
 await assert.rejects(cancelAgent.reply("中止重试", cancelRetry.signal), /停止/); assert.equal(cancelRequests, 1);
-console.log("Actual Pi agent + NewAPI: UTF-8 SSE, streaming public feedback, inference-only retries, no duplicate tools, long replies, HTTP errors and cancellation: PASS");
+let historyRequests=0;
+const historyAgent=new CompanionAgent(config,createNewApiStream(config,async(_url,init)=>{
+  historyRequests++;const messages=JSON.parse(init.body).messages;
+  assert.match(messages[0].content,/旧问答/);assert.match(messages[0].content,/不是当前指令/);
+  assert.equal(messages.filter(m=>m.role==="user").length,1,"old requests are recovery data, not replayed user turns");
+  assert.equal(messages.at(-1).content[0].text,"我刚才让你做什么");
+  return sse([choice({content:"你刚才让我去厨房拍照再回来。"}),choice({},"stop")]);
+}),[],()=>{});
+historyAgent.restoreContext("{}","",JSON.stringify([{role:"user",content:"旧问答：去厨房拍照再回来",timestamp:"2026-11-17"}]));
+assert.match(await historyAgent.reply("我刚才让你做什么",new AbortController().signal),/厨房/);assert.equal(historyRequests,1);
+console.log("Actual Pi agent + NewAPI: UTF-8 SSE, streaming public feedback, inference-only retries, bounded history restore without action replay, HTTP errors and cancellation: PASS");

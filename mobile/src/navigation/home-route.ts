@@ -22,19 +22,24 @@ export class HomeRouteCursor {
     if(this.total>40)throw new Error("本次路线过长，请拆分目的地");
   }
   get total(){return this.lengths.at(-1)!;}
-  select(p:HomePose) {
+  advanceTo(arc:number) {
+    if(!Number.isFinite(arc)||arc<0||arc>this.total+.001)throw new Error("观察点路线进度无效");
+    this.progress=Math.max(this.progress,Math.min(arc,this.total));
+  }
+  select(p:HomePose,limitArc?:number) {
     let best=Infinity,bestArc=this.progress,offRoute=Infinity;
     for(let i=1;i<this.points.length;i++) {
       if(this.lengths[i]<this.progress-.1 || this.lengths[i-1]>this.progress+.65)continue;
       const a=this.points[i-1],b=this.points[i],dx=b.x-a.x,dy=b.y-a.y,dd=dx*dx+dy*dy;
       const t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/dd));
       const d=Math.hypot(p.x-a.x-t*dx,p.y-a.y-t*dy),arc=this.lengths[i-1]+t*Math.sqrt(dd);
+      if(arc<this.progress-.08)continue;
       offRoute=Math.min(offRoute,d);const score=d+Math.abs(arc-this.progress)*.02;
       if(score<best){best=score;bestArc=arc;}
     }
     if(offRoute>.40)throw new Error("已偏离带领路线，请暂停后重新定位");
     this.progress=Math.max(this.progress,bestArc);
-    let targetArc=Math.min(this.total,this.progress+.40);
+    let targetArc=Math.min(this.total,this.progress+.40,limitArc ?? Infinity);
     for(let i=1;i<this.points.length-1;i++) {
       const arc=this.lengths[i];if(arc<this.progress+.09 || arc>targetArc)continue;
       const a=this.points[i-1],b=this.points[i],c=this.points[i+1];
@@ -43,7 +48,7 @@ export class HomeRouteCursor {
     }
     let i=1;while(i<this.lengths.length-1 && this.lengths[i]<targetArc)i++;
     const a=this.points[i-1],b=this.points[i],t=(targetArc-this.lengths[i-1])/(this.lengths[i]-this.lengths[i-1]);
-    return {target:{x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t,yaw:b.yaw},final:targetArc>=this.total-.001,
+    return {target:{x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t,yaw:b.yaw},final:limitArc===undefined && targetArc>=this.total-.001,
       progress:this.progress,total:this.total,index:i,offRoute};
   }
 }

@@ -603,6 +603,12 @@ export const localMemoryDatabase = {
     }));
   },
 
+  async recentConversationMessages(): Promise<ChatMessage[]> {
+    const db = await getDatabase();
+    const rows = await db.getAllAsync<MessageRow>("SELECT * FROM conversation_messages ORDER BY id DESC LIMIT 48");
+    return rows.reverse().map(row => ({ id: `local-history-${row.id}`, role: row.role, content: row.content, timestamp: row.created_at }));
+  },
+
   async getConversationMessages(sessionId: string): Promise<ChatMessage[]> {
     if (!sessionId) return [];
     const db = await getDatabase();

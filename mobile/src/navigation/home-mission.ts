@@ -4,7 +4,7 @@ import {prepareNativeNavigationDrive} from "../device-tools/looi-robot";
 import {getNavigationControlOwner} from "../core/navigation-control-lease";
 import {LocalGoalController} from "./local-goal-controller";
 import {runFloorVisionProbe,releaseContinuousVision} from "../diagnostics/floor-vision-probe";
-import {HomeRouteCursor,homeToLocal} from "./home-route";
+import {HomeRouteCursor,homeToLocal,localToHome} from "./home-route";
 
 let active=false;
 export async function waitForHomeMission(){while(active)await new Promise(r=>setTimeout(r,30));}
@@ -12,6 +12,7 @@ export async function waitForHomeMission(){while(active)await new Promise(r=>set
 export async function runHomeMission() {
   if(active)throw new Error("家庭导航已经启动");active=true;
   let prepared:Awaited<ReturnType<typeof prepareNativeNavigationDrive>>|undefined,token="",taskId="",failure="",targetName="",completed=false;
+  let inspection:Awaited<ReturnType<typeof import("../inspection/inspection-mission").beginInspection>>;
   const stopOwn=async(reason:string)=>{
     if(token && (await getContinuousStatus()).token===token)await stopNativeContinuous(reason);
   };
@@ -29,8 +30,14 @@ export async function runHomeMission() {
     const plan=await getHomePlan();if(plan.taskId!==taskId || plan.revision!==initial.revision)throw new Error("任务或地图已变化");
     targetName=plan.targetName;
     const origin=plan.origin,points=plan.points.map(p=>homeToLocal(p,origin));
-    if(Math.hypot(points.at(-1)!.x,points.at(-1)!.y)<=.06){completed=true;return;}
-    const cursor=new HomeRouteCursor(points),first=cursor.select({x:0,y:0,yaw:0});
+    if(plan.inspectionId)inspection=await (await import("../inspection/inspection-mission")).beginInspection(plan);
+    const stops=plan.inspectionStops ?? [];let stopIndex=0;
+    const done=[...(plan.inspectionDone ?? [])];
+    let coverage=JSON.parse(plan.coverage ?? "[]") as Array<[number,number,number]>;
+    if(!inspection && Math.hypot(points.at(-1)!.x,points.at(-1)!.y)<=.06){completed=true;return;}
+    if(inspection && points.every(p=>Math.hypot(p.x,p.y)<.005))points.push({x:0,y:.035,yaw:0});
+    const cursor=new HomeRouteCursor(points),first=cursor.select({x:0,y:0,yaw:0},stops[0]?.arc);
+    if(inspection && Math.hypot(first.target.x,first.target.y)<.03)first.target={x:0,y:.035,yaw:0};
     const controller=new LocalGoalController({x:0,y:.15},g,0);controller.setGoal(first.target);
     controller.setForbidden(plan.zones.map(z=>({...homeToLocal({...z,yaw:0},origin),radius:z.radius})));
     let region=preflight.selectedFloorRegion!,previous=first.target,previousFinal=first.final;
@@ -41,7 +48,7 @@ export async function runHomeMission() {
     let errors=0,lostAt=0,bestProgress=0,progressAt=Date.now();
     while(Date.now()-started<540_000) {
       const status=await getContinuousStatus();if(status.token!==token)throw new Error("导航控制会话已变化");
-      if(!status.active){completed=status.phase==="AT_GOAL";if(!completed)failure=String(status.reason ?? status.phase);break;}
+      if(!status.active){completed=status.phase==="AT_GOAL" && stopIndex>=stops.length;if(!completed)failure=String(status.reason ?? status.phase);break;}
       const home=await getHomeStatus();
       if(!home.atlas || home.atlas.mapId!==plan.mapId || home.atlas.revision!==plan.revision || home.poseRevision!==plan.poseRevision)throw new Error("地图或定位起点改变，请重新定位后继续");
       if(!home.connectionConfirmed)throw new Error("连接已变化，请重新确认最低姿态");
@@ -55,7 +62,13 @@ export async function runHomeMission() {
         const latest=await getContinuousStatus();if(latest.token!==token || !latest.active)continue;
         const pose=latest.pose!;controller.pose={...capture.pose};controller.observe(result.navigationCells!);controller.pose={...pose};
         controller.positionUncertaintyMeters=Number(latest.positionUncertaintyMeters ?? 0);
-        const next=cursor.select(pose as HomePose);
+        const stop=stops[stopIndex];
+        if(inspection && stop && latest.phase==="WAYPOINT_REACHED" && latest.stopAcknowledged===true && Math.hypot(pose.x-homeToLocal(stop.pose,origin).x,pose.y-homeToLocal(stop.pose,origin).y)<=.065) {
+          await inspection.capture(stop.id,stop.name,localToHome(pose,origin),token,stop.id);done.push(stop.id);stopIndex++;cursor.advanceTo(stop.arc);
+          if(plan.inspectionAction==="rescan")coverage=(await import("../inspection/inspection-coverage")).mergeInspectionCoverage(coverage,result.navigationCells!,capture.pose,origin,g.centerRightMeters,g.alongViewMeters);
+          await publishHomeProgress({taskId,phase:"RUNNING",inspectionDone:done,...(plan.inspectionAction==="rescan"?{coverage}:{}),reason:"观察点结果已记录，继续任务并返回"});
+        }
+        const next=cursor.select(pose as HomePose,stops[stopIndex]?.arc);
         if(next.progress>bestProgress+.01){bestProgress=next.progress;progressAt=Date.now();}
         if(Date.now()-progressAt>35_000)throw new Error("路线持续无进展，请检查障碍后继续");
         if(Math.hypot(next.target.x-previous.x,next.target.y-previous.y)>.025 || next.final!==previousFinal) {
@@ -72,15 +85,18 @@ export async function runHomeMission() {
     if(!completed && !failure)failure="本轮导航达到时间上限，可定位后继续原目的地";
   } catch(e){failure=e instanceof Error?e.message:String(e);}
   finally {
+    try {
     await stopOwn(failure || "家庭任务已结束").catch(()=>{});
     let stopped=false;
     for(let i=0;i<15;i++){const status=await getContinuousStatus().catch(()=>null);if(status?.stopAcknowledged===true || !token){stopped=true;break;}await new Promise(r=>setTimeout(r,100));}
-    prepared?.finish();await releaseContinuousVision().catch(()=>{});active=false;
+    prepared?.finish();await releaseContinuousVision().catch(()=>{});
+    if(inspection){const home=await getHomeStatus().catch(()=>null);const phase=home?JSON.parse(home.task).phase:"";inspection.finish(completed && stopped,failure || "已返回出发位置并停车",phase==="CANCELLED");}
     if(taskId)await publishHomeProgress({taskId,phase:completed && stopped?"COMPLETED":"BLOCKED",reason:!stopped?"已请求停车，尚未收到回执":failure || "已到达并停车"}).catch(()=>{});
     if(taskId)await import("react-native").then(async n=>{
       if(n.AppState.currentState!=="active")return;
       const {default:voice}=await import("../../modules/vosk-command-recognizer");
-      await voice.speakChinese(completed && stopped?`已经到达${targetName}`:`导航已暂停，${failure || "请查看屏幕提示"}`);
+      await voice.speakChinese(completed && stopped?inspection?"已经返回出发位置，照片已记录，正在整理见闻。":`已经到达${targetName}`:`导航已暂停，${failure || "请查看屏幕提示"}`);
     }).catch(()=>{});
+    } finally {active=false;}
   }
 }

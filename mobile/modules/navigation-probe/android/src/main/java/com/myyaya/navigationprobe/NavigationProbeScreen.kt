@@ -109,6 +109,7 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
   private lateinit var datasetButton: Button
   private val monocular=MonocularSnapshot(host,{ running && resumed && !isDestroyed && !isFinishing },{roomMap?.continuousSnapshot()})
   fun captureMonocular(promise: expo.modules.kotlin.Promise)=monocular.request(promise)
+  fun captureScene(promise: expo.modules.kotlin.Promise)=monocular.request(promise,true)
   fun showMonocular(id: String,data: String,inferenceMs: Double)=monocular.show(id,data,inferenceMs)
   fun showFloor(id: String,data: String,summary: String)=monocular.showFloor(id,data,summary)
   fun analyzeUprightReference(id: String,height: Double,width: Double,promise: expo.modules.kotlin.Promise)=monocular.reference(id,height,width,promise)

@@ -85,7 +85,12 @@ export async function openTaughtRouteSession(name = ""): Promise<string | null> 
               if(event.action === "home_navigate") {
                 await stopping;const home=await import("./home-mission");await home.waitForHomeMission();
                 if(closed || requestSequence!==lastSequence || AppState.currentState!=="active")return;
-                assertNavigationControl(token);await home.runHomeMission();return;
+                assertNavigationControl(token);await home.runHomeMission();
+                if(!closed && requestSequence===lastSequence) {
+                  const n=await import("../../modules/navigation-probe"),status=await n.getHomeStatus(),task=JSON.parse(status.task);
+                  if(task.inspectionId && task.phase==="COMPLETED")await n.finishNativeHomeSession(token);
+                }
+                return;
               }
               if(event.action === "continuous_goal") {
                 await stopping;if(closed || requestSequence!==lastSequence)return;assertNavigationControl(token);

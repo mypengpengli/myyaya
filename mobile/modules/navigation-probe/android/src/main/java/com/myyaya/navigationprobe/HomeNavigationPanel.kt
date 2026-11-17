@@ -86,6 +86,10 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
       "继续" to {command(JSONObject().put("op","resume"))},"取消任务" to {command(JSONObject().put("op","cancel"))})
     row("恢复定位" to {command(JSONObject().put("op","relocalize"))},"导出导航记录" to {export()})
     row("附近逛一圈再回来" to {command(JSONObject().put("op","patrol"))})
+    row("巡视登记房间并返回" to {command(JSONObject().put("op","inspect").put("scope","all"))},"到点拍照并返回" to {
+      val a=sync();check(a.places.isNotEmpty()){"请先登记地点"}
+      AlertDialog.Builder(activity).setTitle("选择拍照地点").setItems(a.places.map {it.name}.toTypedArray()){_,i->attempt {command(JSONObject().put("op","inspect").put("scope","place").put("action","photo").put("target",a.places[i].id))}}.setNegativeButton("取消",null).show()
+    })
     addView(TextView(activity).apply {text="带领时保持手机安装和最低高度；按住方向键行驶，松开停车。每次长按约3秒，再按可继续。";setTextColor(Color.LTGRAY);textSize=11f})
     addView(LinearLayout(activity).apply {
       for((title,direction) in listOf("左转" to "left","朝镜头走" to "back","右转" to "right"))addView(Button(activity).apply {
@@ -184,15 +188,16 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
       "remove_zone"->{stop("修改禁行区");val a=sync();val id=v.getString("id");check(a.zones.any {it.id==id}){"没有这个禁行区"};persist(a.copy(revision=a.revision+1,zones=a.zones.filter {it.id!=id}))}
       "go"->{check(!teaching){"请先结束带领"};pendingTarget=v.getString("target");launch()}
       "patrol"->launchPatrol(false)
+      "inspect"->{if(v.optString("scope","current")=="current")launchPatrol(false,v.optString("action","observe")) else launchInspection(v,false)}
       "pause"->{stop("用户暂停");task.put("phase","PAUSED");saveTask()}
       "cancel"->{stop("用户取消");task.put("phase","CANCELLED");saveTask();pendingTarget=""}
-      "resume"->{check(task.has("destination") && task.optString("phase") in setOf("PAUSED","PAUSED_RESTART","WAITING_LOCALIZATION","BLOCKED","FAILED")){"没有可继续的任务"};if(task.optString("kind")=="patrol")launchPatrol(true) else {pendingTarget=task.getString("destination");launch()}}
+      "resume"->{check(task.has("destination") && task.optString("phase") in setOf("PAUSED","PAUSED_RESTART","WAITING_LOCALIZATION","BLOCKED","FAILED")){"没有可继续的任务"};when(task.optString("kind")){"patrol"->launchPatrol(true);"inspection"->launchInspection(JSONObject(),true);else->{pendingTarget=task.getString("destination");launch()}}}
       "relocalize"->{stop("重新定位");tracker.reset();say("请让后摄看见原位置的固定参照图；未恢复定位不会发车")}
       else->error("不支持的家庭地图操作")
     }
     render();return status()
   }
-  @Synchronized private fun launchPatrol(resume: Boolean) {
+  @Synchronized private fun launchPatrol(resume: Boolean,action: String="observe") {
     val a=sync();HomeWorkflow.requireNavigation(task.optString("phase"),teaching)
     check(!motor.busy && motor.continuous?.pilot?.active!=true){"上一动作尚未停车，请稍后重试"}
     check(confirmedConnection==motor.connectionRevision && motor.isConnected()){ "请确认连接和最低姿态" }
@@ -207,9 +212,34 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
     } else task=JSONObject().put("id",UUID.randomUUID().toString()).put("kind","patrol").put("phase","PREPARING")
       .put("destination","__patrol__").put("destinationName","附近巡游起点").put("patrolStart",JSONObject(at.report()))
       .put("patrolTrail",JSONArray().put(JSONObject(at.report()))).put("patrolElapsedMs",0).put("mapRevision",a.revision).put("startedAt",System.currentTimeMillis())
+    if(!resume)task.put("inspectionId",task.getString("id")).put("inspectionAction",action)
+      .put("mapping",if(action=="rescan")"rescan" else if(HomeInspectionPlanner.hasLocalRoute(a,at) || (0 until coverage.length()).count {i->val c=coverage.getJSONArray(i);c.getInt(2)==1 && hypot(c.getDouble(0)-at.x,c.getDouble(1)-at.y)<.35}>=4)"existing" else "local-new")
+      .put("roomName",a.places.filter {it.kind=="room" && it.pose.distance(at)<.8}.minByOrNull {it.pose.distance(at)}?.name ?: "当前位置")
     saveTask()
     try {motor.homeNavigate()}catch(e: Exception){task.put("phase","BLOCKED").put("reason",e.message ?: "控制通道未就绪");saveTask();throw e}
     say("准备附近短巡游：半径最多80厘米、整轮最多2分钟，记录新观察地面并沿实际轨迹返回。不是全屋建图。")
+  }
+  @Synchronized private fun launchInspection(v: JSONObject,resume: Boolean) {
+    val a=sync();HomeWorkflow.requireNavigation(task.optString("phase"),teaching)
+    check(!motor.busy && motor.continuous?.pilot?.active!=true){"上一任务尚未停车"}
+    check(confirmedConnection==motor.connectionRevision && motor.isConnected()){ "请确认连接和最低姿态" }
+    val at=pose()
+    val targets=if(resume)(0 until task.getJSONArray("inspectionTargets").length()).map {task.getJSONArray("inspectionTargets").getString(it)}
+      else if(v.optString("scope")=="all")a.places.filter {it.kind=="room"}.sortedBy {it.pose.distance(at)}.map {it.id}
+      else listOf(requireNotNull(a.named(v.getString("target"))){"尚未登记这个房间或地点"}.id)
+    check(targets.isNotEmpty()){"尚未登记房间，可先在当前位置短巡查补图"}
+    val original=if(resume)task.getJSONObject("inspectionStart").let {HomePose(it.getDouble("x"),it.getDouble("y"),it.getDouble("yaw"))} else at
+    val done=if(resume)task.optJSONArray("inspectionDone") ?: JSONArray() else JSONArray()
+    val doneIds=(0 until done.length()).map {done.getString(it)}
+    HomeInspectionPlanner.plan(a,at,original,targets.filter {it !in doneIds},robotRadius())
+    if(resume){check(task.optInt("mapRevision")==a.revision){"地图已编辑，原任务需重新安排"};task.put("id",UUID.randomUUID().toString()).put("phase","PREPARING")}
+    else task=JSONObject().put("id",UUID.randomUUID().toString()).put("kind","inspection").put("phase","PREPARING")
+      .put("destination","__inspection__").put("destinationName","巡查出发位置").put("inspectionTargets",JSONArray(targets))
+      .put("inspectionStart",JSONObject(original.report())).put("inspectionDone",done).put("inspectionAction",v.optString("action","observe"))
+      .put("mapping",if(v.optString("action")=="rescan")"rescan" else "existing").put("mapRevision",a.revision).put("startedAt",System.currentTimeMillis())
+    if(!resume)task.put("inspectionId",task.getString("id"))
+    saveTask();try {motor.homeNavigate()}catch(e:Exception){task.put("phase","BLOCKED").put("reason",e.message);saveTask();throw e}
+    say("已有地点与路线，准备前往观察、保存照片，再返回出发位置。")
   }
   @Synchronized private fun launch() {
     val a=sync();HomeWorkflow.requireNavigation(task.optString("phase"),teaching)
@@ -228,8 +258,19 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
     val a=sync();check(task.optString("phase")=="PREPARING");val start=pose()
     if(task.optString("kind")=="patrol")return mapOf("taskId" to task.getString("id"),"mapId" to a.mapId,"revision" to a.revision,"poseRevision" to tracker.revision,
       "origin" to start.report(),"targetName" to "附近巡游起点","mode" to "patrol","patrolStart" to task.getJSONObject("patrolStart").toString(),
+      "inspectionId" to task.optString("inspectionId"),"inspectionAction" to task.optString("inspectionAction","observe"),"mapping" to task.optString("mapping","existing"),"roomName" to task.optString("roomName","当前位置"),
       "patrolTrail" to task.getJSONArray("patrolTrail").toString(),"patrolElapsedMs" to task.optLong("patrolElapsedMs"),"coverage" to coverage.toString(),
       "points" to listOf(start.report(),HomePose(start.x,start.y+.15).report()),"zones" to a.zones.map {mapOf("x" to it.x,"y" to it.y,"radius" to it.radius)},"robotRadius" to robotRadius())
+    if(task.optString("kind")=="inspection") {
+      val done=task.getJSONArray("inspectionDone");val ids=(0 until done.length()).map {done.getString(it)}
+      val targets=task.getJSONArray("inspectionTargets");val original=task.getJSONObject("inspectionStart").let {HomePose(it.getDouble("x"),it.getDouble("y"),it.getDouble("yaw"))}
+      val trip=HomeInspectionPlanner.plan(a,start,original,(0 until targets.length()).map {targets.getString(it)}.filter {it !in ids},robotRadius())
+      activeRoute=trip.points
+      return mapOf("taskId" to task.getString("id"),"mapId" to a.mapId,"revision" to a.revision,"poseRevision" to tracker.revision,"origin" to start.report(),
+        "targetName" to "巡查出发位置","mode" to "inspection","inspectionId" to task.getString("inspectionId"),"inspectionAction" to task.optString("inspectionAction","observe"),
+        "mapping" to task.optString("mapping","existing"),"coverage" to coverage.toString(),"inspectionDone" to ids,"inspectionStops" to trip.stops.map {mapOf("id" to it.id,"name" to it.name,"pose" to it.pose.report(),"arc" to it.arc)},
+        "points" to trip.points.map(HomePose::report),"zones" to a.zones.map {mapOf("x" to it.x,"y" to it.y,"radius" to it.radius)},"robotRadius" to robotRadius())
+    }
     val route=HomeRoutePlanner.plan(a,start,task.getString("destination"),robotRadius())
     activeRoute=route.points
     return mapOf("taskId" to task.getString("id"),"mapId" to a.mapId,"revision" to a.revision,"poseRevision" to tracker.revision,
@@ -239,7 +280,8 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
   @Synchronized fun progress(v: JSONObject) {
     check(v.getString("taskId")==task.optString("id")){"旧任务不能覆盖新任务"}
     if(task.optString("phase") in setOf("CANCELLED","PAUSED","PAUSED_RESTART"))return
-    if(task.optString("kind")=="patrol") {
+    if(v.has("inspectionDone")){val done=v.getJSONArray("inspectionDone");require(done.length()<=6);task.put("inspectionDone",done)}
+    if(task.optString("kind") in setOf("patrol","inspection")) {
       if(v.has("patrolTrail")) {
         val trail=v.getJSONArray("patrolTrail");require(trail.length() in 1..128)
         for(i in 0 until trail.length()){val p=trail.getJSONObject(i);HomePose(p.getDouble("x"),p.getDouble("y"),p.getDouble("yaw"))}

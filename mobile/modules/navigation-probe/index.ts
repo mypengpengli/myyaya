@@ -16,8 +16,10 @@ export type ContinuousStatus={token?:string;stopEpoch:number;phase?:string;reaso
 export type HomePose={x:number;y:number;yaw:number};
 export type HomeAtlas={mapId:string;revision:number;requiresReference:boolean;task?:string;places:Array<{id:string;name:string;room:string;kind:string;pose:HomePose}>;links:Array<{id:string;from:string;to:string;taught:boolean;enabled:boolean;points:HomePose[]}>;zones:Array<{id:string;name:string;x:number;y:number;radius:number}>};
 export type HomeStatus={atlas:Pick<HomeAtlas,"mapId"|"revision"|"requiresReference">|null;pose:HomePose|null;localized:boolean;poseRevision:number;connectionConfirmed:boolean;teaching:boolean;task:string;notice:string;localizationReason:string};
-export type HomePlan={taskId:string;mapId:string;revision:number;poseRevision:number;origin:HomePose;targetName:string;points:HomePose[];zones:Array<{x:number;y:number;radius:number}>;robotRadius:number;mode?:"patrol";patrolStart?:string;patrolTrail?:string;patrolElapsedMs?:number;coverage?:string};
+export type HomePlan={taskId:string;mapId:string;revision:number;poseRevision:number;origin:HomePose;targetName:string;points:HomePose[];zones:Array<{x:number;y:number;radius:number}>;robotRadius:number;mode?:"patrol"|"inspection";patrolStart?:string;patrolTrail?:string;patrolElapsedMs?:number;coverage?:string;inspectionId?:string;inspectionAction?:"observe"|"photo"|"rescan";mapping?:"existing"|"local-new"|"rescan";roomName?:string;inspectionStops?:Array<{id:string;name:string;pose:HomePose;arc:number}>;inspectionDone?:string[]};
 type Native = {
+  captureSceneFrame():Promise<{jpegUri:string;requestId:string;imageTimestampNs:number}>;
+  finishHomeSession(token:string):Promise<void>;
   homeStatus():Promise<HomeStatus>;
   homePlan():Promise<HomePlan>;
   homeCommand(data:string):Promise<HomeStatus>;
@@ -59,6 +61,8 @@ function getNative(): Native {
   return native ??= requireNativeModule<Native>("NavigationProbe");
 }
 export const getContinuousStatus=()=>getNative().continuousStatus();
+export const captureNativeSceneFrame=()=>getNative().captureSceneFrame();
+export const finishNativeHomeSession=(token:string)=>getNative().finishHomeSession(token);
 export const getHomeStatus=()=>getNative().homeStatus();
 export const getHomePlan=()=>getNative().homePlan();
 export const sendHomeCommand=(data:Record<string,unknown>)=>getNative().homeCommand(JSON.stringify(data));

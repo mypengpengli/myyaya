@@ -25,6 +25,19 @@ async function request(mapId:string|undefined,command:Record<string,unknown>,sig
   return text({status:"opening_home_setup",saved:false,moving:false,notice:"已打开家庭地图操作，需恢复实际位置并确认最低姿态；尚未记住新地点或到达目的地。"});
 }
 export function createHomeTools():AgentTool[] {return [
+  {name:"inspect_home",label:"正在安排房间巡查与返回",description:"用户要求逛房间、巡视各个房间、去厨房拍照再回来时使用。scope=current在当前位置短巡查补图；all依次巡视已登记可达房间；place指定真实地点。已有地图复用，不因建过图跳过观察。action=photo自动拍照保存再返回；observe记录见闻；rescan只补扫指定位置，不声称重建全屋。需定位和姿态准备，opening不是已发车。返回原出发位置后才汇报返回成功，无可用路线明确失败。",parameters:Type.Object({map_id:Type.Optional(Type.String()),scope:Type.Union([Type.Literal("current"),Type.Literal("all"),Type.Literal("place")]),action:Type.Optional(Type.Union([Type.Literal("observe"),Type.Literal("photo"),Type.Literal("rescan")])),place_id:Type.Optional(Type.String())}),execute:async(_id,p,signal)=>{
+    const a=p as {map_id?:string;scope:string;action?:string;place_id?:string};
+    if(a.scope==="place") {
+      const matches=(await listHomeAtlases()).filter(h=>(!a.map_id||h.mapId===a.map_id)&&h.places.some(n=>n.id===a.place_id));
+      if(matches.length!==1)throw new Error("请查询地图并提供准确地点编号，不能猜厨房位置");a.map_id=matches[0].mapId;
+    }
+    return request(a.map_id,{op:"inspect",scope:a.scope,action:a.action??"observe",target:a.place_id},signal);
+  }},
+  {name:"inspection_reports",label:"正在查询巡查照片与见闻",description:"查询手机持久保存的巡查任务、房间、观察时间、照片编号和是否返回。时间是过去观察时刻，不能说成现在仍然如此；分析失败或未拍到必须说明。默认query只读，不重新执行巡查。用户明确要求重试失败照片分析时operation=retry_analysis并传task_id，只重分析原照片，不发车或重拍。",parameters:Type.Object({task_id:Type.Optional(Type.String()),room:Type.Optional(Type.String({maxLength:40})),operation:Type.Optional(Type.Union([Type.Literal("query"),Type.Literal("retry_analysis")]))}),execute:async(_id,p)=>{
+    const a=p as {task_id?:string;room?:string;operation?:string};const m=await import("../inspection/inspection-runtime");
+    if(a.operation==="retry_analysis"){if(!a.task_id)throw new Error("请提供原巡查任务编号");m.getInspectionService().retryDescriptions(a.task_id);m.startInspectionMonitor();}
+    return text(m.getInspectionService().summaries(a.room).filter(t=>!a.task_id||t.id===a.task_id).slice(0,6).map(t=>({...t,observations:t.observations.slice(-4).map(o=>({...o,summary:o.summary.slice(0,600)}))})));
+  }},
   {name:"patrol_nearby",label:"正在准备附近短巡游",description:"用户说逛一圈、在附近转转然后回来时使用；只在起点80厘米半径内观察、补记新地面，最多2分钟并沿实际轨迹返回。已观察位置复用记录但仍实时避障；不是全屋自主建图。需要本地相机定位、底座连接和最低姿态确认，opening只代表准备。指定房间请用navigate_home，不能用本工具猜房间。",parameters:Type.Object({map_id:Type.Optional(Type.String())}),execute:async(_id,p,signal)=>request((p as {map_id?:string}).map_id,{op:"patrol"},signal)},
   {name:"home_maps",label:"正在查看家庭地图",description:"查询已保存家庭地图、房间/门口/停车点、实际带领路线和禁行区。savedTask是上次保存的记录，不表示现在正在移动。去客厅先查真实地点；没有路线不能编造已到达。",parameters:Type.Object({}),execute:async()=>text(await homeSummaries())},
   {name:"navigate_home",label:"正在准备前往目的地",description:"用户要求去已登记房间/地点时，选择真实家庭地图与地点编号，打开定位准备，随后由本地导航执行带领路线和避障。返回opening不是已经发车或到达；需要先带领登记，不能用robot_action循环代替。",parameters:Type.Object({map_id:Type.Optional(Type.String()),place_id:Type.String()}),execute:async(_id,p,signal)=>{

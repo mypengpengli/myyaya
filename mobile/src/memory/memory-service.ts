@@ -94,6 +94,10 @@ export async function getLocalConversationMessages(sessionId: string): Promise<C
   await ensureLocalMemoryReady();
   return localMemoryDatabase.getConversationMessages(sessionId);
 }
+export async function getRecentConversationMessages(): Promise<ChatMessage[]> {
+  await ensureLocalMemoryReady();
+  return localMemoryDatabase.recentConversationMessages();
+}
 
 export async function exportLocalMemoryBackup(): Promise<LocalMemoryBackupV1> {
   return localMemoryDatabase.exportBackup();

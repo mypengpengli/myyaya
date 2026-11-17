@@ -4,7 +4,8 @@ import { readNewApiConfig } from "./newapi-config";
 import { createNewApiStream } from "./newapi-stream";
 import { recordDiagnosticEvent } from "../diagnostics/diagnostic-log";
 import { phoneTools } from "./phone-tools";
-import { mirrorSessionMessage, mirrorSessionTouch } from "../memory/memory-service";
+import { mirrorSessionMessage, mirrorSessionTouch, getRecentConversationMessages } from "../memory/memory-service";
+import { boundedRecentDialogue } from "../memory/recent-dialogue";
 import { currentHermesTasks } from "../hermes/task-runtime";
 import { listArtifacts } from "../artifacts/artifact-store";
 import { readArtifactFocus } from "../artifacts/artifact-focus";
@@ -22,6 +23,7 @@ let agent: CompanionAgent | undefined;
 let binding = "";
 let sessionId = "";
 let currentFeedback: ConversationReporter | undefined;
+let recoveredDialogue = "";
 const taskNotices = new Map<string, string>();
 export function queueCompanionTaskResult(id: string, text: string) {
   taskNotices.set(id, text.slice(0, 10_000));
@@ -51,6 +53,7 @@ export async function replyToCompanion(text: string, signal: AbortSignal, feedba
     if (!config) throw new Error("请在菜单的模型连接中填写中转站和 API Key");
     const identity = JSON.stringify(config); // In memory only. Never logged or persisted outside SecureStore.
     if (!agent || binding !== identity) {
+      recoveredDialogue = await getRecentConversationMessages().then(boundedRecentDialogue).catch(()=>JSON.stringify({unavailable:true,notice:"近期聊天暂时无法恢复，不能声称记得旧问答"}));
       agent?.abort(); binding = identity;
       agent = new CompanionAgent(config, createNewApiStream(config, fetch, (value) => {
         recordDiagnosticEvent("llm", "chat-http", { ...value });
@@ -67,7 +70,8 @@ export async function replyToCompanion(text: string, signal: AbortSignal, feedba
     let skills: string;
     try { skills = prepareSkillContext(text, phoneTools.map((tool) => tool.name)); }
     catch { skills = JSON.stringify({ unavailable: true, notice: "本轮技能库暂时无法读取；不能声称已加载或记得技能步骤，其他手机工具仍可正常使用" }); }
-    agent.restoreContext(restoredCompanionContext(tasks, listArtifacts(), media, readArtifactFocus(), resultPresentation.getSnapshot().active?.id), skills);
+    const inspections=await import("../inspection/inspection-runtime").then(async m=>(await import("../inspection/inspection-service")).inspectionContext(m.getInspectionService().list())).catch(()=>({unavailable:true}));
+    agent.restoreContext(JSON.stringify({tasksAndMedia:JSON.parse(restoredCompanionContext(tasks, listArtifacts(), media, readArtifactFocus(), resultPresentation.getSnapshot().active?.id)),inspections}), skills, recoveredDialogue);
     for (const [id, notice] of taskNotices) if (tasks.some((task) => task.id === id) || media.some((job) => `media:${job.id}` === id)) agent.appendBackgroundResult(notice);
     taskNotices.clear();
     mirrorSessionMessage(sessionId, { role: "user", content: text });

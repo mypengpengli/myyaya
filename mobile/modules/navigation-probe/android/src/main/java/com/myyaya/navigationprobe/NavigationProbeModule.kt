@@ -124,6 +124,16 @@ class NavigationProbeModule : Module() {
       if(screen==null || activity==null) promise.reject("ERR_REFERENCE_SCREEN","请打开教路线相机并开始扫描",null)
       else activity.runOnUiThread { screen.analyzeUprightReference(id,height,width,promise) }
     }
+    AsyncFunction("captureSceneFrame") { promise: Promise ->
+      val screen=routeScreen;val activity=appContext.currentActivity
+      if(screen==null || activity==null)promise.reject("ERR_SCENE_CAMERA","请先打开导航相机",null)
+      else activity.runOnUiThread {screen.captureScene(promise)}
+    }
+    AsyncFunction("finishHomeSession") { token: String,promise: Promise ->
+      val activity=appContext.currentActivity
+      if(gateway?.token!=token || gateway?.continuous?.pilot?.active==true || activity==null)promise.reject("ERR_HOME_ACTIVE","当前导航尚未停车或会话已变化",null)
+      else activity.runOnUiThread {if(gateway?.token==token && gateway?.continuous?.pilot?.active!=true && gateway?.continuous?.report()?.get("stopAcknowledged")==true){routeScreen?.finish();promise.resolve(null)}else promise.reject("ERR_HOME_CHANGED","导航会话已变化或未确认停车",null)}
+    }
     AsyncFunction("captureMonocularFrame") { promise: Promise ->
       val screen=routeScreen;val activity=appContext.currentActivity
       if(screen==null || activity==null) promise.reject("ERR_MONOCULAR_SCREEN","请打开教路线相机并开始扫描",null)

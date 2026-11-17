@@ -37,6 +37,7 @@ export default function CompanionMenu() {
     { title: "小丫的技能", detail: "已学会的做法与步骤", icon: "◇", path: "/skills" },
     { title: "作品与录像", detail: "查看或重新播放", icon: "▧", path: "/artifacts" },
     { title: "房间地图", detail: "扫描、地点与参照定位", icon: "⌖", path: "/room-map" },
+    { title: "巡查见闻", detail: "房间、照片与观察时间", icon: "◉", path: "/inspection-reports" },
     { title: "设置", detail: "外观、服务与更新", icon: "⚙", path: "/settings" },
     { title: "任务记录", detail: "查看进度与结果", icon: "▤", path: "/tasks" },
   ];

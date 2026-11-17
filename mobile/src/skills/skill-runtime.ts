@@ -18,7 +18,7 @@ const successfulTools = new Set<string>(), loaded = new Set<string>();
 export function observeSkillTool(name: string, isError: boolean, result?: unknown): void {
   if (isError || name.startsWith("skill_")) return;
   // Accepted asynchronous work is not a successful completed workflow.
-  if (["create_media", "hermes_submit", "hermes_continue", "record_video", "patrol_nearby"].includes(name)) return;
+  if (["create_media", "hermes_submit", "hermes_continue", "record_video", "patrol_nearby", "inspect_home"].includes(name)) return;
   if ((result as { details?: { cancelled?: boolean } } | undefined)?.details?.cancelled) return;
   const parts = (result as { content?: { type: string; text?: string }[] } | undefined)?.content;
   let value: unknown;
@@ -26,6 +26,7 @@ export function observeSkillTool(name: string, isError: boolean, result?: unknow
   if (value && typeof value === "object" && ((value as { cancelled?: boolean }).cancelled || (value as { saved?: boolean }).saved === false)) return;
   if (name === "media_status" && Array.isArray(value) && value.some((job) => job.status === "completed" && job.artifactId)) successfulTools.add("create_media");
   if (name === "hermes_status" && Array.isArray(value) && value.some((task) => task.status === "completed")) successfulTools.add("hermes_submit");
+  if (name === "inspection_reports" && Array.isArray(value) && value.some(task=>task.phase==="completed" && task.returned===true && task.observations?.some((o:{artifactId?:string})=>o.artifactId))) successfulTools.add("inspect_home");
   if (name === "stop_recording" && (value as { saved?: boolean } | undefined)?.saved === true) successfulTools.add("record_video");
   successfulTools.add(name);
 }
