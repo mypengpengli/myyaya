@@ -88,14 +88,14 @@ export async function runHomeMission() {
     try {
     await stopOwn(failure || "家庭任务已结束").catch(()=>{});
     let stopped=false;
-    for(let i=0;i<15;i++){const status=await getContinuousStatus().catch(()=>null);if(status?.stopAcknowledged===true || !token){stopped=true;break;}await new Promise(r=>setTimeout(r,100));}
+    for(let i=0;i<15;i++){const status=await getContinuousStatus().catch(()=>null);if(!token || status?.token===token && status.stopAcknowledged===true){stopped=true;break;}await new Promise(r=>setTimeout(r,100));}
     prepared?.finish();await releaseContinuousVision().catch(()=>{});
-    if(inspection){const home=await getHomeStatus().catch(()=>null);const phase=home?JSON.parse(home.task).phase:"";inspection.finish(completed && stopped,failure || "已返回出发位置并停车",phase==="CANCELLED");}
+    if(inspection){const home=await getHomeStatus().catch(()=>null);const phase=home?JSON.parse(home.task).phase:"";inspection.finish(completed && stopped,completed && stopped?"已返回出发位置并停车":failure || "尚未确认停车或返回",phase==="CANCELLED");}
     if(taskId)await publishHomeProgress({taskId,phase:completed && stopped?"COMPLETED":"BLOCKED",reason:!stopped?"已请求停车，尚未收到回执":failure || "已到达并停车"}).catch(()=>{});
     if(taskId)await import("react-native").then(async n=>{
       if(n.AppState.currentState!=="active")return;
       const {default:voice}=await import("../../modules/vosk-command-recognizer");
-      await voice.speakChinese(completed && stopped?inspection?"已经返回出发位置，照片已记录，正在整理见闻。":`已经到达${targetName}`:`导航已暂停，${failure || "请查看屏幕提示"}`);
+      await voice.speakChinese(completed && stopped?inspection?"已经返回出发位置，观察点结果已记录，正在整理。":`已经到达${targetName}`:`导航已暂停，${failure || "请查看屏幕提示"}`);
     }).catch(()=>{});
     } finally {active=false;}
   }

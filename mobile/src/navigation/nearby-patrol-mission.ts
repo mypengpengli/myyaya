@@ -87,7 +87,7 @@ export async function runNearbyPatrolMission(initial: HomePlan) {
     for(let i=0;token && i<15;i++){const s=await getContinuousStatus().catch(()=>null);if(s?.token===token && s.stopAcknowledged===true){stopped=true;break;}await new Promise(r=>setTimeout(r,100));}
     prepared?.finish();await releaseContinuousVision().catch(()=>{});
     const success=completed && stopped;
-    if(inspection){const home=await getHomeStatus().catch(()=>null);const phase=home?JSON.parse(home.task).phase:"";inspection.finish(success,failure || "已返回出发位置并停车",phase==="CANCELLED");}
+    if(inspection){const home=await getHomeStatus().catch(()=>null);const phase=home?JSON.parse(home.task).phase:"";inspection.finish(success,success?"已返回出发位置并停车":failure || "尚未确认停车或返回",phase==="CANCELLED");}
     await publishHomeProgress({taskId:initial.taskId,phase:success?"COMPLETED":"BLOCKED",...checkpoint,
       reason:success?"附近短巡游已返回起点并停车，不代表整个房间探索完毕":!stopped?"已请求停车，尚未收到回执":failure}).catch(()=>{});
     await import("react-native").then(async n=>{
