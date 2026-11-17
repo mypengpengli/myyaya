@@ -42,16 +42,16 @@ export function parseChineseRobotCommand(text: string): ChineseRobotCommand | nu
 export class ChineseCommandGate {
   private until = 0;
   reset() { this.until = 0; }
-  open(now: number) { this.until = now + 15_000; }
+  open(now: number) { this.until = now + 60_000; }
   accept(text: string, partial: boolean, now: number): { command?: ChineseRobotCommand; wake?: boolean } {
     // STOP bypasses wake, endpoint and conversation windows. Other partials do nothing.
     if (isChineseStop(text)) { this.until = 0; return { command: { kind: "stop" } }; }
     if (partial) return {};
     const addressed = splitChineseWake(text);
-    if (addressed.addressed) this.until = now + 15_000;
+    if (addressed.addressed) this.open(now);
     if (now >= this.until) return {};
     const command = parseChineseRobotCommand(addressed.command);
-    if (command) this.until = now + 15_000;
+    if (command) this.open(now);
     return { ...(addressed.addressed ? { wake: true } : {}), ...(command ? { command } : {}) };
   }
 }

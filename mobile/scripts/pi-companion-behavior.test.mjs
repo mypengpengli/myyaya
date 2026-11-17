@@ -13,7 +13,7 @@ function load(path, mocks, clock = { setTimeout, clearTimeout }) {
   return module.exports;
 }
 const { createNewApiStream, toNewApiMessages } = load("src/agent/newapi-stream.ts", { "./pi-mobile-compat": compat });
-const { CompanionAgent } = load("src/agent/companion-agent.ts", { "@earendil-works/pi-agent-core": core });
+const { CompanionAgent } = load("src/agent/companion-agent.ts", { "@earendil-works/pi-agent-core": core, "../voice/conversation-feedback": load("src/voice/conversation-feedback.ts", {}) });
 const config = { version: 1, baseUrl: "https://example.invalid/v1", apiKey: "test-only-not-a-real-key", model: "test-model" };
 function sse(chunks, truncate = false) {
   const wire = chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\r\n\r\n`).join("") + (truncate ? "" : "data: [DONE]\n\n");
@@ -106,8 +106,8 @@ const gradual = new CompanionAgent(config, idleAdapter.createNewApiStream(config
   return new Response(new ReadableStream({ start(controller) { nativeController = controller; } }));
 }), [], () => {});
 const slowReply = gradual.reply("慢慢回复", new AbortController().signal); await flush();
-advance(50_000); nativeController.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(choice({ content: "持续" }))}\n\n`)); await flush();
-advance(50_000); assert.equal(requestSignal.aborted, false, "an active reply can last longer than sixty seconds");
+advance(150_000); nativeController.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(choice({ content: "持续" }))}\n\n`)); await flush();
+advance(150_000); assert.equal(requestSignal.aborted, false, "an active reply can last longer than the old three-minute absolute cap");
 nativeController.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(choice({ content: "回复" }))}\n\ndata: ${JSON.stringify(choice({}, "stop"))}\n\n`));
 assert.equal(await slowReply, "持续回复"); assert.equal(timers.size, 0);
 assert.equal(requestSignal.aborted, true, "a completed open stream releases the actual native request, not only its JS reader");
@@ -149,11 +149,11 @@ for (const phase of ["request", "body"]) {
     ? new Promise(() => {})
     : new Response(new ReadableStream({ start() {}, cancel() { return new Promise(() => {}); } }), {
       headers: { "content-type": "text/event-stream", "x-request-id": "server-idle-fixture" },
-    }), (value) => diagnostics.push(value)), [], () => {});
+    }), (value) => diagnostics.push(value), { maxAttempts: 1 }), [], () => {});
   const response = idle.reply("bounded wait", new AbortController().signal);
   // Register the rejection handler before advancing the virtual deadline.
   const rejected = assert.rejects(response, phase === "request" ? /等待模型响应超时/ : /接收模型回复超时/);
-  await flush(); advance(60_001); await flush(); await rejected;
+  await flush(); advance(180_001); await flush(); await rejected;
   assert.equal(diagnostics.at(-1).reason, "idle-timeout");
   assert.equal(diagnostics.at(-1).receivedBytes, 0);
   assert.equal(diagnostics.at(-1).status, phase === "request" ? undefined : 200);
@@ -173,4 +173,25 @@ assert.match(await receiptAgent.reply("generate once", new AbortController().sig
 assert.equal(submissions, 1);
 await assert.rejects(receiptAgent.reply("an unrelated next turn", new AbortController().signal), /HTTP 502/);
 assert.equal(submissions, 1, "a final model failure never replays an accepted media tool");
-console.log("Actual Pi agent + NewAPI: fragmented UTF-8 SSE, tool replay/validation, public progress, truncation, HTTP errors and cancellation: PASS");
+// A transient failure retries the inference, not the complete agent turn or its side effects.
+let retryRequests = 0, retryTools = 0;
+const retryEvents = [], publicFeedback = [];
+const retryAgent = new CompanionAgent(config, createNewApiStream(config, async () => {
+  retryRequests++;
+  if (retryRequests === 1 || retryRequests === 3) return new Response("private", { status: 503 });
+  if (retryRequests === 2) return sse([choice({ tool_calls: [{ index: 0, id: "once", function: { name: "one_action", arguments: "{}" } }] }), choice({}, "tool_calls")]);
+  return sse([choice({ content: "已经完成。" }), choice({}, "stop")]);
+}, v => retryEvents.push(v), { retryDelayMs: 0 }), [{ name: "one_action", label: "正在拍照", description: "fixture", parameters: Type.Object({}), execute: async () => {
+  retryTools++; return { content: [{ type: "text", text: "真实执行成功" }], details: {} };
+} }], () => {});
+assert.equal(await retryAgent.reply("执行一次", new AbortController().signal, v => publicFeedback.push(v)), "已经完成。");
+assert.equal(retryRequests, 4); assert.equal(retryTools, 1); assert.equal(retryEvents.filter(v => v.stage === "retry").length, 2);
+assert.ok(publicFeedback.some(v => v.kind === "stage" && v.text === "正在拍照。"));
+assert.ok(publicFeedback.some(v => v.kind === "assistant" && v.text === "已经完成。"));
+let partialRequests = 0;
+const partialAgent = new CompanionAgent(config, createNewApiStream(config, async () => { partialRequests++; return sse([choice({ content: "已读出的半句" })], true); }, undefined, { retryDelayMs: 0 }), [], () => {});
+await assert.rejects(partialAgent.reply("不能重读", new AbortController().signal), /中断/); assert.equal(partialRequests, 1);
+const cancelRetry = new AbortController(); let cancelRequests = 0;
+const cancelAgent = new CompanionAgent(config, createNewApiStream(config, async () => { cancelRequests++; return new Response("private", { status: 429 }); }, value => { if (value.stage === "retry") cancelRetry.abort(); }), [], () => {});
+await assert.rejects(cancelAgent.reply("中止重试", cancelRetry.signal), /停止/); assert.equal(cancelRequests, 1);
+console.log("Actual Pi agent + NewAPI: UTF-8 SSE, streaming public feedback, inference-only retries, no duplicate tools, long replies, HTTP errors and cancellation: PASS");

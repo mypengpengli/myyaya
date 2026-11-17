@@ -73,7 +73,7 @@ const { Type } = await import("typebox");
 const compat = Object.assign({}, ...await Promise.all(["transcript", "event-stream", "identity", "json-parse", "validation"]
   .map((name) => import(`@earendil-works/pi-ai/utils/${name}`))));
 const { webSearchTool } = load("src/search/web-search-tool.ts", { typebox: { Type }, "./tavily-search": search });
-const { CompanionAgent } = load("src/agent/companion-agent.ts", { "@earendil-works/pi-agent-core": core });
+const { CompanionAgent } = load("src/agent/companion-agent.ts", { "@earendil-works/pi-agent-core": core, "../voice/conversation-feedback": load("src/voice/conversation-feedback.ts", {}) });
 const { createNewApiStream } = load("src/agent/newapi-stream.ts", { "./pi-mobile-compat": compat });
 let requests = 0; const progress = [];
 const stream = createNewApiStream({ baseUrl: "https://example.invalid/v1", apiKey: "model-test-only" }, async (_url, init) => {

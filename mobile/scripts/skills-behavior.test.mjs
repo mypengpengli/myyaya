@@ -27,7 +27,7 @@ function tools() {
 }
 let allTools = tools(), available = allTools.map((tool) => tool.name);
 assert.throws(() => runtime.getSkillService().save(base, available, []), /成功调用依据/);
-const { CompanionAgent } = load("src/agent/companion-agent.ts", { "@earendil-works/pi-agent-core": core });
+const { CompanionAgent } = load("src/agent/companion-agent.ts", { "@earendil-works/pi-agent-core": core, "../voice/conversation-feedback": load("src/voice/conversation-feedback.ts", {}) });
 const { createNewApiStream } = load("src/agent/newapi-stream.ts", { "./pi-mobile-compat": compat });
 const config = { version: 1, baseUrl: "https://example.test/v1", apiKey: "test-only-fixture", model: "test-model" };
 function response(call, args) {

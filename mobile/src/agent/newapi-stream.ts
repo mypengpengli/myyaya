@@ -5,11 +5,22 @@ import type { NewApiConfig } from "./newapi-config";
 
 type Transport = (url: string, init: RequestInit) => Promise<Response>;
 export type ChatHttpDiagnostic = {
-  clientRequestId: string; startedAt: string; stage: "request" | "headers" | "receiving" | "complete" | "error";
+  clientRequestId: string; startedAt: string; stage: "request" | "headers" | "receiving" | "complete" | "error" | "retry";
   elapsedMs: number; requestBytes: number; receivedBytes: number; dataEvents: number; pendingChars: number;
   completionSeen: boolean; status?: number; requestId?: string; contentType?: string;
   headersMs?: number; firstByteMs?: number; idleMs?: number; reason?: string;
+  attempt?: number;
 };
+export const CHAT_WAIT_POLICY = { idleMs: 180_000, totalMs: 900_000, maxAttempts: 3, retryDelayMs: 1000 };
+async function retryPause(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw new Error("已停止");
+  await new Promise<void>((resolve, reject) => {
+    const abort = () => { clearTimeout(timer); signal?.removeEventListener("abort", abort); reject(new Error("已停止")); };
+    const timer = setTimeout(() => { signal?.removeEventListener("abort", abort); resolve(); }, ms);
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+  });
+}
 let requestSequence = 0;
 const textOf = (content: unknown): string => typeof content === "string" ? content :
   Array.isArray(content) ? content.filter((item) => item.type === "text").map((item) => item.text).join("\n") : "";
@@ -36,13 +47,18 @@ export function toNewApiMessages(messages: Message[]): Record<string, unknown>[]
 }
 
 /** Stream protocol adapter only. Tool scheduling and validation belong to Pi. */
-export function createNewApiStream(config: NewApiConfig, transport: Transport, report?: (value: ChatHttpDiagnostic) => void): StreamFn {
+export function createNewApiStream(config: NewApiConfig, transport: Transport, report?: (value: ChatHttpDiagnostic) => void,
+  waitPolicy: Partial<typeof CHAT_WAIT_POLICY> = {}): StreamFn {
+  const policy = { ...CHAT_WAIT_POLICY, ...waitPolicy };
   return (model, context, options) => {
     const stream = createAssistantMessageEventStream();
     const output: AssistantMessage = { role: "assistant", content: [], api: model.api, provider: model.provider,
       model: model.id, timestamp: Date.now(), stopReason: "pending", usage: { input: 0, output: 0,
         cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
     void (async () => {
+      let streamStarted = false;
+      for (let attempt = 1; attempt <= policy.maxAttempts; attempt++) {
+      let retry = false;
       const started = Date.now(), clientRequestId = `myyaya-chat-${started.toString(36)}-${++requestSequence}`;
       let status: number | undefined, requestId: string | undefined, contentType: string | undefined;
       let headersMs: number | undefined, firstByteMs: number | undefined, lastByteAt = started;
@@ -51,7 +67,7 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport, r
       const diagnostic = (stage: ChatHttpDiagnostic["stage"], reason?: string) => {
         try { report?.({ clientRequestId, startedAt: new Date(started).toISOString(), stage, elapsedMs: Date.now() - started,
           requestBytes, receivedBytes, dataEvents, pendingChars: pending.length, completionSeen: finished,
-          status, requestId, contentType, headersMs, firstByteMs, idleMs: Date.now() - lastByteAt, reason }); } catch { /* Observation cannot break a reply. */ }
+          status, requestId, contentType, headersMs, firstByteMs, idleMs: Date.now() - lastByteAt, reason, attempt }); } catch { /* Observation cannot break a reply. */ }
       };
       const controller = new AbortController();
       const abort = () => controller.abort();
@@ -60,9 +76,9 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport, r
       // A long but active reply must not be aborted just because its total
       // duration exceeds one minute. Keep both an idle and an overall bound.
       const expireIdle = () => { timeoutReason = "idle-timeout"; abort(); };
-      let timeout = setTimeout(expireIdle, 60_000);
-      const overallTimeout = setTimeout(() => { timeoutReason = "total-timeout"; abort(); }, 180_000);
-      const received = () => { lastByteAt = Date.now(); clearTimeout(timeout); timeout = setTimeout(expireIdle, 60_000); };
+      let timeout = setTimeout(expireIdle, policy.idleMs);
+      const overallTimeout = setTimeout(() => { timeoutReason = "total-timeout"; abort(); }, policy.totalMs);
+      const received = () => { lastByteAt = Date.now(); clearTimeout(timeout); timeout = setTimeout(expireIdle, policy.idleMs); };
       let rejectAborted: (() => void) | undefined;
       const aborted = new Promise<never>((_, reject) => {
         rejectAborted = () => reject(new Error("request-aborted"));
@@ -90,7 +106,7 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport, r
         received();
         if (response.url && new URL(response.url).origin !== new URL(config.baseUrl).origin) throw new Error("模型地址发生跨站跳转");
         if (!response.body) throw new Error("模型未返回流式响应");
-        stream.push({ type: "start", partial: output });
+        if (!streamStarted) { streamStarted = true; stream.push({ type: "start", partial: output }); }
         reader = response.body.getReader();
         const decoder = new TextDecoder();
         let textIndex = -1, streamDone = false;
@@ -182,7 +198,11 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport, r
         output.errorMessage = output.stopReason === "aborted" ? "已停止" : timeoutReason ? status === undefined ? "手机等待模型响应超时，请稍后重试" : "手机接收模型回复超时，请稍后重试" : error instanceof Error &&
           /^(模型|请填写)/.test(error.message) ? error.message : "模型连接失败或超时，请检查网络及模型设置";
         diagnostic("error", options?.signal?.aborted ? "user-abort" : timeoutReason ?? (status && status >= 400 ? "http-error" : "incomplete-response"));
-        stream.push({ type: "error", reason: output.stopReason, error: output });
+        // Replay only the current unfinished inference, never Agent.prompt or an executed tool.
+        retry = !options?.signal?.aborted && attempt < policy.maxAttempts && output.content.length === 0 &&
+          (!!timeoutReason || status === undefined || status === 408 || status === 429 || status >= 500 || status === 200);
+        if (retry) diagnostic("retry", timeoutReason ?? "transient-request-failure");
+        else stream.push({ type: "error", reason: output.stopReason, error: output });
       } finally {
         clearTimeout(timeout); clearTimeout(overallTimeout); options?.signal?.removeEventListener("abort", abort);
         if (rejectAborted) controller.signal.removeEventListener("abort", rejectAborted);
@@ -191,8 +211,17 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport, r
         controller.abort();
         // Expo's native cancellation can wait on the network. Closing the Pi
         // event stream must not depend on that acknowledgement.
-        void reader?.cancel().catch(() => {}); stream.end(output);
+        void reader?.cancel().catch(() => {});
       }
+      if (!retry) break;
+      try { await retryPause(policy.retryDelayMs * 2 ** (attempt - 1), options?.signal); }
+      catch {
+        output.stopReason = "aborted"; output.errorMessage = "已停止";
+        stream.push({ type: "error", reason: "aborted", error: output }); break;
+      }
+      output.stopReason = "pending"; delete output.errorMessage;
+      }
+      stream.end(output);
     })();
     return stream;
   };

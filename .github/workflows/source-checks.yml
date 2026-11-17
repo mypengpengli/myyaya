@@ -32,3 +32,4 @@ jobs:
       - run: corepack pnpm run test:head-observation
       - run: corepack pnpm run navigation:robot-test && corepack pnpm run navigation:goal-test && corepack pnpm run motion:safety-test && corepack pnpm run ble:lifecycle-test && corepack pnpm run ble:adoption-test && corepack pnpm run ble:foreground-retry-test && corepack pnpm run vosk:emergency-stop-test && corepack pnpm run motion:cliff-test && corepack pnpm run realtime:pcm-types-test
       - run: corepack pnpm run navigation:home-test
+      - run: corepack pnpm run voice:turn-test

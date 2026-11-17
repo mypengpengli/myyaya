@@ -18,7 +18,8 @@ const successfulTools = new Set<string>(), loaded = new Set<string>();
 export function observeSkillTool(name: string, isError: boolean, result?: unknown): void {
   if (isError || name.startsWith("skill_")) return;
   // Accepted asynchronous work is not a successful completed workflow.
-  if (["create_media", "hermes_submit", "hermes_continue", "record_video"].includes(name)) return;
+  if (["create_media", "hermes_submit", "hermes_continue", "record_video", "patrol_nearby"].includes(name)) return;
+  if ((result as { details?: { cancelled?: boolean } } | undefined)?.details?.cancelled) return;
   const parts = (result as { content?: { type: string; text?: string }[] } | undefined)?.content;
   let value: unknown;
   try { value = JSON.parse(parts?.find((part) => part.type === "text")?.text ?? "null"); } catch { /* Some synchronous tools return plain text. */ }

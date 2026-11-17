@@ -18,7 +18,9 @@ export async function runHomeMission() {
   const started=Date.now();
   try {
     const owner=getNavigationControlOwner();if(!owner)throw new Error("请打开家庭导航");
-    const initial=await getHomePlan();taskId=initial.taskId;
+    const initial=await getHomePlan();
+    if(initial.mode==="patrol"){await (await import("./nearby-patrol-mission")).runNearbyPatrolMission(initial);return;}
+    taskId=initial.taskId;
     const before=await getContinuousStatus(),settings=await getNavigationProbeStatus(),g=settings.navigationGeometry;
     if(!g || !settings.measuredCameraHeightMeters)throw new Error("请填写车身和镜头标定");
     await prepareHomeCapture();

@@ -17,6 +17,7 @@ import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import org.json.JSONObject
+import org.json.JSONArray
 import kotlin.math.*
 
 /** Semantic graph/editor and live home coordinates. Motor timing stays in the existing owner. */
@@ -41,6 +42,7 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
   private var currentMap=""
   private var selected: String?=null
   private var activeRoute=emptyList<HomePose>()
+  private var coverage=JSONArray()
   private lateinit var label: TextView
   private lateinit var view: HomeView
   private var notice="先建立家庭地图、确认最低姿态，再带领经过房间和门口。"
@@ -53,16 +55,17 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
   @Synchronized private fun sync(): HomeAtlas {
     val m=requireNotNull(metadata()) {"请先新建或打开家庭地图"}
     if(currentMap!=m.id) {
-      stop("切换家庭地图");if(tracker.mapIdentifier!=m.id)tracker.reset();currentMap=m.id;atlas=null;loadError=null
+      stop("切换家庭地图");if(tracker.mapIdentifier!=m.id)tracker.reset();currentMap=m.id;atlas=null;loadError=null;coverage=JSONArray()
       runCatching {store.load(m.id)}.onSuccess {atlas=it ?: HomeAtlas(m.id,referenceKey(m))}
         .onFailure {loadError="家庭路线文件损坏，请导出记录后恢复备份：${it.message}"}
+      runCatching {store.coverage(m.id)}.getOrNull()?.let {saved->if(saved.optString("referenceKey")==referenceKey(m))coverage=saved.optJSONArray("cells") ?: JSONArray()}
       task=runCatching {store.task(m.id)}.getOrElse {JSONObject().put("phase","RECOVERY_REQUIRED").put("reason","旧任务无法读取，请导出记录；家庭地图仍可使用")} ?: JSONObject().put("phase","IDLE")
       if(task.optString("phase") in setOf("RUNNING","PREPARING","PAUSED","WAITING_LOCALIZATION")) {
         task.put("phase","PAUSED_RESTART").put("reason","已恢复旧任务；请重新定位并选择继续，不会自动发车")
       }
     }
     check(loadError==null){loadError!!};val a=requireNotNull(atlas)
-    if(a.referenceKey!=referenceKey(m) && a.places.isEmpty()) {atlas=HomeAtlas(m.id,referenceKey(m));return atlas!!}
+    if(a.referenceKey!=referenceKey(m) && a.places.isEmpty()) {atlas=HomeAtlas(m.id,referenceKey(m));coverage=JSONArray();return atlas!!}
     check(a.referenceKey==referenceKey(m)) {"参照图或安装标定已变化，请重新建立家庭路线"};return a
   }
   @Synchronized private fun persist(a: HomeAtlas) {store.save(a);atlas=a;activeRoute=emptyList();saveMap();render()}
@@ -82,6 +85,7 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
     row("编辑地图" to {editMenu()},"暂停" to {command(JSONObject().put("op","pause"))},
       "继续" to {command(JSONObject().put("op","resume"))},"取消任务" to {command(JSONObject().put("op","cancel"))})
     row("恢复定位" to {command(JSONObject().put("op","relocalize"))},"导出导航记录" to {export()})
+    row("附近逛一圈再回来" to {command(JSONObject().put("op","patrol"))})
     addView(TextView(activity).apply {text="带领时保持手机安装和最低高度；按住方向键行驶，松开停车。每次长按约3秒，再按可继续。";setTextColor(Color.LTGRAY);textSize=11f})
     addView(LinearLayout(activity).apply {
       for((title,direction) in listOf("左转" to "left","朝镜头走" to "back","右转" to "right"))addView(Button(activity).apply {
@@ -179,13 +183,33 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
         persist(a.copy(revision=a.revision+1,zones=a.zones+HomeZone(name=v.optString("name","禁行区"),x=at.x,y=at.y,radius=v.optDouble("radius",.15))))}
       "remove_zone"->{stop("修改禁行区");val a=sync();val id=v.getString("id");check(a.zones.any {it.id==id}){"没有这个禁行区"};persist(a.copy(revision=a.revision+1,zones=a.zones.filter {it.id!=id}))}
       "go"->{check(!teaching){"请先结束带领"};pendingTarget=v.getString("target");launch()}
+      "patrol"->launchPatrol(false)
       "pause"->{stop("用户暂停");task.put("phase","PAUSED");saveTask()}
       "cancel"->{stop("用户取消");task.put("phase","CANCELLED");saveTask();pendingTarget=""}
-      "resume"->{check(task.has("destination") && task.optString("phase") in setOf("PAUSED","PAUSED_RESTART","WAITING_LOCALIZATION","BLOCKED","FAILED")){"没有可继续的任务"};pendingTarget=task.getString("destination");launch()}
+      "resume"->{check(task.has("destination") && task.optString("phase") in setOf("PAUSED","PAUSED_RESTART","WAITING_LOCALIZATION","BLOCKED","FAILED")){"没有可继续的任务"};if(task.optString("kind")=="patrol")launchPatrol(true) else {pendingTarget=task.getString("destination");launch()}}
       "relocalize"->{stop("重新定位");tracker.reset();say("请让后摄看见原位置的固定参照图；未恢复定位不会发车")}
       else->error("不支持的家庭地图操作")
     }
     render();return status()
+  }
+  @Synchronized private fun launchPatrol(resume: Boolean) {
+    val a=sync();HomeWorkflow.requireNavigation(task.optString("phase"),teaching)
+    check(!motor.busy && motor.continuous?.pilot?.active!=true){"上一动作尚未停车，请稍后重试"}
+    check(confirmedConnection==motor.connectionRevision && motor.isConnected()){ "请确认连接和最低姿态" }
+    val at=pose()
+    store.save(a);saveMap()
+    val saved=runCatching {store.coverage(a.mapId)}.getOrNull()
+    coverage=if(saved?.optString("referenceKey")==a.referenceKey)saved.optJSONArray("cells") ?: JSONArray() else JSONArray()
+    if(resume) {
+      check(task.optInt("mapRevision")==a.revision){"地图已编辑，请重新开始附近巡游"}
+      val start=task.getJSONObject("patrolStart");check(at.distance(HomePose(start.getDouble("x"),start.getDouble("y")))<=.92){"离原巡游起点过远，请重新定位"}
+      task.put("id",UUID.randomUUID().toString()).put("phase","PREPARING")
+    } else task=JSONObject().put("id",UUID.randomUUID().toString()).put("kind","patrol").put("phase","PREPARING")
+      .put("destination","__patrol__").put("destinationName","附近巡游起点").put("patrolStart",JSONObject(at.report()))
+      .put("patrolTrail",JSONArray().put(JSONObject(at.report()))).put("patrolElapsedMs",0).put("mapRevision",a.revision).put("startedAt",System.currentTimeMillis())
+    saveTask()
+    try {motor.homeNavigate()}catch(e: Exception){task.put("phase","BLOCKED").put("reason",e.message ?: "控制通道未就绪");saveTask();throw e}
+    say("准备附近短巡游：半径最多80厘米、整轮最多2分钟，记录新观察地面并沿实际轨迹返回。不是全屋建图。")
   }
   @Synchronized private fun launch() {
     val a=sync();HomeWorkflow.requireNavigation(task.optString("phase"),teaching)
@@ -202,6 +226,10 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
   fun robotRadius(): Double {val p=activity.getSharedPreferences("terrain-envelope",0);return (max(p.getFloat("width",.15f),p.getFloat("length",.1f))/2+p.getFloat("margin",.02f)).toDouble()}
   @Synchronized fun plan(): Map<String,Any?> {
     val a=sync();check(task.optString("phase")=="PREPARING");val start=pose()
+    if(task.optString("kind")=="patrol")return mapOf("taskId" to task.getString("id"),"mapId" to a.mapId,"revision" to a.revision,"poseRevision" to tracker.revision,
+      "origin" to start.report(),"targetName" to "附近巡游起点","mode" to "patrol","patrolStart" to task.getJSONObject("patrolStart").toString(),
+      "patrolTrail" to task.getJSONArray("patrolTrail").toString(),"patrolElapsedMs" to task.optLong("patrolElapsedMs"),"coverage" to coverage.toString(),
+      "points" to listOf(start.report(),HomePose(start.x,start.y+.15).report()),"zones" to a.zones.map {mapOf("x" to it.x,"y" to it.y,"radius" to it.radius)},"robotRadius" to robotRadius())
     val route=HomeRoutePlanner.plan(a,start,task.getString("destination"),robotRadius())
     activeRoute=route.points
     return mapOf("taskId" to task.getString("id"),"mapId" to a.mapId,"revision" to a.revision,"poseRevision" to tracker.revision,
@@ -211,8 +239,23 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
   @Synchronized fun progress(v: JSONObject) {
     check(v.getString("taskId")==task.optString("id")){"旧任务不能覆盖新任务"}
     if(task.optString("phase") in setOf("CANCELLED","PAUSED","PAUSED_RESTART"))return
+    if(task.optString("kind")=="patrol") {
+      if(v.has("patrolTrail")) {
+        val trail=v.getJSONArray("patrolTrail");require(trail.length() in 1..128)
+        for(i in 0 until trail.length()){val p=trail.getJSONObject(i);HomePose(p.getDouble("x"),p.getDouble("y"),p.getDouble("yaw"))}
+        task.put("patrolTrail",trail)
+        activeRoute=(0 until trail.length()).map {val p=trail.getJSONObject(it);HomePose(p.getDouble("x"),p.getDouble("y"),p.getDouble("yaw"))}
+      }
+      if(v.has("patrolElapsedMs"))task.put("patrolElapsedMs",v.getLong("patrolElapsedMs").coerceIn(0,120_000))
+      if(v.has("coverage")) {
+        val cells=v.getJSONArray("coverage");require(cells.length()<=8000)
+        for(i in 0 until cells.length()){val c=cells.getJSONArray(i);require(c.length()==3 && abs(c.getDouble(0))<=50 && abs(c.getDouble(1))<=50 && c.getInt(2) in 1..4)}
+        coverage=cells;store.coverage(currentMap,JSONObject().put("referenceKey",sync().referenceKey).put("cells",cells));saveMap()
+      }
+    }
     for(k in listOf("phase","reason","waypoint","total","remainingMeters","pose","nativeToken"))if(v.has(k))task.put(k,v.get(k))
-    notice=when(task.optString("phase")){"COMPLETED"->"已到达${task.optString("destinationName")}并停车";"BLOCKED"->"导航已暂停，可处理后继续原目的地";else->"正在前往${task.optString("destinationName")}，黄色为计划路线"}
+    notice=if(task.optString("kind")=="patrol")when(task.optString("phase")){"COMPLETED"->"附近短巡游已回到起点并停车；不代表整个房间建图完成";"BLOCKED"->"巡游已暂停：${task.optString("reason")}";else->v.optString("reason","正在附近巡游")}
+      else when(task.optString("phase")){"COMPLETED"->"已到达${task.optString("destinationName")}并停车";"BLOCKED"->"导航已暂停，可处理后继续原目的地";else->"正在前往${task.optString("destinationName")}，黄色为计划路线"}
     store.event(currentMap,mapOf("task" to task.toString()));saveTask();render()
   }
   private fun saveTask() {if(currentMap.isNotEmpty())store.task(currentMap,task)}
@@ -262,13 +305,16 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
     private fun sy(y: Double)=height/2f-((y-cy)*scale).toFloat()
     override fun onDraw(c: Canvas) {
       c.drawColor(Color.rgb(18,30,40));val a=atlas ?: return
-      val all=a.places.map {it.pose}+a.links.flatMap {it.points}+listOfNotNull(tracker.pose)
+      val observed=(0 until coverage.length()).map {coverage.getJSONArray(it)}
+      val all=a.places.map {it.pose}+a.links.flatMap {it.points}+listOfNotNull(tracker.pose)+observed.map {HomePose(it.getDouble(0),it.getDouble(1))}
       if(all.isEmpty())return
       val minX=all.minOf {it.x}-.4;val maxX=all.maxOf {it.x}+.4;val minY=all.minOf {it.y}-.4;val maxY=all.maxOf {it.y}+.4
       cx=(minX+maxX)/2;cy=(minY+maxY)/2;scale=min(width/(maxX-minX),height/(maxY-minY)).toFloat()
       paint.strokeWidth=1f;paint.color=Color.DKGRAY
       var x=floor(minX*2)/2;while(x<=maxX){c.drawLine(sx(x),0f,sx(x),height.toFloat(),paint);x+=.5}
       var y=floor(minY*2)/2;while(y<=maxY){c.drawLine(0f,sy(y),width.toFloat(),sy(y),paint);y+=.5}
+      for(cell in observed){val px=cell.getDouble(0);val py=cell.getDouble(1);paint.color=if(cell.getInt(2)==1)0x774caf82 else 0x88e17055.toInt()
+        c.drawRect(sx(px-.025),sy(py+.025),sx(px+.025),sy(py-.025),paint)}
       for(z in a.zones){paint.color=0x88ff5555.toInt();c.drawCircle(sx(z.x),sy(z.y),(z.radius*scale).toFloat(),paint)}
       for(e in a.links){paint.color=if(e.enabled) Color.rgb(65,175,190) else Color.GRAY;paint.strokeWidth=4f
         e.points.zipWithNext().forEach {(u,v)->c.drawLine(sx(u.x),sy(u.y),sx(v.x),sy(v.y),paint)}}

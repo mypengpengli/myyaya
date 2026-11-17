@@ -26,7 +26,7 @@ export const chineseVoice = new ChineseVoiceSession(VoskCommandRecognizer, async
     return artifact ? "录像已保存" : notice;
   },
   () => stopLooiMotion("chinese-voice-capture-closed"),
-  async (text, signal) => (await import("../agent/companion-runtime")).replyToCompanion(text, signal));
+  async (text, signal, feedback) => (await import("../agent/companion-runtime")).replyToCompanion(text, signal, feedback));
 
 export function focusChineseVoiceScreen({ autoStart = false }: { autoStart?: boolean } = {}): () => void {
   const owner = ++focusGeneration;
@@ -67,7 +67,7 @@ export function focusChineseVoiceScreen({ autoStart = false }: { autoStart?: boo
     const user = useUserStore.getState();
     const phase = chineseVoice.getSnapshot().phase;
     const next = user.robotSleeping || AppState.currentState !== "active" ? "sleeping"
-      : phase === "speaking" ? "speaking" : phase === "loading" || phase === "thinking" ? "processing" : phase === "listening" ? "listening" : "attention";
+      : phase === "speaking" || chineseVoice.getSnapshot().interim ? "speaking" : phase === "loading" || phase === "thinking" ? "processing" : phase === "listening" && chineseVoice.getSnapshot().awake ? "listening" : "attention";
     if (user.voiceState !== next) user.setVoiceState(next);
   };
   const expression = chineseVoice.subscribe(syncFace);

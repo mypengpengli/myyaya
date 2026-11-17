@@ -226,9 +226,13 @@ export default function IndexScreen() {
   const interactionNotice = speech.notice && !/^(离线监听中|请说一句话)/.test(speech.notice) ? speech.notice : "";
   const caption = ["preparing", "recording", "saving"].includes(recording.phase) ? recording.notice
     : robotSleeping ? (appMode === "local" ? "休息中" : t("home.wakeFromSleep")) : speech.phase === "loading" ? "正在准备…"
-    : speech.phase === "thinking" ? progress.label || "正在想怎么回答"
+    : speech.phase === "thinking" ? speech.interim || progress.label || "已收到，正在处理"
     : speech.phase === "error" ? speech.notice || "语音暂不可用" : speech.phase === "speaking" ? "小丫在说话"
-    : speech.partial || (speech.phase === "listening" ? interactionNotice || "小丫 · 我在听" : "小丫");
+    : speech.partial || (speech.phase === "listening" ? interactionNotice || (speech.awake ? "我在听" : "等待唤醒，请说“小丫小丫”") : "小丫");
+  const voiceReady = speech.captureActive && !robotSleeping;
+  const voiceStatus = !voiceReady ? "收音未开启" : speech.phase === "thinking" ? "已收到 · 正在处理"
+    : speech.phase === "speaking" || speech.interim ? "正在播报 · 可说停止"
+    : speech.awake || speech.mode === "dictation" ? "已唤醒 · 正在听你说" : "待唤醒 · 请说小丫小丫";
   return <SafeAreaView style={styles.home} {...swipe.panHandlers}>
     <Animated.View layout={LinearTransition.duration(240)} style={cameraVisible ? styles.cameraFace : presentation.active && appMode === "local" ? styles.smallFace : styles.faceStage}>
       <RobotFace mode={cameraVisible || (presentation.active && appMode === "local") ? "avatar" : "fullscreen"} labelVisible={false}
@@ -241,7 +245,11 @@ export default function IndexScreen() {
         }} />
     </Animated.View>
     {appMode === "local" || robotSleeping ? <View pointerEvents="none" style={styles.caption}>
-      <Text numberOfLines={1} style={styles.captionText}>{caption}</Text>
+      {appMode === "local" && !robotSleeping ? <View style={[styles.voiceBadge, voiceReady && speech.awake ? styles.voiceAwake : undefined]}>
+        <Text style={[styles.voiceDot, { color: voiceReady && speech.awake ? "#64f7b5" : "#a9b7c9" }]}>●</Text>
+        <Text style={styles.voiceText}>{voiceStatus}</Text>
+      </View> : null}
+      <Text numberOfLines={2} style={styles.captionText}>{caption}</Text>
     </View> : <ConversationOverlay />}
     {!robotSleeping && appMode === "legacy_realtime" ? <ImageOverlay /> : null}
     {appMode === "local" && !cameraVisible ? <ResultOverlay /> : null}
@@ -257,7 +265,10 @@ const styles = StyleSheet.create({
   smallFace: { position: "absolute", right: "2%", top: "35%", bottom: "35%", width: "15%", alignItems: "center", justifyContent: "center" },
   cameraFace: { position: "absolute", left: "3%", top: "22%", bottom: "22%", width: "35%", alignItems: "center", justifyContent: "center" },
   caption: { position: "absolute", bottom: 8, left: 16, right: 48, alignItems: "flex-start" },
-  captionText: { color: looiTheme.muted, fontSize: 10, opacity: 0.65 },
+  captionText: { color: looiTheme.muted, fontSize: 14, opacity: 0.95, marginTop: 4 },
+  voiceBadge: { flexDirection: "row", gap: 8, alignItems: "center", backgroundColor: "#182232", borderRadius: 14, paddingHorizontal: 13, paddingVertical: 7 },
+  voiceAwake: { backgroundColor: "#133a30", borderWidth: 1, borderColor: "#64f7b5" },
+  voiceDot: { fontSize: 16 }, voiceText: { color: "#edf7ff", fontSize: 17, fontWeight: "600" },
   menuHandle: { position: "absolute", right: 0, top: "38%", bottom: "38%", width: 38, justifyContent: "center", alignItems: "center" },
   handle: { color: looiTheme.muted, fontSize: 25, opacity: 0.35 },
 });

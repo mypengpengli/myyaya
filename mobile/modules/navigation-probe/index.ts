@@ -16,7 +16,7 @@ export type ContinuousStatus={token?:string;stopEpoch:number;phase?:string;reaso
 export type HomePose={x:number;y:number;yaw:number};
 export type HomeAtlas={mapId:string;revision:number;requiresReference:boolean;task?:string;places:Array<{id:string;name:string;room:string;kind:string;pose:HomePose}>;links:Array<{id:string;from:string;to:string;taught:boolean;enabled:boolean;points:HomePose[]}>;zones:Array<{id:string;name:string;x:number;y:number;radius:number}>};
 export type HomeStatus={atlas:Pick<HomeAtlas,"mapId"|"revision"|"requiresReference">|null;pose:HomePose|null;localized:boolean;poseRevision:number;connectionConfirmed:boolean;teaching:boolean;task:string;notice:string;localizationReason:string};
-export type HomePlan={taskId:string;mapId:string;revision:number;poseRevision:number;origin:HomePose;targetName:string;points:HomePose[];zones:Array<{x:number;y:number;radius:number}>;robotRadius:number};
+export type HomePlan={taskId:string;mapId:string;revision:number;poseRevision:number;origin:HomePose;targetName:string;points:HomePose[];zones:Array<{x:number;y:number;radius:number}>;robotRadius:number;mode?:"patrol";patrolStart?:string;patrolTrail?:string;patrolElapsedMs?:number;coverage?:string};
 type Native = {
   homeStatus():Promise<HomeStatus>;
   homePlan():Promise<HomePlan>;

@@ -104,7 +104,7 @@ finishDrive(); await assert.rejects(moving, /停止/); pendingDrive = undefined;
 // Real Pi validates action enums and replays the camera image as a model vision block.
 const core = await import("@earendil-works/pi-agent-core");
 const compat = Object.assign({}, ...await Promise.all(["transcript", "event-stream", "identity", "json-parse", "validation"].map((name) => import(`@earendil-works/pi-ai/utils/${name}`))));
-const { CompanionAgent } = load("src/agent/companion-agent.ts", { "@earendil-works/pi-agent-core": core });
+const { CompanionAgent } = load("src/agent/companion-agent.ts", { "@earendil-works/pi-agent-core": core, "../voice/conversation-feedback": load("src/voice/conversation-feedback.ts", {}) });
 const { createNewApiStream } = load("src/agent/newapi-stream.ts", { "./pi-mobile-compat": compat });
 async function roundTrip(tool, args, check, reply) {
   let requests = 0;

@@ -33,6 +33,20 @@ internal class HomeAtlasStore(context: Context) {
     val atomic=AtomicFile(file(id,"task.json"));val out=atomic.startWrite()
     try {out.write(text.toByteArray(Charsets.UTF_8));atomic.finishWrite(out)}catch(e: Exception){atomic.failWrite(out);throw e}
   }
+  fun coverage(id: String): JSONObject? {
+    val atomic=AtomicFile(file(id,"coverage.json"))
+    if(!atomic.baseFile.exists() && !File(atomic.baseFile.path+".bak").exists())return null
+    val bytes=atomic.readFully();require(bytes.size<=250_000)
+    return JSONObject(bytes.toString(Charsets.UTF_8)).also {data->
+      val cells=data.getJSONArray("cells");require(cells.length()<=8000)
+      for(i in 0 until cells.length()){val c=cells.getJSONArray(i);require(c.length()==3 && kotlin.math.abs(c.getDouble(0))<=50 && kotlin.math.abs(c.getDouble(1))<=50 && c.getInt(2) in 1..4)}
+    }
+  }
+  fun coverage(id: String,data: JSONObject) {
+    val bytes=data.toString().toByteArray(Charsets.UTF_8);require(bytes.size<=250_000)
+    val atomic=AtomicFile(file(id,"coverage.json"));val out=atomic.startWrite()
+    try {out.write(bytes);atomic.finishWrite(out)}catch(e: Exception){atomic.failWrite(out);throw e}
+  }
   fun event(id: String,event: Map<String,Any?>) {
     val f=file(id,"events.ndjson");if(f.length()>1_000_000)f.writeText("")
     f.appendText(JSONObject(event+mapOf("at" to System.currentTimeMillis())).toString()+"\n")

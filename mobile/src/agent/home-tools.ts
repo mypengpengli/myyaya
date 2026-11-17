@@ -25,6 +25,7 @@ async function request(mapId:string|undefined,command:Record<string,unknown>,sig
   return text({status:"opening_home_setup",saved:false,moving:false,notice:"已打开家庭地图操作，需恢复实际位置并确认最低姿态；尚未记住新地点或到达目的地。"});
 }
 export function createHomeTools():AgentTool[] {return [
+  {name:"patrol_nearby",label:"正在准备附近短巡游",description:"用户说逛一圈、在附近转转然后回来时使用；只在起点80厘米半径内观察、补记新地面，最多2分钟并沿实际轨迹返回。已观察位置复用记录但仍实时避障；不是全屋自主建图。需要本地相机定位、底座连接和最低姿态确认，opening只代表准备。指定房间请用navigate_home，不能用本工具猜房间。",parameters:Type.Object({map_id:Type.Optional(Type.String())}),execute:async(_id,p,signal)=>request((p as {map_id?:string}).map_id,{op:"patrol"},signal)},
   {name:"home_maps",label:"正在查看家庭地图",description:"查询已保存家庭地图、房间/门口/停车点、实际带领路线和禁行区。savedTask是上次保存的记录，不表示现在正在移动。去客厅先查真实地点；没有路线不能编造已到达。",parameters:Type.Object({}),execute:async()=>text(await homeSummaries())},
   {name:"navigate_home",label:"正在准备前往目的地",description:"用户要求去已登记房间/地点时，选择真实家庭地图与地点编号，打开定位准备，随后由本地导航执行带领路线和避障。返回opening不是已经发车或到达；需要先带领登记，不能用robot_action循环代替。",parameters:Type.Object({map_id:Type.Optional(Type.String()),place_id:Type.String()}),execute:async(_id,p,signal)=>{
     const a=p as {map_id?:string;place_id:string},homes=await listHomeAtlases();const matches=homes.filter(h=>(!a.map_id||h.mapId===a.map_id)&&h.places.some(n=>n.id===a.place_id));

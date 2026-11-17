@@ -27,10 +27,10 @@ assert.deepEqual(gate.accept("前进", false, 100), {});
 assert.deepEqual(gate.accept("小丫小丫前进", true, 100), {});
 assert.ok(gate.accept("小丫小丫", false, 100).wake);
 assert.equal(gate.accept("前进", false, 101).command?.kind, "move");
-assert.deepEqual(gate.accept("前进", false, 16000), {});
+assert.deepEqual(gate.accept("前进", false, 61000), {});
 assert.equal(gate.accept("停止", true, 16000).command?.kind, "stop");
 
-const { ChineseVoiceSession } = load("src/voice/chinese-voice-session.ts", { "./chinese-command": commands });
+const { ChineseVoiceSession } = load("src/voice/chinese-voice-session.ts", { "./chinese-command": commands, "./conversation-feedback": load("src/voice/conversation-feedback.ts") });
 const events = new Map();
 let starts = 0, stops = 0, nativeId = 0, permission = true, allowed = true;
 let prepare = async () => ({ sessionId: ++nativeId });
