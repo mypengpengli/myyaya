@@ -36,8 +36,8 @@ export async function replyToCompanion(text: string, signal: AbortSignal, feedba
     if (signal.aborted) throw new Error("已停止");
     const photo = quickPhotoRequest(text);
     if (photo) {
-      update({ phase: "tool", label: "正在拍照，照片出现后可确定或重拍" });
-      feedback?.({ kind: "stage", text: "我来拍照，拍好后请点确定或重拍。" });
+      update({ phase: "tool", label: "正在拍照，照片出现后可用语音或按钮选择" });
+      feedback?.({ kind: "stage", text: "我来拍照，照片出现后可以直接说你的选择。" });
       const result = await photoTool.execute(`quick-photo-${Date.now()}`, photo, signal);
       if (signal.aborted) throw new Error("已停止");
       observeSkillTool("phone_photo", false, result);
@@ -58,7 +58,9 @@ export async function replyToCompanion(text: string, signal: AbortSignal, feedba
       agent = new CompanionAgent(config, createNewApiStream(config, fetch, (value) => {
         recordDiagnosticEvent("llm", "chat-http", { ...value });
         if (value.stage === "retry") {
-          const label = `模型连接暂时不稳定，正在第${value.attempt! + 1}次尝试`;
+          const reason = value.status === 429 ? "服务暂时限制请求" : value.status && value.status >= 500 ? "模型服务暂时不可用"
+            : value.reason === "idle-timeout" || value.reason === "total-timeout" ? "等待模型数据超时" : "模型连接暂时不稳定";
+          const label = `${reason}，准备第${value.attempt! + 1}次尝试`;
           update({ phase: "thinking", label }); currentFeedback?.({ kind: "stage", text: label + "。" });
         }
       }), phoneTools, update, observeSkillTool, observeSkillReply);

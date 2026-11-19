@@ -23,7 +23,7 @@ export function PhotoCaptureOverlay() {
     <View style={styles.actions}>
       <Button label="确定" disabled={state.phase !== "review" || !state.photo} onPress={() => void photoCapture.confirm()} />
       <Button label="重拍" disabled={state.phase !== "review"} onPress={() => photoCapture.retake()} />
-      <Button label="取消拍照" onPress={() => photoCapture.cancel()} />
+      <Button label="取消拍照" disabled={state.phase === "saving"} onPress={() => photoCapture.cancel()} />
     </View>
   </Animated.View>;
 }

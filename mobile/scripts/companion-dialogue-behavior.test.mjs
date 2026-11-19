@@ -14,7 +14,7 @@ const drain = async () => { for (let i = 0; i < 30; i++) await Promise.resolve()
 const events = new Map(), calls = [], spoken = [], motions = [];
 let id = 0, speech, pending, captureStops = 0, captureStarts = 0, foreground = true;
 const native = {
-  prepareChinese: async () => ({ sessionId: ++id }), startChineseCapture: async () => { captureStarts++; }, stopChineseCapture: async () => { captureStops++; },
+  prepareChinese: async () => ({ sessionId: ++id }), startChineseCapture: async () => { captureStarts++; return { running: true }; }, stopChineseCapture: async () => { captureStops++; },
   speakChinese: (text) => { if (text === "好的，我来处理。") return Promise.resolve(); spoken.push(text); return new Promise((resolve, reject) => { speech = { resolve, reject }; }); },
   stopChineseSpeech: () => { speech?.reject(new Error("cancelled")); speech = null; },
   addListener(name, fn) { const set = events.get(name) ?? new Set(); set.add(fn); events.set(name, set); return { remove: () => set.delete(fn) }; },

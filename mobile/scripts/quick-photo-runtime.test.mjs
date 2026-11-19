@@ -19,7 +19,7 @@ const runtime=load("src/agent/companion-runtime.ts",{
 const signal=new AbortController().signal,feedback=[];
 assert.equal(await runtime.replyToCompanion("帮我用后置摄像头拍一张照片",signal,v=>feedback.push(v)),"照片已经确认并保存。");
 assert.equal(photos,1);assert.equal(reads,0);assert.deepEqual(seenArgs,{camera:"back"});assert.equal(learned[0],"phone_photo");
-assert.equal(stages.at(-1).phase,"idle");assert.ok(feedback[0].text.includes("确定"));assert.equal(logs.length,2);
+assert.equal(stages.at(-1).phase,"idle");assert.match(feedback[0].text,/直接说/);assert.doesNotMatch(feedback[0].text,/确定|重拍|取消/);assert.equal(logs.length,2);
 cancelled=true;assert.equal(await runtime.replyToCompanion("拍张照片",signal),"拍照已取消。");
 const aborted=new AbortController();aborted.abort();await assert.rejects(runtime.replyToCompanion("拍张照片",aborted.signal),/停止/);
 assert.equal(photos,2);assert.equal(releases,3);

@@ -7,11 +7,15 @@ import { ChineseVoiceSession } from "./chinese-voice-session";
 import { stopLooiMotion } from "../device-tools/looi-robot";
 import { isChineseWakeEnabled, subscribeChineseWake } from "./chinese-voice-preferences";
 import { hasCompletedRobotOnboarding } from "../setup/setup-storage";
+import { resultPresentation } from "../artifacts/presentation";
+import { videoControl } from "../artifacts/video-control";
+import { ViewerVoice } from "./viewer-voice";
 
 let focused = 0;
 let focusGeneration = 0;
 let automaticResume: () => void = () => {};
 export function resumeAutomaticChineseVoice(): void { automaticResume(); }
+const photoSession = () => (require("../artifacts/phone-camera") as typeof import("../artifacts/phone-camera")).photoCapture;
 export const chineseVoice = new ChineseVoiceSession(VoskCommandRecognizer, async () => {
   if (Platform.OS !== "android") return false;
   return await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO) === PermissionsAndroid.RESULTS.GRANTED;
@@ -26,7 +30,15 @@ export const chineseVoice = new ChineseVoiceSession(VoskCommandRecognizer, async
     return artifact ? "录像已保存" : notice;
   },
   () => stopLooiMotion("chinese-voice-capture-closed"),
-  async (text, signal, feedback) => (await import("../agent/companion-runtime")).replyToCompanion(text, signal, feedback));
+  async (text, signal, feedback) => (await import("../agent/companion-runtime")).replyToCompanion(text, signal, feedback),
+  command => photoSession().handleVoice(command),
+  () => {
+    const review = photoSession().getSnapshot();
+    if (review.phase === "saving") return "正在保存照片。";
+    if (review.phase === "capturing") return "还在等待相机拍回照片。";
+    if (review.phase === "review") return !review.photo ? "没有拍到照片，请按屏幕提示选择。"
+      : review.notice.includes("保存失败") ? "这张还没保存，请按屏幕提示选择。" : "照片已经拍好，正在等你选择。";
+  }, new ViewerVoice(resultPresentation, videoControl, () => photoSession().getSnapshot().phase === "idle"));
 
 export function focusChineseVoiceScreen({ autoStart = false }: { autoStart?: boolean } = {}): () => void {
   const owner = ++focusGeneration;

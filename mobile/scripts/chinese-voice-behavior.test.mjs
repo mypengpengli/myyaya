@@ -38,7 +38,7 @@ let finishSpeech;
 let hardwareStops = 0;
 const executed = [];
 const native = {
-  prepareChinese: () => prepare(), startChineseCapture: async () => { starts++; }, stopChineseCapture: async () => { stops++; },
+  prepareChinese: () => prepare(), startChineseCapture: async () => { starts++; return { running: true }; }, stopChineseCapture: async () => { stops++; },
   speakChinese: () => new Promise((resolve, reject) => { finishSpeech = { resolve, reject }; }),
   stopChineseSpeech: () => { finishSpeech?.reject(new Error("cancelled")); finishSpeech = null; },
   addListener: (name, fn) => { const callbacks = events.get(name) ?? new Set(); callbacks.add(fn); events.set(name, callbacks); return { remove: () => callbacks.delete(fn) }; },

@@ -228,10 +228,10 @@ export default function IndexScreen() {
     : robotSleeping ? (appMode === "local" ? "休息中" : t("home.wakeFromSleep")) : speech.phase === "loading" ? "正在准备…"
     : speech.phase === "thinking" ? speech.interim || progress.label || "已收到，正在处理"
     : speech.phase === "error" ? speech.notice || "语音暂不可用" : speech.phase === "speaking" ? "小丫在说话"
-    : speech.partial || (speech.phase === "listening" ? interactionNotice || (speech.awake ? "我在听" : "等待唤醒，请说“小丫小丫”") : "小丫");
+    : ((speech.awake || speech.mode === "dictation") && speech.partial) || (speech.phase === "listening" ? interactionNotice || (speech.awake ? "我在听" : "等待唤醒，请说“小丫小丫”") : "小丫");
   const voiceReady = speech.captureActive && !robotSleeping;
-  const voiceStatus = !voiceReady ? "收音未开启" : speech.phase === "thinking" ? "已收到 · 正在处理"
-    : speech.phase === "speaking" || speech.interim ? "正在播报 · 可说停止"
+  const voiceStatus = !voiceReady ? "收音未开启" : speech.phase === "speaking" || speech.interim ? "正在播报 · 可说停止"
+    : speech.phase === "thinking" ? "已收到 · 可喊小丫小丫打断"
     : speech.awake || speech.mode === "dictation" ? "已唤醒 · 正在听你说" : "待唤醒 · 请说小丫小丫";
   return <SafeAreaView style={styles.home} {...swipe.panHandlers}>
     <Animated.View layout={LinearTransition.duration(240)} style={cameraVisible ? styles.cameraFace : presentation.active && appMode === "local" ? styles.smallFace : styles.faceStage}>
@@ -249,6 +249,8 @@ export default function IndexScreen() {
         <Text style={[styles.voiceDot, { color: voiceReady && speech.awake ? "#64f7b5" : "#a9b7c9" }]}>●</Text>
         <Text style={styles.voiceText}>{voiceStatus}</Text>
       </View> : null}
+      {appMode === "local" && !robotSleeping && speech.phase === "thinking" && speech.acceptedText ?
+        <Text numberOfLines={1} style={styles.captionText}>听到：{speech.acceptedText}</Text> : null}
       <Text numberOfLines={2} style={styles.captionText}>{caption}</Text>
     </View> : <ConversationOverlay />}
     {!robotSleeping && appMode === "legacy_realtime" ? <ImageOverlay /> : null}

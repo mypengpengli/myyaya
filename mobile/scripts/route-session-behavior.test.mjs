@@ -30,7 +30,7 @@ const robot = {
   moveLooiOperatorTurnCalibration:(dir,owner)=>{lease.assertNavigationControl(owner);pulses.push({dir,ms:350});return new Promise(resolve=>pending.push(()=>resolve({completed:true})));},
 };
 const voice={stop:async()=>{},pauseCaptureForRecording:async()=>async()=>{releasedMic++;}};
-const vosk={prepareChinese:async()=>({sessionId:44}),startChineseCapture:async()=>{},stopChineseCapture:async()=>{voiceStops++;},
+const vosk={prepareChinese:async()=>({sessionId:44}),startChineseCapture:async()=>({running:true}),stopChineseCapture:async()=>{voiceStops++;},
   addListener:(_name,cb)=>{voiceResult=cb;return {remove(){voiceResult=undefined;}};}};
 const session=load("src/navigation/route-robot-session.ts",{
   "react-native":{AppState:app,PermissionsAndroid:{PERMISSIONS:{CAMERA:"camera",RECORD_AUDIO:"mic"},RESULTS:{GRANTED:"granted"},request:async()=>"granted",check:async()=>true}},

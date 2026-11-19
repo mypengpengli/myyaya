@@ -12,6 +12,13 @@ export type ChatHttpDiagnostic = {
   attempt?: number;
 };
 export const CHAT_WAIT_POLICY = { idleMs: 180_000, totalMs: 900_000, maxAttempts: 3, retryDelayMs: 1000 };
+function httpFailure(status: number): string {
+  const hint = status === 401 ? "请在模型连接设置中检查中转站密钥"
+    : status === 403 ? "请检查账号是否有权使用这个模型"
+    : status === 429 ? "服务暂时限制请求，请稍后再试；如果持续出现，请检查额度"
+    : status >= 500 ? "中转站或模型服务暂时无法完成请求，请稍后再试" : "";
+  return `模型请求失败（HTTP ${status}）${hint ? "，" + hint : ""}`;
+}
 async function retryPause(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) throw new Error("已停止");
   await new Promise<void>((resolve, reject) => {
@@ -102,7 +109,7 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport, r
         const rawType = response.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
         contentType = rawType === "text/event-stream" ? "sse" : rawType === "application/json" ? "json" : rawType === "text/html" ? "html" : rawType ? "other" : "missing";
         diagnostic("headers");
-        if (!response.ok) throw new Error(`模型请求失败（HTTP ${response.status}）`);
+        if (!response.ok) throw new Error(httpFailure(response.status));
         received();
         if (response.url && new URL(response.url).origin !== new URL(config.baseUrl).origin) throw new Error("模型地址发生跨站跳转");
         if (!response.body) throw new Error("模型未返回流式响应");
@@ -197,6 +204,9 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport, r
         // Never surface response bodies, headers, or transport error URLs containing credentials.
         output.errorMessage = output.stopReason === "aborted" ? "已停止" : timeoutReason ? status === undefined ? "手机等待模型响应超时，请稍后重试" : "手机接收模型回复超时，请稍后重试" : error instanceof Error &&
           /^(模型|请填写)/.test(error.message) ? error.message : "模型连接失败或超时，请检查网络及模型设置";
+        if (output.stopReason !== "aborted" && output.content.some(part => part.type === "text" && part.text.trim())) {
+          output.errorMessage = "刚才的回答没有收完。" + output.errorMessage;
+        }
         diagnostic("error", options?.signal?.aborted ? "user-abort" : timeoutReason ?? (status && status >= 400 ? "http-error" : "incomplete-response"));
         // Replay only the current unfinished inference, never Agent.prompt or an executed tool.
         retry = !options?.signal?.aborted && attempt < policy.maxAttempts && output.content.length === 0 &&

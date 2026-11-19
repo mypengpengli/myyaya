@@ -64,7 +64,7 @@ assert.equal(await invalid.reply("检查", new AbortController().signal), "参�
 const broken = new CompanionAgent(config, createNewApiStream(config, async () => sse([choice({ content: "不应当被朗读" })], true)), [], () => {});
 await assert.rejects(broken.reply("你好", new AbortController().signal), /连接中断/);
 const httpError = new CompanionAgent(config, createNewApiStream(config, async () => new Response("secret private provider body", { status: 401 })), [], () => {});
-await assert.rejects(httpError.reply("你好", new AbortController().signal), /HTTP 401/);
+await assert.rejects(httpError.reply("你好", new AbortController().signal), /HTTP 401.*密钥/);
 const abort = new AbortController(); abort.abort();
 await assert.rejects(agent.reply("不能发出请求", abort.signal), /停止/);
 assert.equal(requests, 2);

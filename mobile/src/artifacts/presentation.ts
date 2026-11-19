@@ -50,6 +50,11 @@ export class ResultPresentation {
     this.update({ pinned: value }); this.update({ deadline: this.deadline() });
   }
   interact() { this.update({ deadline: this.deadline() }); }
+  keepVisibleForVoice() {
+    const deadline = this.state.deadline;
+    const voiceDeadline = this.now() + 5_000;
+    if (deadline !== null && voiceDeadline > deadline) this.update({ deadline: voiceDeadline });
+  }
   suspend(value: boolean) { this.update({ suspended: value }); this.update({ deadline: this.deadline() }); }
   /** Keep a result available while a user command is being understood/executed.
    * Separate leases avoid releasing another turn or the background suspension. */
