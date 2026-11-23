@@ -43,6 +43,7 @@ const robot = compileTs("src/device-tools/looi-robot.ts", customRequire, (source
   source.replace("export const CONTINUOUS_MOTION_DEADMAN_MS = 5_000;", "export const CONTINUOUS_MOTION_DEADMAN_MS = 120;")
 );
 
+let failStopWrite = false;
 const transport = {
   async connect() {},
   async disconnect() {},
@@ -54,6 +55,7 @@ const transport = {
   },
   async write(key, payload, options) {
     writes.push({ at: Date.now(), key, payload, options });
+    if (failStopWrite && key === "drive" && payload === "0000") throw new Error("stop-write-failed");
   },
 };
 
@@ -108,4 +110,17 @@ await cancellation;
 assert.equal(writes.slice(beforeWarmup).filter((write) => write.key === "drive" && write.payload !== "0000").length, 0,
   "a cancelled warmup must never emit a late drive frame");
 await robot.disconnectLooiRobot();
-console.log("Motion deadman behavioral tests passed");
+robot.configureLooiRobotTransport(transport);
+await robot.connectLooiRobot();
+notifyFed9({ characteristic: "dockNotify", hex: "0101010101", bytes: new Uint8Array([1, 1, 1, 1, 1]) });
+notifyFed9({ characteristic: "dockNotify", hex: "0ee803", bytes: new Uint8Array([0x0e, 0xe8, 0x03]) });
+const beforeBadStop = events.length;
+failStopWrite = true;
+await assert.rejects(robot.moveLooi("forward", 80), /停止写入失败/);
+assert.equal(robot.getLooiRobotRuntimeState().connected, false);
+assert.equal(robot.getLooiRobotRuntimeState().motionActive, false);
+assert.ok(events.slice(beforeBadStop).some(event => event.event === "ble-stop-write-failed"));
+assert.ok(!events.slice(beforeBadStop).some(event => event.event === "move-stop" && event.details.reason === "duration-complete"));
+failStopWrite = false;
+await robot.disconnectLooiRobot();
+console.log("Motion deadman and failed stop receipt behavioral tests passed");

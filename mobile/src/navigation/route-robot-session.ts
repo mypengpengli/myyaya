@@ -57,8 +57,8 @@ export async function openTaughtRouteSession(name = ""): Promise<string | null> 
               if(home && !["pause","cancel"].includes(String(home.op))) {
                 const sequence=`${event.resetGeneration}:${event.sequence}`;
                 if(event.partial || sequence===lastHomeSequence)return;lastHomeSequence=sequence;
-                void sendHomeCommand(home).then(()=>vosk.speakChinese(["remember","rename"].includes(String(home.op))?"地点已保存":"指令已收到"))
-                  .catch(error=>import("../../modules/navigation-probe").then(n=>n.publishNativeLocalMission(error instanceof Error?error.message:String(error))));return;
+                void sendHomeCommand(home).then(()=>vosk.speakChinese(["remember","rename"].includes(String(home.op))?"地点已保存":home.op==="patrol"?"正在观察地面，准备附近巡视。":"指令已收到"))
+                  .catch(error=>import("../../modules/navigation-probe").then(n=>Promise.all([n.publishNativeLocalMission(error instanceof Error?error.message:String(error)),vosk.speakChinese(error instanceof Error?error.message:String(error)).catch(()=>{})])));return;
               }
               if (!home && !isChineseStop(event.text) && !/^(?:小丫小丫)?(?:请)?(?:停止导航|停止复走|取消导航|别走了)$/u.test(value)) return;
               if (Date.now() - lastStop < 800) return;
@@ -141,7 +141,17 @@ export async function openTaughtRouteSession(name = ""): Promise<string | null> 
         const publish = () => { if (!closed) void publishRouteRobotState(token, getLooiRobotRuntimeState().connected, voiceReady,navigationDrivePermits().back,navigationDrivePermits().turn).catch(() => {}); };
         removeState = subscribeLooiRobotRuntimeState(publish);
         timer = setInterval(publish, 200);
-        return await openNativeTaughtRoutes(token, name);
+        const screen = openNativeTaughtRoutes(token, name);
+        if (name.startsWith("home:") && JSON.parse(name.slice(5)).command?.op === "inspect") {
+          const connected = getLooiRobotRuntimeState().connected;
+          void import("../../modules/vosk-command-recognizer").then(({default: vosk}) => {
+            if (closed) return;
+            return vosk.speakChinese(connected
+              ? "请让相机恢复定位，并确认底座在最低水平姿态。"
+              : "底座尚未连接，请先连接，再确认最低水平姿态和定位。");
+          }).catch(() => {});
+        }
+        return await screen;
       } finally {
         closed = true;
         removeListener?.(); removeState?.(); if (timer) clearInterval(timer);

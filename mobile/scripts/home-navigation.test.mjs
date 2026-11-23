@@ -30,6 +30,9 @@ assert.deepEqual(parseHomeVoice('请去客厅吧'),{op:'go',target:'客厅'});
 assert.deepEqual(parseHomeVoice('把客厅改名为大厅'),{op:'rename',id:'客厅',name:'大厅'});
 assert.deepEqual(parseHomeVoice('继续导航'),{op:'resume'});assert.deepEqual(parseHomeVoice('取消导航'),{op:'cancel'});
 assert.equal(parseHomeVoice('我觉得客厅挺好的'),null);
+assert.deepEqual(parseHomeVoice('你到周围转一圈'),{op:'patrol'});
+assert.deepEqual(parseHomeVoice('去附近看看再回来'),{op:'patrol'});
+assert.notEqual(parseHomeVoice('原地转一圈')?.op,'patrol');
 
 function rig(mode='success') {
  let state={stopEpoch:3,active:false},homeCalls=0,planCalls=0;

@@ -13,13 +13,22 @@ const drain = async () => { for (let i = 0; i < 40; i++) await Promise.resolve()
 const { PhotoCaptureSession } = load("src/artifacts/photo-capture-session.ts");
 let captures = 0, saves = [], failSave = false;
 const frame = (n) => ({ base64: `frame-${n}`, mimeType: "image/jpeg", cameraFacing: "front" });
-const photo = new PhotoCaptureSession(async () => frame(++captures), async (image) => {
+const photo = new PhotoCaptureSession(async (image) => {
   if (failSave) throw Error("storage");
   saves.push(image.base64); return { id: "saved-" + saves.length, kind: "image" };
 });
-const accepted = photo.begin("front"); await drain();
+const showAndShoot = async (session, shutter = async () => frame(++captures)) => {
+  assert.equal(session.getSnapshot().phase, "framing");
+  session.cameraReady(session.getSnapshot().id, shutter);
+  await session.confirm();
+};
+const accepted = photo.begin("front");
+assert.equal(captures, 0);
+await photo.confirm();
+assert.equal(captures, 0);
+await showAndShoot(photo);
 assert.equal(photo.getSnapshot().phase, "review"); assert.equal(saves.length, 0);
-photo.retake(); await drain(); assert.equal(photo.getSnapshot().photo.base64, "frame-2");
+photo.retake(); await showAndShoot(photo); assert.equal(photo.getSnapshot().photo.base64, "frame-2");
 await photo.confirm();
 assert.equal((await accepted).photo.base64, "frame-2");
 assert.deepEqual(saves, ["frame-2"], "discarded retakes are never saved or returned to the model");
@@ -28,12 +37,15 @@ const aborted = new AbortController(), cancelled = photo.begin("back", aborted.s
 aborted.abort(); assert.equal(await cancelled, null); await drain(); assert.equal(photo.getSnapshot().phase, "idle");
 assert.equal(saves.length, 1);
 failSave = true;
-const retrySave = photo.begin("front"); await drain(); await photo.confirm();
+const retrySave = photo.begin("front"); await showAndShoot(photo); await photo.confirm();
 assert.equal(photo.getSnapshot().phase, "review"); assert.match(photo.getSnapshot().notice, /保存失败/);
 failSave = false; await photo.confirm(); assert.ok(await retrySave);
 let finishCapture;
-const late = new PhotoCaptureSession(() => new Promise((resolve) => { finishCapture = resolve; }), async () => { throw Error("must not save"); });
-const stale = late.begin("front"); late.cancel(); finishCapture(frame(9)); await drain();
+const late = new PhotoCaptureSession(async () => { throw Error("must not save"); });
+const stale = late.begin("front");
+const pendingShot = showAndShoot(late, () => new Promise(resolve => { finishCapture = resolve; }));
+assert.equal(late.handleVoice("取消拍照"), true);
+finishCapture(frame(9)); await pendingShot;
 assert.equal(await stale, null); assert.equal(late.getSnapshot().phase, "idle");
 
 const app = { currentState: "active" };
@@ -54,16 +66,18 @@ app.currentState = "background"; await assert.rejects(camera.observeScene("front
 assert.equal(runtimeCaptures, 1);
 let homeNavigations = 0;
 const cameraTools = load("src/agent/camera-tools.ts", { typebox: { Type }, "../artifacts/phone-camera": camera,
-  "expo-router": { router: { navigate: () => homeNavigations++ } } });
+  "expo-router": { router: { navigate: () => homeNavigations++ } },
+  "../artifacts/presentation": { resultPresentation: { close() {} } },
+  "../core/social-attention": { pauseSocialCamera: async () => () => {} } });
 const imageResult = await cameraTools.observeSceneTool.execute("look", {}, new AbortController().signal);
 assert.equal(imageResult.content[1].type, "image");
 assert.match(imageResult.content[0].text, /默认不要弹图/);
 assert.equal(homeNavigations, 0, "observation must not change the current screen");
 const draft = cameraTools.photoTool.execute("photo", {}, new AbortController().signal);
-await drain(); assert.equal(camera.photoCapture.getSnapshot().phase, "review");
+await drain(); await showAndShoot(camera.photoCapture);
 assert.equal(homeNavigations, 1, "explicit photo requests bring their confirmation UI into view");
 const savedBeforeConfirm = runtimeSaves;
-camera.photoCapture.retake(); await drain(); assert.equal(runtimeSaves, savedBeforeConfirm);
+camera.photoCapture.retake(); await showAndShoot(camera.photoCapture); assert.equal(runtimeSaves, savedBeforeConfirm);
 await camera.photoCapture.confirm();
 assert.equal((await draft).content[1].type, "image");
 
@@ -96,6 +110,10 @@ assert.deepEqual(frames.slice(-2), [["drive", "047a"], ["drive", "0000"]]);
 blocked = true; await assert.rejects(tools.robotActionTool.execute("move", { action: "forward" }), /传感器保护/); blocked = false;
 app.currentState = "background"; await assert.rejects(tools.robotActionTool.execute("move", { action: "forward" }), /前台/); app.currentState = "active";
 connected = false; await assert.rejects(tools.robotActionTool.execute("move", { action: "forward" }), /连接 LOOI/); connected = true;
+const writesBeforeUnsupportedDistances = frames.length;
+await assert.rejects(tools.robotActionTool.execute("move", { action: "forward", distanceCm: 1.5 }), /2 至 20 厘米/);
+await assert.rejects(tools.robotActionTool.execute("move", { action: "forward", distanceCm: 500 }), /2 至 20 厘米/);
+assert.equal(frames.length, writesBeforeUnsupportedDistances);
 let finishDrive; pendingDrive = new Promise((resolve) => { finishDrive = resolve; });
 const abortMotion = new AbortController(), moving = tools.robotActionTool.execute("move", { action: "forward" }, abortMotion.signal);
 await drain(); abortMotion.abort(); await drain(); assert.deepEqual(frames.at(-1), ["drive", "0000"]);
@@ -106,7 +124,7 @@ const core = await import("@earendil-works/pi-agent-core");
 const compat = Object.assign({}, ...await Promise.all(["transcript", "event-stream", "identity", "json-parse", "validation"].map((name) => import(`@earendil-works/pi-ai/utils/${name}`))));
 const { CompanionAgent } = load("src/agent/companion-agent.ts", { "@earendil-works/pi-agent-core": core, "../voice/conversation-feedback": load("src/voice/conversation-feedback.ts", {}) });
 const { createNewApiStream } = load("src/agent/newapi-stream.ts", { "./pi-mobile-compat": compat });
-async function roundTrip(tool, args, check, reply) {
+async function roundTrip(tool, args, check, reply, expected = reply) {
   let requests = 0;
   const config = { baseUrl: "https://example.invalid/v1", apiKey: "test-only", model: "test" };
   const stream = createNewApiStream(config, async (_url, init) => {
@@ -116,9 +134,9 @@ async function roundTrip(tool, args, check, reply) {
     return new Response(`data: ${JSON.stringify({ choices: [{ delta }] })}\n\ndata: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: requests === 1 ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`, { headers: { "Content-Type": "text/event-stream" } });
   });
   const agent = new CompanionAgent(config, stream, [tool], () => {});
-  assert.equal(await agent.reply("执行用户要求", new AbortController().signal), reply); assert.equal(requests, 2);
+  assert.equal(await agent.reply("执行用户要求", new AbortController().signal), expected); assert.equal(requests, 2);
 }
-await roundTrip(tools.robotActionTool, { action: "back" }, (messages) => assert.match(messages.at(-1).content, /指令执行结束/), "已经向后短移。");
+await roundTrip(tools.robotActionTool, { action: "back" }, (messages) => assert.match(messages.at(-1).content, /实际位移未测量/), "已经向后短移。", "短步驱动和停止指令已写入，实际位移未测量。");
 assert.deepEqual(frames.slice(-2), [["drive", "86fc"], ["drive", "0000"]]);
 await roundTrip(cameraTools.observeSceneTool, {}, (messages) => assert.match(messages.at(-1).content[0].image_url.url, /^data:image\/jpeg;base64,frame-/), "已根据眼前照片回答。");
 console.log("Robot/camera tools: Pi to SDK drive frames, guards/STOP, observation vision replay, confirm/retake/cancel and stale capture/save isolation: PASS");

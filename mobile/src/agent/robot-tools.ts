@@ -30,8 +30,8 @@ export const connectRobotTool: AgentTool = {
   },
 };
 export const robotActionTool: AgentTool = {
-  name: "robot_action", label: "正在控制 LOOI", description: "用户明确要求移动、转向、抬低头、点头、跳舞、灯光或停止时控制底座。前后是一次约 450 毫秒短动作，左右是估时 90 度转向；不代表已到达地点或精确距离。没有地图/跟随能力，禁止循环盲走。传感器保护、后台与本地停止仍优先。",
-  parameters: Type.Object({ action: Type.Union(Object.keys(commands).map((action) => Type.Literal(action))) }),
+  name: "robot_action", label: "正在控制 LOOI", description: "用户明确要求移动、转向、抬低头、点头、跳舞、灯光或停止时控制底座。前后默认一次约 450 毫秒短动作，可用 distanceCm 指定 2 至 20 厘米的估时目标，左右是估时 90 度转向；不代表已到达地点或精确距离。没有地图/跟随能力，禁止循环盲走。传感器保护、后台与本地停止仍优先。",
+  parameters: Type.Object({ action: Type.Union(Object.keys(commands).map((action) => Type.Literal(action))), distanceCm: Type.Optional(Type.Number({minimum:2,maximum:20})) }),
   execute: async (_id, params, signal) => {
     const action = (params as { action: keyof typeof commands }).action;
     if (!Object.hasOwn(commands, action)) throw new Error("不支持的底座动作");
@@ -41,9 +41,12 @@ export const robotActionTool: AgentTool = {
     signal?.addEventListener("abort", stop, { once: true });
     try {
       if (signal?.aborted) throw new Error("动作已取消");
-      const notice = await executeChineseRobotCommand(commands[action]);
+      const command = commands[action];
+      const cm = (params as {distanceCm?: number}).distanceCm;
+      if (cm !== undefined && command.kind !== "move") throw new Error("仅前后直行支持厘米");
+      const notice = await executeChineseRobotCommand(command.kind === "move" ? {...command, distanceCm: cm} : command);
       if (signal?.aborted) throw new Error("动作已停止");
-      return text({ action, notice, connected: getLooiRobotRuntimeState().connected,
+      return text({ action, notice, measuredDistanceCm: null, connected: getLooiRobotRuntimeState().connected,
         ...(action.startsWith("head_") || action === "nod" ? { physicalPosition: "unknown", instruction: "指令返回不代表机械到位；不能声称已最低或已抬到位" } : {}) });
     } finally { signal?.removeEventListener("abort", stop); }
   },

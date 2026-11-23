@@ -36,8 +36,8 @@ export async function replyToCompanion(text: string, signal: AbortSignal, feedba
     if (signal.aborted) throw new Error("已停止");
     const photo = quickPhotoRequest(text);
     if (photo) {
-      update({ phase: "tool", label: "正在拍照，照片出现后可用语音或按钮选择" });
-      feedback?.({ kind: "stage", text: "我来拍照，照片出现后可以直接说你的选择。" });
+      update({ phase: "tool", label: "正在打开取景，请摆好姿势" });
+      feedback?.({ kind: "stage", text: "取景画面会显示在右边，请先摆好姿势。" });
       const result = await photoTool.execute(`quick-photo-${Date.now()}`, photo, signal);
       if (signal.aborted) throw new Error("已停止");
       observeSkillTool("phone_photo", false, result);
@@ -49,6 +49,17 @@ export async function replyToCompanion(text: string, signal: AbortSignal, feedba
       agent?.appendBackgroundResult(reply + "具体作品请查询手机作品记录。");
       update({ phase: "idle", label: "" }); return reply;
     }
+    if (/^原地转(?:一|1)圈[。！!]?$/u.test(text.replace(/\s/gu, ""))) {
+      update({ phase: "idle", label: "" });
+      return "原地转整圈还没有标定。可以说左转、右转或掉头。";
+    }
+    const { isNearbyPatrolRequest } = await import("../navigation/home-voice");
+    if (isNearbyPatrolRequest(text)) {
+      const { startNearbyVoicePatrol } = await import("./home-tools");
+      const reply = await startNearbyVoicePatrol(signal);
+      update({ phase: "idle", label: "" });
+      return reply;
+    }
     const config = await readNewApiConfig();
     if (!config) throw new Error("请在菜单的模型连接中填写中转站和 API Key");
     const identity = JSON.stringify(config); // In memory only. Never logged or persisted outside SecureStore.
@@ -57,6 +68,11 @@ export async function replyToCompanion(text: string, signal: AbortSignal, feedba
       agent?.abort(); binding = identity;
       agent = new CompanionAgent(config, createNewApiStream(config, fetch, (value) => {
         recordDiagnosticEvent("llm", "chat-http", { ...value });
+        if (value.stage === "waiting") {
+          const label = value.status === 200 ? "模型连接已建立，正在等待回复内容" : "还在等待模型服务器响应";
+          update({ phase: "thinking", label });
+          currentFeedback?.({ kind: "stage", text: label + "。" });
+        }
         if (value.stage === "retry") {
           const reason = value.status === 429 ? "服务暂时限制请求" : value.status && value.status >= 500 ? "模型服务暂时不可用"
             : value.reason === "idle-timeout" || value.reason === "total-timeout" ? "等待模型数据超时" : "模型连接暂时不稳定";

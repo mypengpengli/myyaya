@@ -17,9 +17,10 @@ const { ChineseCommandGate, parseChineseRobotCommand, isChineseStop } = commands
 assert.deepEqual(parseChineseRobotCommand("小 丫 小 丫，往 前 走 一 下。"), { kind: "move", direction: "forward" });
 assert.deepEqual(parseChineseRobotCommand("请右转"), { kind: "turn", direction: "right", degrees: 90 });
 assert.deepEqual(parseChineseRobotCommand("小鸭小鸭，点头"), { kind: "nod" });
-for (const text of ["不要前进", "如果我说前进怎么办", "解释左转", "前进然后右转", "向前走五米", "我刚才说小丫小丫前进", "小丫小丫别开灯"]) {
+for (const text of ["不要前进", "如果我说前进怎么办", "解释左转", "前进然后右转", "我刚才说小丫小丫前进", "小丫小丫别开灯"]) {
   assert.equal(parseChineseRobotCommand(text), null, text);
 }
+assert.deepEqual(parseChineseRobotCommand("向前走五米"), {kind:"move",direction:"forward",distanceCm:500});
 assert.ok(isChineseStop("小丫小丫 停下来"));
 assert.equal(isChineseStop("不要停止"), false);
 const gate = new ChineseCommandGate();

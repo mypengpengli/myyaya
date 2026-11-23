@@ -25,7 +25,7 @@ async function capture(cameraFacing: "front" | "back"): Promise<LocalStillCaptur
     return photo;
   } finally { captureBusy = false; }
 }
-export const photoCapture = new PhotoCaptureSession(capture,
+export const photoCapture = new PhotoCaptureSession(
   (photo) => savePhotoArtifact(photo.base64, photo.mimeType, "手机照片"));
 
 /** Observation reuses Camera2 capture and returns an actual image to the model, without opening a Viewer. */

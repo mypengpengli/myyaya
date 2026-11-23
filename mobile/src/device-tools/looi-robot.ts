@@ -689,7 +689,12 @@ async function runBoundedMotion(
   } finally {
     if (generation === state.motionGeneration) {
       robot.stopMoveLoop({ writeStop: false });
-      await stopRobotWithDeadline(robot, "duration-complete").catch(() => undefined);
+      try { await stopRobotWithDeadline(robot, "duration-complete"); }
+      catch (error) {
+        recordDiagnosticEvent("robot", "ble-stop-write-failed", { reason: "duration-complete" });
+        await recoverAfterBleFailure(robot, error, "duration-complete-stop");
+        throw new Error("已发送驱动，停止写入失败，请检查底座");
+      }
       state.motionActive = false;
       state.activeDirection = null;
       state.lastSafetyStopReason = "duration-complete";
@@ -830,7 +835,12 @@ export async function turnLooi(direction: "left" | "right", degrees: 90 | 180 = 
   } finally {
     if (generation === state.motionGeneration) {
       robot.stopMoveLoop({ writeStop: false });
-      await stopRobotWithDeadline(robot, "turn-duration-complete").catch(() => undefined);
+      try { await stopRobotWithDeadline(robot, "turn-duration-complete"); }
+      catch (error) {
+        recordDiagnosticEvent("robot", "ble-stop-write-failed", { reason: "turn-duration-complete" });
+        await recoverAfterBleFailure(robot, error, "turn-duration-complete-stop");
+        throw new Error("已发送驱动，停止写入失败，请检查底座");
+      }
       state.motionActive = false;
       state.activeDirection = null;
       state.lastSafetyStopReason = "duration-complete";

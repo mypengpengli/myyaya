@@ -1,6 +1,6 @@
 export type ChineseRobotCommand =
   | { kind: "stop" }
-  | { kind: "move"; direction: "forward" | "back" }
+  | { kind: "move"; direction: "forward" | "back"; distanceCm?: number }
   | { kind: "turn"; direction: "left" | "right"; degrees: 90 | 180 }
   | { kind: "head"; direction: "up" | "down" | "center" }
   | { kind: "nod" }
@@ -15,14 +15,27 @@ export function compactChinese(text: string): string {
 const ADDRESS = /^(?:小丫小丫|小鸭小鸭|小雅小雅)/u;
 export function splitChineseWake(text: string): { addressed: boolean; command: string } {
   const value = compactChinese(text);
-  return { addressed: ADDRESS.test(value), command: value.replace(ADDRESS, "") };
+  return { addressed: ADDRESS.test(value), command: text.normalize("NFKC").replace(/\s/gu, "").replace(ADDRESS, "").replace(/^[,，、:：]+/u, "") };
 }
 export function isChineseStop(text: string): boolean {
   const { command } = splitChineseWake(text);
-  return /^(?:请)?(?:停|停下|停下来|停止|停止移动|停止运动|停止录像|结束录像|停止录制|紧急停止|别动|不要动|刹车)$/u.test(command);
+  return /^(?:请)?(?:停|停下|停下来|停止|停止移动|停止运动|停止录像|结束录像|停止录制|紧急停止|别动|不要动|刹车)$/u.test(compactChinese(command));
 }
 export function parseChineseRobotCommand(text: string): ChineseRobotCommand | null {
-  const value = splitChineseWake(text).command.replace(/^请/u, "").replace(/(?:一下|一点|一点点)$/u, "");
+  const raw = splitChineseWake(text).command;
+  const value = compactChinese(raw).replace(/^请/u, "").replace(/(?:一下|一点|一点点)$/u, "");
+  const distance = raw.match(/^(?:请)?(?:你)?(?:帮我)?(前进|向前走?|往前走?|后退|向后退|向后走?|往后走?)(\d+(?:\.\d+)?|[一二两三四五六七八九]?十[一二三四五六七八九]?|[零一二两三四五六七八九])(厘米|公分|毫米|米|cm|mm|m)(?:吧)?[。！？,.!?]?$/iu);
+  if (distance) {
+    const number = distance[2];
+    const digits = "零一二三四五六七八九";
+    const digit = (s: string) => digits.indexOf(s.replace("两", "二"));
+    const [tens, units] = number.split("十");
+    const cm = /^\d/.test(number) ? Number(number) : units === undefined ? digit(tens)
+      : (tens ? digit(tens) : 1) * 10 + (units ? digit(units) : 0);
+    const unit = distance[3].toLowerCase();
+    const scale = unit === "米" || unit === "m" ? 100 : unit === "毫米" || unit === "mm" ? 0.1 : 1;
+    return { kind: "move", direction: /前/.test(distance[1]) ? "forward" : "back", distanceCm: cm * scale };
+  }
   if (isChineseStop(value)) return { kind: "stop" };
   if (/^(?:前进|向前|往前|向前走|往前走|前进一步)$/u.test(value)) return { kind: "move", direction: "forward" };
   if (/^(?:后退|退后|向后|往后|向后走|往后走|后退一步)$/u.test(value)) return { kind: "move", direction: "back" };

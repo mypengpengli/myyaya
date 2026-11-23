@@ -126,7 +126,6 @@ export const phoneTools: AgentTool[] = [
       const id = await submitNewHermesTask(args.task, args.returnFiles);
       updateArtifactFocus({ taskId: id });
       const task = getHermesTaskService().list().find((item) => item.id === id);
-      if (task?.runId && AppState.currentState === "active" && !signal?.aborted) router.navigate({ pathname: "/tasks", params: { taskId: id } });
       return text({ id, status: task?.status, accepted: Boolean(task?.runId), notice: task?.notice }); } },
   { name: "hermes_status", label: "正在查看任务结果", description: "查询已经提交的后台任务的真实进度和结果。空编号列出最近任务。",
     parameters: Type.Object({ id: Type.Optional(Type.String()) }), execute: async (_id, params) => {
@@ -146,7 +145,6 @@ export const phoneTools: AgentTool[] = [
       if (!previous) throw new Error("没有可继续的旧任务，请先查询任务记录");
       const id = await continueHermesTask(previous.id, args.task, args.returnFiles);
       const task = getHermesTaskService().list().find((entry) => entry.id === id);
-      if (task?.runId && AppState.currentState === "active") router.navigate({ pathname: "/tasks", params: { taskId: id } });
       return text({ id, previousTaskId: previous.id, sessionId: task?.sessionId, status: task?.status, accepted: Boolean(task?.runId) });
     } },
   { name: "hermes_stop", label: "正在请求停止任务", description: "用户明确要求停止指定的后台任务时请求取消，需根据返回状态确认是否结束。",

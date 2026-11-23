@@ -153,7 +153,9 @@ for (const phase of ["request", "body"]) {
   const response = idle.reply("bounded wait", new AbortController().signal);
   // Register the rejection handler before advancing the virtual deadline.
   const rejected = assert.rejects(response, phase === "request" ? /等待模型响应超时/ : /接收模型回复超时/);
-  await flush(); advance(180_001); await flush(); await rejected;
+  await flush(); advance(12_001); await flush();
+  assert.equal(diagnostics.at(-1).stage, "waiting");
+  advance(168_000); await flush(); await rejected;
   assert.equal(diagnostics.at(-1).reason, "idle-timeout");
   assert.equal(diagnostics.at(-1).receivedBytes, 0);
   assert.equal(diagnostics.at(-1).status, phase === "request" ? undefined : 200);
@@ -169,7 +171,7 @@ const receiptAgent = new CompanionAgent(config, createNewApiStream(config, async
 }), [{ name: "create_media", description: "fixture", parameters: Type.Object({}), execute: async () => {
   submissions++; return { content: [{ type: "text", text: JSON.stringify({ id: "persisted-media-job", status: "submitting", resolution: "2K" }) }], details: {} };
 } }], () => {});
-assert.match(await receiptAgent.reply("generate once", new AbortController().signal), /2K.*任务已在手机建立.*回答没有收完整/);
+assert.match(await receiptAgent.reply("generate once", new AbortController().signal), /2K.*任务已建立.*等待服务端接收.*后续回复中断/);
 assert.equal(submissions, 1);
 await assert.rejects(receiptAgent.reply("an unrelated next turn", new AbortController().signal), /HTTP 502/);
 assert.equal(submissions, 1, "a final model failure never replays an accepted media tool");

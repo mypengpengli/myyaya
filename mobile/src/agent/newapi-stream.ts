@@ -5,7 +5,7 @@ import type { NewApiConfig } from "./newapi-config";
 
 type Transport = (url: string, init: RequestInit) => Promise<Response>;
 export type ChatHttpDiagnostic = {
-  clientRequestId: string; startedAt: string; stage: "request" | "headers" | "receiving" | "complete" | "error" | "retry";
+  clientRequestId: string; startedAt: string; stage: "request" | "headers" | "waiting" | "receiving" | "complete" | "error" | "retry";
   elapsedMs: number; requestBytes: number; receivedBytes: number; dataEvents: number; pendingChars: number;
   completionSeen: boolean; status?: number; requestId?: string; contentType?: string;
   headersMs?: number; firstByteMs?: number; idleMs?: number; reason?: string;
@@ -85,6 +85,9 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport, r
       const expireIdle = () => { timeoutReason = "idle-timeout"; abort(); };
       let timeout = setTimeout(expireIdle, policy.idleMs);
       const overallTimeout = setTimeout(() => { timeoutReason = "total-timeout"; abort(); }, policy.totalMs);
+      const slowResponse = setTimeout(() => {
+        if (!controller.signal.aborted && output.content.length === 0) diagnostic("waiting");
+      }, 12_000);
       const received = () => { lastByteAt = Date.now(); clearTimeout(timeout); timeout = setTimeout(expireIdle, policy.idleMs); };
       let rejectAborted: (() => void) | undefined;
       const aborted = new Promise<never>((_, reject) => {
@@ -214,7 +217,7 @@ export function createNewApiStream(config: NewApiConfig, transport: Transport, r
         if (retry) diagnostic("retry", timeoutReason ?? "transient-request-failure");
         else stream.push({ type: "error", reason: output.stopReason, error: output });
       } finally {
-        clearTimeout(timeout); clearTimeout(overallTimeout); options?.signal?.removeEventListener("abort", abort);
+        clearTimeout(timeout); clearTimeout(overallTimeout); clearTimeout(slowResponse); options?.signal?.removeEventListener("abort", abort);
         if (rejectAborted) controller.signal.removeEventListener("abort", rejectAborted);
         // reader.cancel() only changes Expo's streaming state on Android;
         // abort the actual native request too, including successful open streams.

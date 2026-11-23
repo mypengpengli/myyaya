@@ -2,6 +2,8 @@ import { ChineseCommandGate, compactChinese, isChineseStop, splitChineseWake, ty
 import { CONVERSATION_WINDOW_MS, type ConversationReporter } from "./conversation-feedback";
 import type { ViewerVoice } from "./viewer-voice";
 
+type RecognitionEvent = { sessionId: number; text: string; partial: boolean; rms16?: number; droppedChunks?: number; processingMs?: number };
+
 export type ChineseSpeechState = {
   phase: "off" | "loading" | "listening" | "thinking" | "speaking" | "error";
   mode: "wake" | "dictation"; partial: string; transcript: string; notice: string;
@@ -13,7 +15,7 @@ export interface ChineseSpeechNative {
   stopChineseCapture(): Promise<void>;
   speakChinese(text: string): Promise<void>;
   stopChineseSpeech(): void;
-  addListener(name: "onCommandResult", listener: (event: { sessionId: number; text: string; partial: boolean }) => void): { remove(): void };
+  addListener(name: "onCommandResult", listener: (event: RecognitionEvent) => void): { remove(): void };
   addListener(name: "onRecognizerError", listener: (event: { message: string }) => void): { remove(): void };
 }
 
@@ -29,6 +31,8 @@ export class ChineseVoiceSession {
   private conversationUntil = 0;
   private windowTimer?: ReturnType<typeof setTimeout>;
   private turn = 0;
+  private continuation?: string;
+  private continuationTimer?: ReturnType<typeof setTimeout>;
   private response?: AbortController;
   private responseFeedback?: ConversationReporter;
   private speakingText = "";
@@ -41,7 +45,8 @@ export class ChineseVoiceSession {
     private readonly converse?: (text: string, signal: AbortSignal, feedback?: ConversationReporter) => Promise<string>,
     private readonly handlePhotoVoice?: (command: string) => boolean,
     private readonly photoWaitHint?: () => string | undefined,
-    private readonly viewerVoice?: ViewerVoice) {}
+    private readonly viewerVoice?: ViewerVoice,
+    private readonly observe?: (event: string, details: Record<string, number | string | boolean | undefined>) => void) {}
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private update(patch: Partial<ChineseSpeechState>) { this.state = { ...this.state, ...patch }; this.listeners.forEach((fn) => fn()); }
@@ -50,6 +55,7 @@ export class ChineseVoiceSession {
   private removeListeners() { this.subscriptions.forEach((item) => item.remove()); this.subscriptions = []; }
   private closeWindow() {
     clearTimeout(this.windowTimer); this.windowTimer = undefined; this.conversationUntil = 0; this.gate.reset();
+    this.clearContinuation();
     this.viewerVoice?.reset();
     this.update({ awake: false, listeningUntil: 0 });
   }
@@ -122,7 +128,7 @@ export class ChineseVoiceSession {
       catch (error) { if (this.current(generation)) this.update({ phase: "error", notice: error instanceof Error ? error.message : "请安装系统中文离线音色" }); }
     });
   }
-  private onResult(event: { text: string; partial: boolean }) {
+  private onResult(event: RecognitionEvent) {
     if (!event.text.trim()) {
       if (!event.partial && this.state.partial) {
         this.viewerVoice?.reset();
@@ -133,27 +139,35 @@ export class ChineseVoiceSession {
       return;
     }
     const addressed = splitChineseWake(event.text);
+    const command = compactChinese(addressed.command);
     // AEC is enabled natively. This additional guard prevents an exact fragment
     // of our own spoken reply from becoming a wake/STOP command on weak devices.
     if (this.speakingText && !isChineseStop(event.text) && this.speakingText.includes(compactChinese(event.text))) return;
     this.lastInputAt = Date.now();
     if (event.partial) {
-      this.update({ partial: event.text });
+      if (this.continuation) this.waitForContinuation();
+      this.update({ partial: this.continuation ? this.continuation + event.text : event.text });
       if (this.state.mode === "wake" && (addressed.addressed || this.state.awake && this.state.phase === "listening")) this.openWindow();
     }
-    else this.update({ transcript: event.text, partial: "" });
+    else {
+      this.update({ transcript: event.text, partial: "" });
+      if (this.state.awake || addressed.addressed) this.observe?.("recognized", {
+        sessionId: this.sessionId, characters: event.text.length, rms16: event.rms16, droppedChunks: event.droppedChunks, processingMs: event.processingMs,
+      });
+    }
     const result = this.gate.accept(event.text, event.partial, Date.now());
     if (this.state.mode === "dictation" && result.command?.kind !== "stop") {
       if (!event.partial) void this.stop("已识别，请检查文字再发送；听写不会自动执行动作");
       return;
     }
     if (this.state.mode === "wake" && !result.command && (addressed.addressed || this.state.awake)) {
-      if (!event.partial && this.handlePhotoVoice?.(addressed.command)) {
+      if (!event.partial && this.handlePhotoVoice?.(command)) {
+        this.clearContinuation();
         this.viewerVoice?.reset();
         this.openWindow();
         return;
       }
-      const notice = this.viewerVoice?.hear(addressed.command, event.partial);
+      const notice = this.viewerVoice?.hear(command, event.partial);
       if (notice) {
         this.openWindow();
         if (this.responseFeedback) this.responseFeedback({ kind: "stage", text: notice });
@@ -168,20 +182,60 @@ export class ChineseVoiceSession {
       // A direct physical instruction supersedes any pending model/tool action.
       this.interrupt(result.command.kind !== "stop");
       const generation = this.generation;
-      void this.execute(result.command).then((notice) => { if (this.current(generation)) this.update({ notice }); })
-        .catch((error) => { if (this.current(generation)) this.update({ notice: error instanceof Error ? error.message : "动作执行失败" }); });
+      const actionTurn = this.turn;
+      this.observe?.("local-action-started", { turn: actionTurn, action: result.command.kind });
+      const finish = (notice: string) => {
+        this.observe?.("local-action-result", { turn: actionTurn, notice });
+        if (this.current(generation) && this.turn === actionTurn) {
+          if (result.command?.kind === "stop") this.update({ notice });
+          else void this.sayWhileListening(notice);
+        }
+      };
+      void this.execute(result.command).then(finish, error => finish(error instanceof Error ? error.message : "动作执行失败"));
     } else if (this.converse && !event.partial) {
       if (addressed.addressed) {
         this.interrupt();
-        if (addressed.command) this.beginConversation(addressed.command);
+        if (command) this.acceptUtterance(addressed.command);
         else void this.sayWhileListening("我在听");
       } else if (this.state.phase === "listening" && Date.now() < this.conversationUntil) {
         if (this.speakingText) this.interrupt();
-        this.beginConversation(event.text);
+        this.acceptUtterance(event.text);
       }
     } else if (result.wake) { this.openWindow(); this.update({ notice: "已唤醒，正在听你说" }); }
   }
+  private clearContinuation() {
+    clearTimeout(this.continuationTimer);
+    this.continuation = undefined;
+  }
+  private waitForContinuation() {
+    clearTimeout(this.continuationTimer);
+    this.continuationTimer = setTimeout(() => {
+      if (!this.continuation) return;
+      if (this.state.partial && Date.now() - this.lastInputAt < 4000) {
+        this.waitForContinuation();
+        return;
+      }
+      this.clearContinuation();
+      if (this.state.phase === "listening") {
+        this.update({ partial: "" });
+        void this.sayWhileListening("想把这张照片怎么改？请说完整要求。");
+      }
+    }, 2200);
+  }
+  private acceptUtterance(text: string) {
+    const whole = (this.continuation ?? "") + text;
+    this.clearContinuation();
+    if (/^(?:请|麻烦)?(?:你)?(?:帮我)?把(?:这|刚才那)张(?:照片|图片)(?:给我)?$/u.test(compactChinese(whole))) {
+      this.continuation = whole;
+      this.openWindow();
+      this.update({ notice: "我在听，请继续说怎么改" });
+      this.waitForContinuation();
+      return;
+    }
+    this.beginConversation(whole);
+  }
   private cancelResponse() {
+    this.clearContinuation();
     this.turn++;
     this.response?.abort();
     this.response = undefined;
@@ -194,6 +248,7 @@ export class ChineseVoiceSession {
     const generation = this.generation;
     const hadCapture = this.state.captureActive;
     this.capturePaused = true;
+    this.clearContinuation();
     this.viewerVoice?.reset();
     this.update({ captureActive: false });
     let failed = false;
@@ -254,15 +309,16 @@ export class ChineseVoiceSession {
     const turn = this.turn, generation = this.generation;
     const controller = new AbortController(); this.response = controller;
     const current = () => this.current(generation) && this.turn === turn && !controller.signal.aborted;
+    this.observe?.("conversation-submitted", { turn, characters: text.length });
     this.openWindow(); this.update({ phase: "thinking", acceptedText: text, partial: "", interim: "", notice: "已收到，正在处理" });
     let speechQueue = Promise.resolve(), streamed = "", message = -1, lastFeedbackAt = Date.now();
     const stages = new Set<string>();
-    let specificFeedback = false;
     const say = (value: string, final = false, stillRelevant?: () => boolean) => {
       speechQueue = speechQueue.then(async () => {
         if (!current() || (stillRelevant && !stillRelevant())) return;
         const audible = value.replace(/https?:\/\/\S+/gu, "链接").replace(/[`*_#]/gu, "").trim();
         if (!audible) return;
+        this.observe?.("conversation-tts", { turn, final, characters: audible.length });
         this.speakingText = compactChinese(audible);
         this.update({ phase: final ? "speaking" : "thinking", interim: audible, notice: final ? "小丫在说话" : audible });
         try { await this.native.speakChinese(audible); } catch { /* Text and tools remain usable if TTS fails. */ }
@@ -271,7 +327,6 @@ export class ChineseVoiceSession {
     };
     const feedback: ConversationReporter = (value) => {
       if (!current()) return;
-      if (value.text.trim()) specificFeedback = true;
       lastFeedbackAt = Date.now();
       if (value.kind === "assistant") {
         if (message !== value.message) { message = value.message; streamed = ""; }
@@ -279,16 +334,13 @@ export class ChineseVoiceSession {
       } else if (!stages.has(value.text)) { stages.add(value.text); say(value.text); }
     };
     this.responseFeedback = feedback;
-    const receiptTimer = setTimeout(() => {
-      if (current() && !specificFeedback) say("好的，我来处理。");
-    }, 250);
     let heartbeat: ReturnType<typeof setTimeout>;
     const tick = () => {
       if (!current()) return;
       if (Date.now() - lastFeedbackAt >= 20_000) {
         const hint = this.photoWaitHint?.();
-        const reminder = hint ?? "还在处理中，有结果我会告诉你。";
-        if (!stages.has(reminder)) {
+        const reminder = hint;
+        if (reminder && !stages.has(reminder)) {
           stages.add(reminder);
           const feedbackAt = lastFeedbackAt;
           say(reminder, false, () => !finished && feedbackAt === lastFeedbackAt && hint === this.photoWaitHint?.());
@@ -298,14 +350,16 @@ export class ChineseVoiceSession {
     };
     heartbeat = setTimeout(tick, 20_000);
     let finished = false;
-    const clearFeedbackTimers = () => { finished = true; clearTimeout(receiptTimer); clearTimeout(heartbeat); };
+    const clearFeedbackTimers = () => { finished = true; clearTimeout(heartbeat); };
     controller.signal.addEventListener("abort", clearFeedbackTimers, { once: true });
     void (async () => {
       try {
         const reply = await this.converse!(text, controller.signal, feedback);
         clearFeedbackTimers();
         if (!current()) return;
-        const remaining = streamed && reply.startsWith(streamed) ? reply.slice(streamed.length) : reply;
+        const prefix = streamed.trimStart();
+        const spokenPrefix = [...stages, prefix].filter(item => item && reply.startsWith(item)).sort((a, b) => b.length - a.length)[0] ?? "";
+        const remaining = reply.slice(spokenPrefix.length);
         if (remaining.trim()) say(remaining, true);
         await speechQueue;
         if (!current()) return;

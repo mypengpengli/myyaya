@@ -225,12 +225,14 @@ export default function IndexScreen() {
   }), [router]);
   const interactionNotice = speech.notice && !/^(离线监听中|请说一句话)/.test(speech.notice) ? speech.notice : "";
   const caption = ["preparing", "recording", "saving"].includes(recording.phase) ? recording.notice
+    : photo.phase !== "idle" ? speech.partial || photo.notice
     : robotSleeping ? (appMode === "local" ? "休息中" : t("home.wakeFromSleep")) : speech.phase === "loading" ? "正在准备…"
     : speech.phase === "thinking" ? speech.interim || progress.label || "已收到，正在处理"
     : speech.phase === "error" ? speech.notice || "语音暂不可用" : speech.phase === "speaking" ? "小丫在说话"
     : ((speech.awake || speech.mode === "dictation") && speech.partial) || (speech.phase === "listening" ? interactionNotice || (speech.awake ? "我在听" : "等待唤醒，请说“小丫小丫”") : "小丫");
   const voiceReady = speech.captureActive && !robotSleeping;
-  const voiceStatus = !voiceReady ? "收音未开启" : speech.phase === "speaking" || speech.interim ? "正在播报 · 可说停止"
+  const voiceStatus = !voiceReady ? "收音未开启" : photo.phase === "framing" ? "取景中 · 可说确定或取消"
+    : photo.phase === "review" ? "审片中 · 可说确定、重拍或取消" : speech.phase === "speaking" || speech.interim ? "正在播报 · 可说停止"
     : speech.phase === "thinking" ? "已收到 · 可喊小丫小丫打断"
     : speech.awake || speech.mode === "dictation" ? "已唤醒 · 正在听你说" : "待唤醒 · 请说小丫小丫";
   return <SafeAreaView style={styles.home} {...swipe.panHandlers}>

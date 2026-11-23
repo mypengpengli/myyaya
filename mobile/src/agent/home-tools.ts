@@ -24,6 +24,26 @@ async function request(mapId:string|undefined,command:Record<string,unknown>,sig
     .catch(error=>Alert.alert("家庭导航",error instanceof Error?error.message:String(error)));},0);
   return text({status:"opening_home_setup",saved:false,moving:false,notice:"已打开家庭地图操作，需恢复实际位置并确认最低姿态；尚未记住新地点或到达目的地。"});
 }
+export async function startNearbyVoicePatrol(signal: AbortSignal): Promise<string> {
+  if (signal.aborted || AppState.currentState !== "active") throw new Error("请在前台开始巡视");
+  const command = {op:"inspect",scope:"current",action:"observe"};
+  if (getNavigationControlOwner()) {
+    await sendHomeCommand(command);
+    return "已安排附近巡视，正在准备地面观察。";
+  }
+  const homes = await listHomeAtlases();
+  if (homes.length > 1) throw new Error("请在家庭地图选择当前地点，再说到周围转一圈。");
+  const {openHomeNavigation} = await import("../navigation/route-robot-session");
+  if (signal.aborted) throw new Error("已取消巡视");
+  void openHomeNavigation({mapId:homes[0]?.mapId,command}).catch(async error => {
+    const notice = error instanceof Error ? error.message : "巡视准备失败";
+    Alert.alert("附近巡视", notice);
+    if (AppState.currentState === "active") {
+      await (await import("../../modules/vosk-command-recognizer")).default.speakChinese(notice).catch(() => {});
+    }
+  });
+  return "正在打开附近巡视。";
+}
 export function createHomeTools():AgentTool[] {return [
   {name:"create_home_location",label:"正在建立新地点地图",description:"用户明确说搬家、来到全新场所并要求记为新地点时使用。创建独立地图，地图、房间、路线和视觉地标按地点隔离保存。普通的这里是厨房应使用edit_home_place记住房间。打开设置只表示准备，需实际扫描后才能记路。",parameters:Type.Object({name:Type.String({minLength:1,maxLength:40})}),execute:async(_id,p,signal)=>request(undefined,{op:"new_location",name:(p as {name:string}).name},signal)},
   {name:"inspect_home",label:"正在安排房间巡查与返回",description:"用户要求逛房间、巡视各个房间、去厨房拍照再回来时使用。scope=current在当前位置短巡查补图；all依次巡视已登记可达房间；place指定真实地点。已有地图复用，不因建过图跳过观察。action=photo自动拍照保存再返回；observe记录见闻；rescan只补扫指定位置，不声称重建全屋。需定位和姿态准备，opening不是已发车。返回原出发位置后才汇报返回成功，无可用路线明确失败。",parameters:Type.Object({map_id:Type.Optional(Type.String()),scope:Type.Union([Type.Literal("current"),Type.Literal("all"),Type.Literal("place")]),action:Type.Optional(Type.Union([Type.Literal("observe"),Type.Literal("photo"),Type.Literal("rescan")])),place_id:Type.Optional(Type.String())}),execute:async(_id,p,signal)=>{

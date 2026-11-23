@@ -9,6 +9,9 @@ import org.vosk.Model
 import org.vosk.Recognizer
 import java.io.File
 import java.io.FileOutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -19,6 +22,7 @@ import kotlin.math.sqrt
 class VoskCommandRecognizerModule : Module() {
   private val executor = Executors.newSingleThreadExecutor()
   private val queuedChunks = AtomicInteger(0)
+  private val droppedChunks = AtomicInteger(0)
   private val resetGeneration = AtomicInteger(0)
   private val resetCount = AtomicInteger(0)
   private val samplesSinceReset = AtomicLong(0)
@@ -46,9 +50,17 @@ class VoskCommandRecognizerModule : Module() {
   @Volatile private var appliedResetGeneration: Int = 0
   private var chineseBridge: ChineseSpeechBridge? = null
 
+  @Volatile private var diagnosticPcm: ByteBuffer? = null
   private fun bridge(): ChineseSpeechBridge = chineseBridge ?: ChineseSpeechBridge(
     appContext.reactContext ?: throw IllegalStateException("React context unavailable"),
-    { pcm -> enqueuePcm(pcm) },
+    { pcm ->
+      val sample = diagnosticPcm
+      if (sample == null) enqueuePcm(pcm)
+      else for (value in pcm) {
+        if (sample.remaining() < 2) break
+        sample.putShort(value.toInt().toShort())
+      }
+    },
     { message -> sendError("chinese-capture", IllegalStateException(message)) }
   ).also { chineseBridge = it }
 
@@ -58,6 +70,7 @@ class VoskCommandRecognizerModule : Module() {
     Events("onCommandResult", "onEmergencyStop", "onEmergencyUnknown", "onEmergencyHealth", "onModelReady", "onRecognizerError", "onRecognizerState")
 
     AsyncFunction("prepareChinese") {
+      check(diagnosticPcm == null) { "Speech sample already active" }
       bridge().stopCapture()
       executor.submit {}.get()
       prepareRecognizer("zh", "vosk-command-cn-0.22", "__dictation__", "[\"[unk]\"]")
@@ -70,6 +83,61 @@ class VoskCommandRecognizerModule : Module() {
     AsyncFunction("stopChineseCapture") {
       bridge().stopCapture()
       executor.submit {}.get()
+    }
+    AsyncFunction("setChinesePhotoMode") { enabled: Boolean ->
+      executor.submit {
+        if (currentLanguage == "zh" && currentGrammar == "__dictation__") {
+          recognizer?.setEndpointerDelays(3.0f, if (enabled) 0.5f else 1.1f, 25.0f)
+        }
+      }.get()
+    }
+    AsyncFunction("startChineseSample") {
+      check(diagnosticPcm == null) { "Speech sample already active" }
+      bridge().stopCapture()
+      executor.submit {}.get()
+      if (currentLanguage != "zh" || currentGrammar != "__dictation__" || recognizer == null) {
+        prepareRecognizer("zh", "vosk-command-cn-0.22", "__dictation__", "[\"[unk]\"]")
+      } else executor.submit {
+        recognizer?.reset()
+        lastPartial = ""
+      }.get()
+      diagnosticPcm = ByteBuffer.allocate(16000 * 2 * 8).order(ByteOrder.LITTLE_ENDIAN)
+      try { bridge().startCapture() }
+      catch (error: Throwable) { diagnosticPcm = null; throw error }
+    }
+    AsyncFunction("finishChineseSample") { save: Boolean ->
+      val sample = diagnosticPcm
+      bridge().stopCapture()
+      diagnosticPcm = null
+      if (save && sample != null && sample.position() > 0) executor.submit<Map<String, Any>> {
+        val count = sample.position() / 2
+        val values = ShortArray(count)
+        sample.flip()
+        sample.asShortBuffer().get(values)
+        val started = SystemClock.elapsedRealtime()
+        val text = Recognizer(requireNotNull(model), 16000.0f).use { decoder ->
+          decoder.setEndpointerDelays(3.0f, 1.1f, 25.0f)
+          val parts = mutableListOf<String>()
+          for (start in values.indices step 1600) {
+            val pcm = values.copyOfRange(start, min(start + 1600, count))
+            if (decoder.acceptWaveForm(pcm, pcm.size)) parts += JSONObject(decoder.result).optString("text")
+          }
+          parts += JSONObject(decoder.finalResult).optString("text")
+          parts.filter { it.isNotBlank() }.joinToString(" ")
+        }
+        val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN).apply {
+          put("RIFF".toByteArray()); putInt(36 + count * 2); put("WAVEfmt ".toByteArray())
+          putInt(16); putShort(1); putShort(1); putInt(16000); putInt(32000); putShort(2); putShort(16)
+          put("data".toByteArray()); putInt(count * 2)
+        }
+        val context = requireNotNull(appContext.reactContext)
+        val wav = File(context.cacheDir, "speech-sample-${UUID.randomUUID()}.wav")
+        FileOutputStream(wav).use { it.write(header.array()); it.write(sample.array(), 0, count * 2) }
+        val rms = sqrt(values.sumOf { it.toDouble() * it } / count)
+        mapOf("uri" to "file://" + wav.path, "text" to text, "durationMs" to count / 16,
+          "rms" to rms, "clipped" to values.count { it <= -32760 || it >= 32760 },
+          "decodeMs" to (SystemClock.elapsedRealtime() - started))
+      }.get() else null
     }
     AsyncFunction("speakChinese") { text: String, promise: expo.modules.kotlin.Promise -> bridge().speak(text, promise) }
     Function("stopChineseSpeech") { chineseBridge?.stopSpeech() }
@@ -180,7 +248,7 @@ class VoskCommandRecognizerModule : Module() {
         "ready" to (recognizer != null), "language" to currentLanguage,
         "queuedChunks" to queuedChunks.get(), "sessionId" to currentSessionId,
         "resetGeneration" to appliedResetGeneration, "resetCount" to resetCount.get(),
-        "droppedChunks" to 0, "samplesSinceReset" to samplesSinceReset.get(),
+        "droppedChunks" to droppedChunks.get(), "samplesSinceReset" to samplesSinceReset.get(),
         "emergencySamplesSinceReset" to emergencySamplesSinceReset.get(),
         "emergencyArmed" to emergencyArmed, "emergencyArmGeneration" to emergencyArmGeneration.get()
       )
@@ -194,7 +262,8 @@ class VoskCommandRecognizerModule : Module() {
   }
 
   private fun enqueuePcm(pcm: FloatArray) {
-      if (recognizer == null || queuedChunks.get() >= 12) return
+      if (recognizer == null) return
+      if (queuedChunks.get() >= 12) { droppedChunks.incrementAndGet(); return }
       val feedEmergencyGeneration = if (emergencyArmed) emergencyArmGeneration.get() else 0
       queuedChunks.incrementAndGet()
       executor.execute {
@@ -294,7 +363,7 @@ class VoskCommandRecognizerModule : Module() {
             "resetGeneration" to appliedResetGeneration,
             "samplesSinceReset" to fedSamples,
             "queuedChunks" to queuedChunks.get(),
-            "droppedChunks" to 0,
+            "droppedChunks" to droppedChunks.get(),
             "endpoint" to endpoint,
             "rms16" to rms16,
             // Keep this metric comparable with prior builds: normal recognizer
@@ -404,7 +473,8 @@ class VoskCommandRecognizerModule : Module() {
       it.setEndpointerMode(Recognizer.EndpointerMode.SHORT)
       // Restored v1.1.36 command behavior after the v1.1.37 600 ms endpoint
       // experiment regressed repeated driving control on the physical robot.
-      it.setEndpointerDelays(3.0f, 0.26f, 5.0f)
+      if (language == "zh" && grammarJson == "__dictation__") it.setEndpointerDelays(3.0f, 1.1f, 25.0f)
+      else it.setEndpointerDelays(3.0f, 0.26f, 5.0f)
     }
     emergencyRecognizer = Recognizer(model, 16000.0f, emergencyGrammarJson).also {
       it.setWords(false)
@@ -414,6 +484,7 @@ class VoskCommandRecognizerModule : Module() {
       // partial. Keep finalization short for cases where only final text appears.
       it.setEndpointerDelays(3.0f, 0.12f, 3.0f)
     }
+    droppedChunks.set(0)
     val recognizerCreateMs = SystemClock.elapsedRealtime() - recognizerStarted
     lastPartial = ""
     lastEmergencyPartial = ""

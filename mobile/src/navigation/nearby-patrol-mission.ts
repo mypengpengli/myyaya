@@ -9,7 +9,7 @@ import {NearbyPatrol} from "./nearby-patrol";
 
 /** Uses the same native feedback/obstacle checks as destination navigation; no timed blind walk. */
 export async function runNearbyPatrolMission(initial: HomePlan) {
-  const started=Date.now();let token="",failure="",completed=false,returned=false;
+  const started=Date.now();let token="",failure="",completed=false,returned=false, departingSpoken=false, returningSpoken=false;
   let prepared:Awaited<ReturnType<typeof prepareNativeNavigationDrive>>|undefined;
   let checkpoint:Record<string,unknown>={};
   let inspection:Awaited<ReturnType<typeof import("../inspection/inspection-mission").beginInspection>>;
@@ -74,6 +74,13 @@ export async function runNearbyPatrolMission(initial: HomePlan) {
         }
         while(coverage.size>8000)coverage.delete(coverage.keys().next().value!);
         checkpoint={patrolTrail:tour.trail.map(p=>localToHome(p,origin)),patrolElapsedMs:elapsed,coverage:[...coverage.values()]};
+        if ((tour.moved && !departingSpoken) || (tour.moved && returned && !returningSpoken)) {
+          const returning = returned;
+          departingSpoken = true;
+          if (returning) returningSpoken = true;
+          void import("../../modules/vosk-command-recognizer").then(({default:voice}) =>
+            voice.speakChinese(returning ? "观察点已记录，我开始返回起点。" : "已开始移动，正在观察附近地面。")).catch(()=>{});
+        }
         if(Date.now()-lastSave>3000){lastSave=Date.now();await publishHomeProgress({taskId:plan.taskId,phase:"RUNNING",...checkpoint,
           reason:returned?tour.reason:"正在附近观察，绿色为已观察地面；最多80厘米范围"});}
         errors=0;

@@ -9,6 +9,7 @@ import { isChineseWakeEnabled, subscribeChineseWake } from "./chinese-voice-pref
 import { hasCompletedRobotOnboarding } from "../setup/setup-storage";
 import { resultPresentation } from "../artifacts/presentation";
 import { videoControl } from "../artifacts/video-control";
+import { recordDiagnosticEvent } from "../diagnostics/diagnostic-log";
 import { ViewerVoice } from "./viewer-voice";
 
 let focused = 0;
@@ -34,11 +35,13 @@ export const chineseVoice = new ChineseVoiceSession(VoskCommandRecognizer, async
   command => photoSession().handleVoice(command),
   () => {
     const review = photoSession().getSnapshot();
+    if (review.phase === "framing" && review.ready) return "取景已就绪，摆好姿势后可以拍摄。";
     if (review.phase === "saving") return "正在保存照片。";
     if (review.phase === "capturing") return "还在等待相机拍回照片。";
     if (review.phase === "review") return !review.photo ? "没有拍到照片，请按屏幕提示选择。"
       : review.notice.includes("保存失败") ? "这张还没保存，请按屏幕提示选择。" : "照片已经拍好，正在等你选择。";
-  }, new ViewerVoice(resultPresentation, videoControl, () => photoSession().getSnapshot().phase === "idle"));
+  }, new ViewerVoice(resultPresentation, videoControl, () => photoSession().getSnapshot().phase === "idle"),
+  (event, details) => recordDiagnosticEvent("stt", event, details));
 
 export function focusChineseVoiceScreen({ autoStart = false }: { autoStart?: boolean } = {}): () => void {
   const owner = ++focusGeneration;

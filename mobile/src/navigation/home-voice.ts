@@ -8,7 +8,7 @@ export function parseHomeVoice(text:string):Record<string,string>|null {
   if(/^(?:巡视|巡查|逛一圈)(?:各个房间|全部房间|全屋)$/u.test(s))return {op:"inspect",scope:"all",action:"observe"};
   let task=s.match(/^(?:去|到)(.{1,30}?)(?:拍照|拍张照片|拍一张照片)(?:然后|再)?回来$/u);if(task)return {op:"inspect",scope:"place",action:"photo",target:task[1]};
   task=s.match(/^(?:重新绘制|重新扫描|补扫)(.{1,30})$/u);if(task)return {op:"inspect",scope:"place",action:"rescan",target:task[1]};
-  if(/^(?:在|把|去)?(?:房间|附近|这里)?(?:逛一圈|转一圈|逛一下|转转)(?:然后回来|再回来|就回来|吧)?$/u.test(s))return {op:"patrol"};
+  if (isNearbyPatrolRequest(s)) return {op:"patrol"};
   if(/^(?:暂停|暂停导航|停下|停止|停一下|别走了)$/u.test(s))return {op:"pause"};
   if(/^(?:继续|继续导航|继续走)$/u.test(s))return {op:"resume"};
   if(/^(?:取消|取消导航|结束导航)$/u.test(s))return {op:"cancel"};
@@ -24,4 +24,10 @@ export function parseHomeVoice(text:string):Record<string,string>|null {
   m=s.match(/^开始带领(?:从)?(.{1,40})$/u);if(m)return {op:"teach",name:m[1]};
   m=s.match(/^(?:结束带领|结束路线)(?:到)?(.{1,40})$/u);if(m)return {op:"finish",name:m[1]};
   return null;
+}
+
+export function isNearbyPatrolRequest(text: string): boolean {
+  const value = compactChinese(text).replace(/^(?:小丫小丫|小鸭小鸭|小雅小雅)/u, "");
+  return /^(?:请)?(?:你)?(?:帮我)?(?:在|把|去|到)?(?:房间|附近|周围|四周|这里)?(?:逛一圈|转一圈|巡一圈|巡视一圈|巡查一圈|看看|逛一下|转转)(?:然后回来|再回来|就回来)?(?:吧)?$/u.test(value) &&
+    (!/看看/u.test(value) || /(?:附近|周围|四周).+回来/u.test(value));
 }

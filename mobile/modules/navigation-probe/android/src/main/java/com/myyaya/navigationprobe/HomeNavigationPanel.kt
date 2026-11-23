@@ -101,10 +101,18 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
   }
   @Synchronized fun confirm() {check(motor.isConnected()){ "请先连接LOOI" };check(floorHeight()!=null){"请填写镜头高度"}
     check(mountAngles!=null){"请先打开实时相机"};confirmedAngles=mountAngles
-    confirmedConnection=motor.connectionRevision;say("已记录最低姿态确认；断连后需要再次确认。")
-    pendingCommands.pending?.let {request->command(request);pendingCommands.completed(request)}
+    confirmedConnection=motor.connectionRevision
+    say(if (pendingCommands.pending != null && !freshPose()) "最低姿态已确认，正在等待地图定位；恢复后执行本次请求。"
+        else "已记录最低姿态确认；断连后需要再次确认。")
+    runPendingCommand()
   }
   @Synchronized fun queue(request: JSONObject) {sync();pendingCommands.queue(request);say("已打开所需操作，请恢复地图定位并确认最低姿态后执行。")}
+  private fun runPendingCommand() {
+    val request = pendingCommands.pending ?: return
+    if (!motor.isConnected() || confirmedConnection != motor.connectionRevision || !freshPose()) return
+    pendingCommands.completed(request)
+    attempt { command(request) }
+  }
   private fun freshPose()=frameAtMs>0 && SystemClock.elapsedRealtime()-frameAtMs in 0..300 && tracker.ready(frameTimestampNs)
   @Synchronized private fun pose(): HomePose {check(freshPose()){tracker.reason};return requireNotNull(tracker.pose)}
   @Synchronized fun status(): Map<String,Any?> {
@@ -126,6 +134,7 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
     fun yaw(c: RigidPose): Double {val q=c.q;return atan2(-2.0*(q[0]*q[2]+q[1]*q[3]),1.0-2.0*(q[0]*q[0]+q[1]*q[1]))}
     val known=mapped?.let {val y=yaw(it);HomePose(it.t[0]+cos(y)*r+sin(y)*f,-it.t[2]-sin(y)*r+cos(y)*f,y)}
     tracker.frame(mapId,session,ns,yaw(raw),known,flow,r,f)
+    runPendingCommand()
     if(teaching) {
       if(tracker.revision!=teachingRevision || !tracker.ready(ns) && lastTeachingFrame>0 && ns-lastTeachingFrame>800_000_000L) {
         teaching=false;held=null;motor.stop("带领定位中断");say("带领已中断，当前未完成路段没有保存，请重新定位")

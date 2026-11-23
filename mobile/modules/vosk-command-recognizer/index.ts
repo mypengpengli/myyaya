@@ -99,6 +99,9 @@ declare class VoskCommandRecognizerModule extends NativeModule<VoskCommandRecogn
   prepareChinese(): Promise<{ sessionId: number; sampleRate: number }>;
   startChineseCapture(): Promise<{ running: boolean; sampleRate: number }>;
   stopChineseCapture(): Promise<void>;
+  setChinesePhotoMode(enabled: boolean): Promise<void>;
+  startChineseSample(): Promise<{ running: boolean }>;
+  finishChineseSample(save: boolean): Promise<{ uri: string; text: string; rms: number; clipped: number; durationMs: number; decodeMs: number } | null>;
   speakChinese(text: string): Promise<void>;
   stopChineseSpeech(): void;
   prepare(language: string, assetDir: string, grammarJson: string, emergencyGrammarJson: string): Promise<void>;
