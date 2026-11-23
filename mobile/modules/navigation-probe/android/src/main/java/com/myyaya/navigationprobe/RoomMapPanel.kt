@@ -24,8 +24,15 @@ import kotlin.math.*
 
 /** Native mapping UI. No motor APIs. All ARCore objects are accessed on the GL thread. */
 internal class RoomMapPanel(private val activity: Activity, private val stopAndReset: () -> Unit,
-  private val pauseOnly: () -> Unit, motor: RouteMotorGateway?=null) {
-  private val directory = File(activity.filesDir,"room-maps").apply { mkdirs() }
+  private val pauseOnly: () -> Unit, motor: RouteMotorGateway?=null,private val replayQuery: Boolean=false,
+  replayMode: Boolean=false) {
+  private val directory = (if(replayMode)File(activity.cacheDir,"replay-room-maps") else File(activity.filesDir,"room-maps")).apply { mkdirs() }
+  private val visual=VisualRelocalizer(directory,File(activity.getExternalFilesDir("navigation-probe") ?: activity.filesDir,"visual-evidence"))
+  private val replayVisual=VisualRelocalizer(File(activity.cacheDir,"visual-replay"),
+    File(activity.getExternalFilesDir("navigation-probe") ?: activity.filesDir,"visual-replay-evidence"))
+  private var visualAnchor: Anchor?=null
+  private var visualAnchorFromMap=RigidPose.IDENTITY
+  private lateinit var visualState: TextView
   private val io = Executors.newSingleThreadExecutor()
   @Volatile private var depthRecorder=DepthEvidenceRecorder(activity.getExternalFilesDir("navigation-probe") ?: activity.filesDir,io)
   private val floorFlow=FloorFlowDiagnostic(File(activity.getExternalFilesDir("navigation-probe") ?: activity.filesDir,"floor-flow-evidence"))
@@ -54,6 +61,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   @Volatile private var observedGround: GroundPlane?=null
   @Volatile private var freshMap = false
   @Volatile private var sessionId = ""
+  private var configuredMapId=""
   @Volatile private var active = false
   @Volatile private var saving = false
   @Volatile private var pendingSave: RoomMapData? = null
@@ -117,6 +125,12 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   fun buildColumn(): View = LinearLayout(activity).apply {
     orientation=LinearLayout.VERTICAL
     title=label("房间表面地图"); addView(title)
+    visualState=label("视觉记路准备中；扫描已定位的场景后会自动保存地标。")
+    addView(visualState)
+    addView(LinearLayout(activity).apply {
+      addView(button("识别地点 / 切换地图") {chooseVisualLocation()},LinearLayout.LayoutParams(0,-2,1f))
+      addView(button("搬家 / 新地点") {newMap()},LinearLayout.LayoutParams(0,-2,1f))
+    })
     state=label("新建地图后开始扫描。青色是观测到的表面，黑色是未知，不代表可通行区域。")
     val terrainActions=LinearLayout(activity)
     terrainActions.addView(button("点选平面") {
@@ -151,14 +165,14 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     addView(state)
     mapView=SurfaceMapView(activity); addView(mapView,LinearLayout.LayoutParams(-1,(130*resources.displayMetrics.density).toInt()))
     places=label("尚无地点。扫描时可将当前位置命名为客厅、沙发旁等。"); addView(places)
-    addView(label("保存并重新打开地图后，只有识别到已登记的固定参照图，才会恢复当前位置。未设置参照图的旧地图仅供查看。"))
+    addView(label("保存并重新打开地图后，可观察记住的场景或固定参照图恢复位置。请核对已保存视角数。"))
     val first=LinearLayout(activity)
     first.addView(button("新建地图") { newMap() },LinearLayout.LayoutParams(0,-2,1f))
     first.addView(button("打开地图") { openMap() },LinearLayout.LayoutParams(0,-2,1f))
     first.addView(button("设置参照图") { chooseReference() },LinearLayout.LayoutParams(0,-2,1f))
     addView(first,1)
     taughtRoutes?.let { addView(it.buildView(),2) }
-    homeNavigation?.let {addView(it.buildView(),3)}
+    homeNavigation?.let {addView(it.buildView(),5)}
   }
   fun addActions(actions: LinearLayout) {
     taughtRoutes?.let { panel->actions.addView(button("停止导航") { stopTaughtRoute("用户停止") }.apply {
@@ -390,7 +404,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   private fun newMap() {
     if (saving) { toast("正在保存地图，请稍后"); return }
     val input=EditText(activity).apply { hint="例如：客厅"; setSingleLine() }
-    AlertDialog.Builder(activity).setTitle("新建房间地图").setView(input)
+    AlertDialog.Builder(activity).setTitle("新建独立地点地图").setView(input)
       .setMessage("当前地图会先保存。先人工带领扫描，不会驱动底座。")
       .setNegativeButton("取消",null).setPositiveButton("新建") { _,_ ->
         val clean=input.text.toString().trim().take(40)
@@ -431,12 +445,28 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
               val selected=maps[index]
               val map=mapper?.snapshot()?.takeIf { it.id==selected.id } ?: selected
               mapper=RoomMapper(map); freshMap=false; name=map.name
-              render(map,if (map.referenceJpeg.isEmpty()) "旧地图已打开，仅供查看。未登记固定参照图，不能恢复位置或追加扫描。"
-                else "旧地图已打开，当前位置无效。开始扫描后，将后摄对准原位置的参照图。")
+              render(map,"地图已打开。开始扫描后观察保存过的门框、柜边等场景，或识别固定参照图恢复位置。")
             }
           }.setNegativeButton("取消",null).show()
       }
     }
+  }
+  private fun chooseVisualLocation() {
+    val id=visual.report()["candidateMapId"] as? String
+    if(id==null || visual.report()["status"]!="MATCH_CONFIRMED") {
+      AlertDialog.Builder(activity).setTitle("识别当前地点")
+        .setMessage("尚未确认当前地点。请开始扫描，缓慢转看保存过的场景。也可以手动打开地图，或为新家建立独立地图。")
+        .setPositiveButton("打开已有地图") {_,_->openMap()}.setNeutralButton("新地点") {_,_->newMap()}.setNegativeButton("继续观察",null).show()
+      return
+    }
+    runCatching {
+      val map=read(File(directory,"$id.yayamap"))
+      AlertDialog.Builder(activity).setTitle("识别到 ${map.name}")
+        .setMessage("切换后重新观察场景恢复位置，再继续导航。")
+        .setPositiveButton("使用这张地图") {_,_->
+          if(!saving)replaceAfterSave {mapper=RoomMapper(map);freshMap=false;name=map.name;render(map,"已切换地点，请开始扫描恢复位置。")}
+        }.setNegativeButton("这是新地点") {_,_->newMap()}.show()
+    }.onFailure {toast("无法打开识别到的地图，请手动选择")}
   }
   private fun chooseReference() {
     if (saving || restoring) { toast("正在保存或恢复地图，请稍后"); return }
@@ -639,6 +669,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
 
   /** Before Session.configure. Called on UI thread while GL is stopped. */
   fun configure(session: Session,id: String,config: Config) {
+    val preserveAnchors=sessionId==id && configuredMapId==mapper?.metadata()?.id
     lastTerrainUiNs=0
     depthReadiness.reset();depthState=LocalDepthReadiness.State()
     generation++
@@ -646,14 +677,20 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     horizontalPlanes=0
     referenceState="NOT_SEEN"; referenceMethod="NOT_SEEN"; knownReferenceImages=0
     configuredReferenceImages=0
-    runCatching { anchor?.detach() }; anchor=null; stableImage=null; stableCount=0; stableSince=0
-    runCatching { sessionOriginAnchor?.detach() };sessionOriginAnchor=null;originAnchorRetired=false
+    if(!preserveAnchors) {
+      runCatching { visualAnchor?.detach() };visualAnchor=null
+      visualAnchorFromMap=RigidPose.IDENTITY
+      runCatching { anchor?.detach() };anchor=null
+      runCatching { sessionOriginAnchor?.detach() };sessionOriginAnchor=null;originAnchorRetired=false
+    }
+    stableImage=null;stableCount=0;stableSince=0
     originAnchorState="NOT_CREATED";originAnchorPose=null
     sessionId=id
     if (freshMap) {
       mapper=mapper?.snapshot()?.let { RoomMapper(it.copy(sessionId=id)) }; freshMap=false
     }
     val current=mapper ?: return
+    configuredMapId=current.metadata().id
     current.bindSession(id)
     val map=current.snapshot()
     if (map.referenceJpeg.isNotEmpty()) {
@@ -666,7 +703,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     }
   }
   fun pause() { homeNavigation?.stop("相机已暂停");taughtRoutes?.pause();generation++; active=false; depthReadiness.reset();depthState=LocalDepthReadiness.State();mapper?.invalidate(); clearTerrain(); renderTerrain(); if (::mapView.isInitialized) { mapView.position=null; mapView.forward=null; mapView.invalidate(); state.text="扫描已暂停，当前位置无效。地图可保存或重新打开。" } }
-  fun close() { runCatching { sessionOriginAnchor?.detach() };sessionOriginAnchor=null;floorFlow.close();io.shutdown();localPlannerWorker.shutdown() }
+  fun close() {visual.close();replayVisual.close();runCatching {visualAnchor?.detach()};visualAnchor=null; runCatching { sessionOriginAnchor?.detach() };sessionOriginAnchor=null;floorFlow.close();io.shutdown();localPlannerWorker.shutdown() }
   fun report(): Map<String,Any?>? = mapper?.summary()?.let { it + mapOf("lastSavedAt" to if (it["mapId"]==savedId) savedAt else 0L,
     "taughtRoute" to taughtRoutes?.report(),
     "referenceTrackingState" to referenceState,"referenceTrackingMethod" to referenceMethod,
@@ -687,8 +724,20 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       "depthCapture" to depthRecorder.report()))) }
   fun canStart() = mapper != null && !saving && !restoring
   fun stopTaughtRoute(reason: String) {homeNavigation?.stop(reason);taughtRoutes?.stop(reason) }
-  fun homeStatus()=requireNotNull(homeNavigation).status()
-  fun homeCommand(data: org.json.JSONObject)=requireNotNull(homeNavigation).command(data)
+  fun homeStatus()=requireNotNull(homeNavigation).status()+mapOf("visualLocalization" to visual.report())
+  fun homeCommand(data: org.json.JSONObject): Map<String,Any?> {
+    if(data.optString("op")=="new_location") {
+      check(!saving){"正在保存地图，请稍后"}
+      val clean=data.getString("name").trim();require(clean.length in 1..40){"请提供地点名称"}
+      replaceAfterSave {
+        val map=RoomMapData(name=clean,sessionId="pending");mapper=RoomMapper(map);freshMap=true;name=clean
+        save(true);requireNotNull(homeNavigation).command(org.json.JSONObject().put("op","status"))
+        render(map,"已建立独立地点，请开始扫描。旧地点地图已保存。")
+      }
+      return mapOf("status" to "creating_location","name" to clean,"saved" to false,"moving" to false)
+    }
+    return requireNotNull(homeNavigation).command(data)+mapOf("visualLocalization" to visual.report())
+  }
   fun homePlan()=requireNotNull(homeNavigation).plan()
   fun homeProgress(data: org.json.JSONObject) {requireNotNull(homeNavigation).progress(data)}
   fun openHomeConfiguration(data: org.json.JSONObject): Boolean {
@@ -698,14 +747,19 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       val map=read(File(directory,"$id.yayamap"));mapper=RoomMapper(map);freshMap=false;name=map.name
       render(map,"请恢复固定参照图定位，再使用家庭导航。")
     } else {
-      val map=RoomMapData(name="我的家",sessionId="pending");mapper=RoomMapper(map);freshMap=true;name=map.name
-      render(map,"先登记固定参照图，确认最低姿态，再带领经过房间和门口。")
+      val newLocation=data.optJSONObject("command")?.takeIf {it.optString("op")=="new_location"}
+      val clean=newLocation?.getString("name")?.trim() ?: "我的家"
+      require(clean.length in 1..40)
+      val map=RoomMapData(name=clean,sessionId="pending");mapper=RoomMapper(map);freshMap=true;name=map.name
+      render(map,"开始扫描记住当前地点的视觉地标，再确认最低姿态、带领经过房间和门口。")
+      if(newLocation!=null) {save(true);requireNotNull(homeNavigation).command(org.json.JSONObject().put("op","status"));return true}
     }
     data.optJSONObject("command")?.let {request->
+      if(request.optString("op")=="new_location") {homeCommand(request);return@let}
       if(request.optString("op") in setOf("pause","cancel","status","rename","remove","link_enabled","remove_zone"))requireNotNull(homeNavigation).command(request)
       else requireNotNull(homeNavigation).queue(request)
     }
-    return mapper?.snapshotReference()==true
+    return mapper!=null
   }
   fun diagnosticField(direction: String,confirmed: Boolean,stepMs: Int,batchId: String,promise: expo.modules.kotlin.Promise) {
     val panel=taughtRoutes
@@ -732,8 +786,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       taughtRoutes?.selectInitial(route);render(map,"已打开路线所属地图。开始扫描后识别同一固定参照图恢复定位。")
     }.onFailure { toast("无法打开指定路线：${it.message}") }
   }
-  fun newPlaybackMap() {
-    mapper=RoomMapper(RoomMapData(name="录制回放",sessionId="pending"));freshMap=true
+  fun newPlaybackMap(id: String=UUID.randomUUID().toString()) {
+    mapper=RoomMapper(RoomMapData(id=id,name="录制回放",sessionId="pending"));freshMap=true
     mapper?.snapshot()?.let { render(it,"录制回放，不驱动底座。点击开始扫描后可分析已录场景。") }
   }
   /** Feed camera images independently of raw-depth polling; two cadence gates halve visual throughput. */
@@ -758,6 +812,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     val token=generation
     val current=mapper ?: return
     val tracking=frame.camera.trackingState==TrackingState.TRACKING
+    val replaying=session.playbackStatus!=PlaybackStatus.NONE
     horizontalPlanes=if (tracking) session.getAllTrackables(Plane::class.java).count {
       it.trackingState==TrackingState.TRACKING && it.type==Plane.Type.HORIZONTAL_UPWARD_FACING && it.subsumedBy==null
     } else 0
@@ -813,7 +868,46 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       if(tracking && originAnchorPose!=null) basisReady=current.alignSessionOrigin(sessionId,originAnchorPose!!)
       if(!basisReady) current.invalidate()
     }
+    if(!tracking) {runCatching {visualAnchor?.detach()};visualAnchor=null}
+    if(visualAnchor?.trackingState==TrackingState.STOPPED){visualAnchor?.detach();visualAnchor=null}
+    if(!basisReady && tracking) {
+      val found=visual.candidate(sessionId,frame.timestamp)
+      if(visualAnchor==null && found?.mapId==current.metadata().id) {
+        val camera=rigid(frame.camera.pose)
+        visualAnchor=runCatching {session.createAnchor(frame.camera.pose)}.getOrNull()
+        visualAnchorFromMap=camera.inverse().compose(found.worldFromMap)
+      }
+      visualAnchor?.takeIf {it.trackingState==TrackingState.TRACKING}?.let {basisReady=current.alignVisual(sessionId,rigid(it.pose).compose(visualAnchorFromMap))}
+    }
     val located=current.observePose(sessionId,rigid(frame.camera.pose),tracking && basisReady)
+    if(replaying) {
+      // Replay learns in a disposable session frame and a separate directory.
+      // It never supplies a localization candidate to the live map or motors.
+      replayVisual.offer(frame,current.metadata(),if(tracking && !replayQuery)rigid(frame.camera.pose) else null,sessionId)
+    } else {
+      val metadata=current.metadata()
+      val camera=rigid(frame.camera.pose)
+      val mapped=if(located)current.poseInMap(sessionId,camera) else null
+      // Initial visual capture can use this session's VIO before its first map
+      // anchor recovers. Navigation continues to require a tracked alignment.
+      val capture=if(mapped!=null)mapped else if(tracking && metadata.sessionId==sessionId &&
+        !hasReference && !current.hasNamedPlaces() && homeNavigation?.canInitializeVisualMap()!=false)
+        metadata.origin?.inverse()?.compose(camera) else null
+      visual.offer(frame,metadata,capture,sessionId,located)
+    }
+    if(::visualState.isInitialized && frame.timestamp-lastTerrainUiNs>=450_000_000L) {
+      val report=if(replaying)replayVisual.report() else visual.report()
+      activity.runOnUiThread {if(token==generation)visualState.text=when(report["status"]) {
+        "LEARNING"->if((report["keyframes"] as? Int ?: 0)==0) "还未记住视角，请缓慢换角度观察柜边、门框等细节"
+          else "已记住 ${report["keyframes"]} 个视角，可继续观察其他方向"
+        "MATCH_CONFIRMED"->"已识别保存过的场景；其他地点可点击上方按钮切换"
+        "VERIFYING"->"看到熟悉场景，请缓慢换角度，正在核对位置和方向"
+        "UNKNOWN_LOCATION"->"暂未认出地点，请转看其他角度，或选择新地点"
+        "AMBIGUOUS_LOCATION"->"多个地点相似，请手动选择地图并换角度观察"
+        "VISION_ERROR"->"视觉记路暂不可用：${report["reason"]}"
+        else->"视觉记路准备中，请让后摄观察有细节的场景"
+      }}
+    }
     active=located
     depthState=depthReadiness.update(frame.timestamp,depthNs,sample,located)
     if (located && depthState.ready && sample!=null) {
@@ -894,12 +988,12 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     if (lastTerrainUiNs>0 && frame.timestamp>=lastTerrainUiNs && frame.timestamp-lastTerrainUiNs<500_000_000L) return
     lastTerrainUiNs=frame.timestamp
     val map=current.snapshot(); val position=current.livePosition?.clone(); val direction=current.liveForward?.clone()
-    val text=if (located) "定位有效 · ${if (hasReference) "固定参照图对齐" else "仅本次会话"}\n原始深度 ≥60% 置信度 · 0.2～4 米 · ${map.voxels.size}/${RoomMapper.MAX_CELLS} 表面点"
+    val text=if (located) "定位有效 · ${if (visualAnchor!=null) "视觉地标对齐" else if(hasReference) "固定参照图对齐" else "本次扫描起点"}\n原始深度 ≥60% 置信度 · 0.2～4 米 · ${map.voxels.size}/${RoomMapper.MAX_CELLS} 表面点"
       else if (!tracking) "定位已中断，暂停融合；请缓慢移动恢复跟踪${if (hasReference) "，并对准参照图" else ""}。"
       else if (hasReference) "等待固定参照图：请让整张实物图像占画面至少四分之一，保持约两秒。\n检测：$referenceState / $referenceMethod · 稳定 $stableCount 次"
       else if(originAnchorState=="WAITING_FOR_TRACKING" || originAnchorState=="PAUSED") "正在建立或恢复当前地图锚点，请保持画面稳定。"
       else if(originAnchorRetired) "当前地图锚点已失效，请新建地图或使用固定参照图恢复坐标。"
-      else "旧地图仅供查看：未登记固定参照图，不能在新会话中恢复坐标。"
+      else "请转看之前记录过的门框、柜边等场景，正在用视觉地标恢复位置。"
     activity.runOnUiThread {
       if (!activity.isDestroyed && token==generation) {
         render(map,text + if (saveFailed) "\n最近保存失败，请检查存储空间并重新保存。" else "")

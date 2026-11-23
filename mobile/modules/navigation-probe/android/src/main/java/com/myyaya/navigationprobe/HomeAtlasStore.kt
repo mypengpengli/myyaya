@@ -8,6 +8,14 @@ import org.json.JSONObject
 
 internal class HomeAtlasStore(context: Context) {
   val directory=File(context.filesDir,"home-navigation").apply {mkdirs()}
+  private val roomDirectory=File(context.filesDir,"room-maps")
+  private fun mapName(id: String)=runCatching {
+    val file=AtomicFile(File(roomDirectory,"$id.yayamap"))
+    file.openRead().use {input->
+      require(input.channel.size()<=RoomMapCodec.MAX_BYTES)
+      RoomMapCodec.decode(input.readBytes()).also {require(it.id==id)}.name
+    }
+  }.getOrDefault(id)
   private fun file(id: String,suffix: String): File {require(UUID.fromString(id).toString()==id);return File(directory,"$id.$suffix")}
   fun load(id: String): HomeAtlas? {
     val atomic=AtomicFile(file(id,"yayaatlas"));if(!atomic.baseFile.exists() && !File(atomic.baseFile.path+".bak").exists())return null
@@ -20,7 +28,7 @@ internal class HomeAtlasStore(context: Context) {
   fun list(): List<Map<String,Any?>> = directory.listFiles()?.mapNotNull {f->
     when {f.name.endsWith(".yayaatlas")->f.name.removeSuffix(".yayaatlas");f.name.endsWith(".yayaatlas.bak")->f.name.removeSuffix(".yayaatlas.bak");else->null}
   }?.distinct()?.mapNotNull {id->runCatching {load(id)?.let {a->
-    a.report()+mapOf("task" to runCatching {task(a.mapId)?.toString()}.getOrElse {JSONObject().put("phase","RECOVERY_REQUIRED").put("reason","旧任务文件无法读取，地图仍可用").toString()})
+    a.report()+mapOf("mapName" to mapName(a.mapId),"task" to runCatching {task(a.mapId)?.toString()}.getOrElse {JSONObject().put("phase","RECOVERY_REQUIRED").put("reason","旧任务文件无法读取，地图仍可用").toString()})
   }}.getOrNull()} ?: emptyList()
   fun task(id: String): JSONObject? {
     val atomic=AtomicFile(file(id,"task.json"))

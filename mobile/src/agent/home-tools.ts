@@ -6,7 +6,7 @@ import {getNavigationControlOwner} from "../core/navigation-control-lease";
 // Load hardware only when a home tool executes; ordinary dialogue/media must not require ARCore.
 async function listHomeAtlases(){return (await import("../../modules/navigation-probe")).listHomeAtlases();}
 async function sendHomeCommand(data:Record<string,unknown>){return (await import("../../modules/navigation-probe")).sendHomeCommand(data);}
-async function homeSummaries(){return (await listHomeAtlases()).map(h=>({mapId:h.mapId,revision:h.revision,requiresReference:h.requiresReference,
+async function homeSummaries(){return (await listHomeAtlases()).map(h=>({mapId:h.mapId,mapName:h.mapName,revision:h.revision,requiresReference:h.requiresReference,
   places:h.places.map(({id,name,room,kind})=>({id,name,room,kind})),links:h.links.map(({id,from,to,taught,enabled,points})=>({id,from,to,taught,enabled,samples:points.length})),zones:h.zones,savedTask:h.task}));}
 
 const text=(value:unknown)=>({content:[{type:"text" as const,text:JSON.stringify(value)}],details:{}});
@@ -19,12 +19,13 @@ async function request(mapId:string|undefined,command:Record<string,unknown>,sig
   }
   const homes=await listHomeAtlases();
   if(mapId && !homes.some(h=>h.mapId===mapId))throw new Error("没有找到这张家庭地图");
-  if(!mapId && homes.length>1)throw new Error("有多张家庭地图，请提供map_id");
+  if(!mapId && homes.length>1 && command.op!=="new_location")throw new Error("有多张家庭地图，请提供map_id");
   setTimeout(()=>{if(signal?.aborted)return;void import("../navigation/route-robot-session").then(n=>signal?.aborted?null:n.openHomeNavigation({mapId,command}))
     .catch(error=>Alert.alert("家庭导航",error instanceof Error?error.message:String(error)));},0);
   return text({status:"opening_home_setup",saved:false,moving:false,notice:"已打开家庭地图操作，需恢复实际位置并确认最低姿态；尚未记住新地点或到达目的地。"});
 }
 export function createHomeTools():AgentTool[] {return [
+  {name:"create_home_location",label:"正在建立新地点地图",description:"用户明确说搬家、来到全新场所并要求记为新地点时使用。创建独立地图，地图、房间、路线和视觉地标按地点隔离保存。普通的这里是厨房应使用edit_home_place记住房间。打开设置只表示准备，需实际扫描后才能记路。",parameters:Type.Object({name:Type.String({minLength:1,maxLength:40})}),execute:async(_id,p,signal)=>request(undefined,{op:"new_location",name:(p as {name:string}).name},signal)},
   {name:"inspect_home",label:"正在安排房间巡查与返回",description:"用户要求逛房间、巡视各个房间、去厨房拍照再回来时使用。scope=current在当前位置短巡查补图；all依次巡视已登记可达房间；place指定真实地点。已有地图复用，不因建过图跳过观察。action=photo自动拍照保存再返回；observe记录见闻；rescan只补扫指定位置，不声称重建全屋。需定位和姿态准备，opening不是已发车。返回原出发位置后才汇报返回成功，无可用路线明确失败。",parameters:Type.Object({map_id:Type.Optional(Type.String()),scope:Type.Union([Type.Literal("current"),Type.Literal("all"),Type.Literal("place")]),action:Type.Optional(Type.Union([Type.Literal("observe"),Type.Literal("photo"),Type.Literal("rescan")])),place_id:Type.Optional(Type.String())}),execute:async(_id,p,signal)=>{
     const a=p as {map_id?:string;scope:string;action?:string;place_id?:string};
     if(a.scope==="place") {

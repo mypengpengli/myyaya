@@ -94,6 +94,8 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
   private var rawPreferred = true
   private var glResumed = false
   private var userWantsRunning = false
+  @Volatile private var manualRecordingDeadline=0L
+  @Volatile private var restoreManualRecording=false
   private var permissionPending = false
   private var supportedAuto = false
   private var supportedRaw = false
@@ -166,9 +168,9 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
       .put("position", JSONObject.NULL).put("running", false)
     if (mapping) roomMap = RoomMapPanel(host, { resetMapSession() }, {
       userWantsRunning = false; pauseCapture("map-export-paused")
-    }, motor)
+    }, motor,intent.getBooleanExtra("visualReplayQuery",false),playbackName!=null)
     buildUi()
-    if(playbackName!=null) roomMap?.newPlaybackMap() else roomMap?.restoreState(savedInstanceState)
+    if(playbackName!=null) roomMap?.newPlaybackMap(UUID.nameUUIDFromBytes("visual-replay:$playbackName".toByteArray()).toString()) else roomMap?.restoreState(savedInstanceState)
     intent.getStringExtra("homeConfig")?.let {userWantsRunning=roomMap?.openHomeConfiguration(JSONObject(it))==true}
     if(motor!=null) intent.getStringExtra("routeName")?.takeIf { it.isNotBlank() }?.let { roomMap?.openTaughtRoute(it) }
     record(JSONObject().put("event", "opened").put("trackingState", "NOT_STARTED"))
@@ -202,11 +204,14 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
       if(!running || playbackName!=null) Toast.makeText(this,"请先开始实时扫描；回放不能录制",Toast.LENGTH_SHORT).show()
       else surface.queueEvent {
         val current=session ?: return@queueEvent
-        val result=runCatching { if(datasets.recording()) datasets.stop(current) else {
-          datasets.start(current);roomMap?.beginDepthCapture()
+        val result=runCatching { if(datasets.recording()) {
+          manualRecordingDeadline=0;restoreManualRecording=false;datasets.stop(current)
+        } else {
+          datasets.start(current,300);manualRecordingDeadline=SystemClock.elapsedRealtime()+300_000L
+          restoreManualRecording=false;roomMap?.beginDepthCapture()
         } }
         runOnUiThread { datasetButton.text=if(datasets.recording()) "停止录制" else "录制相机与IMU（本机）"
-          Toast.makeText(this,result.exceptionOrNull()?.message ?: if(datasets.recording()) "正在录制相机与IMU，仅本机，最多90秒" else "录制已保存，可选择回放",Toast.LENGTH_LONG).show() }
+          Toast.makeText(this,result.exceptionOrNull()?.message ?: if(datasets.recording()) "正在录制相机与IMU，仅本机，最多5分钟；切回后接续录制" else "录制已保存，可选择回放",Toast.LENGTH_LONG).show() }
       }
     }
     datasetActions.addView(datasetButton,LinearLayout.LayoutParams(0,-2,1f))
@@ -216,7 +221,11 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
       else {
         motor?.stop("打开录制回放")
         AlertDialog.Builder(host).setTitle("本机相机与IMU录制").setItems(files.map { it.name }.toTypedArray()) { _,i->
-          startActivityForResult(Intent(host,NavigationProbeActivity::class.java).putExtra("mapping",true).putExtra("playbackFile",files[i].name),28433)
+          AlertDialog.Builder(host).setTitle("选择视觉回放方式")
+            .setItems(arrayOf("建图采集","使用已保存地标检查定位")) {_,mode->
+              startActivityForResult(Intent(host,NavigationProbeActivity::class.java).putExtra("mapping",true)
+                .putExtra("playbackFile",files[i].name).putExtra("visualReplayQuery",mode==1),28433)
+            }.setNegativeButton("取消",null).show()
         }.setNegativeButton("取消",null).show()
       }
     },LinearLayout.LayoutParams(0,-2,1f))
@@ -390,18 +399,27 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
         return
       }
       if (mapping) check(supportedRaw) { "此设备不支持带置信度的原始深度建图" }
-      current.configure(Config(current).apply {
+      if(configuredDepthMode==null) {
+        current.configure(Config(current).apply {
         depthMode = activeMode
         // AR tracking follows the official sample's fixed focus. Photo/video
         // capture uses its own camera session; this is not a fix for native faults.
         focusMode = Config.FocusMode.FIXED
         planeFindingMode = if (mapping) Config.PlaneFindingMode.HORIZONTAL else Config.PlaneFindingMode.DISABLED
         if (mapping) roomMap?.configure(current, requireNotNull(sessionId), this)
-      })
-      if (mapping) record(JSONObject().put("event","reference-database-configured")
-        .put("configuredReferenceImages",current.config.augmentedImageDatabase.numImages))
-      configuredDepthMode = activeMode
+        })
+        if (mapping) record(JSONObject().put("event","reference-database-configured")
+          .put("configuredReferenceImages",current.config.augmentedImageDatabase.numImages))
+        configuredDepthMode = activeMode
+      }
       current.resume()
+      if(restoreManualRecording) {
+        restoreManualRecording=false
+        val remaining=manualRecordingDeadline-SystemClock.elapsedRealtime()
+        if(remaining>0)runCatching {datasets.start(current,(remaining/1000).toInt().coerceIn(1,300),prune=false)}
+          .onFailure {recordError("recording-resume",Exception(it))}
+        datasetButton.text=if(datasets.recording()) "停止录制" else "录制相机与IMU（本机）"
+      }
       breakPath = true
       running = true
       surface.onResume()
@@ -426,6 +444,11 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
   }
 
   private fun pauseCapture(reason: String) {
+    if(reason=="activity-paused") {
+      restoreManualRecording=restoreManualRecording || (datasets.recording() && manualRecordingDeadline>SystemClock.elapsedRealtime())
+    } else {
+      restoreManualRecording=false;manualRecordingDeadline=0
+    }
     monocular.cancel()
     running = false
     breakPath = true

@@ -13,7 +13,7 @@ internal class HomePoseTracker {
   private var dx0=0.0;private var dz0=0.0;private var rawYaw0=0.0
   private var seed: HomePose?=null;private var seedYaw=0.0
   private var acceptReset=false;private var needsAlignment=true
-  fun reset() {pose=null;seed=null;flowOrigin=0;sampleNs=0;lastNs=0;needsAlignment=true;revision++;reason="请重新识别固定参照图"}
+  fun reset() {pose=null;seed=null;flowOrigin=0;sampleNs=0;lastNs=0;needsAlignment=true;revision++;reason="请观察保存过的场景或固定参照图恢复定位"}
   fun expectFlowReset() {acceptReset=true}
   fun ready(nowNs: Long)=pose!=null && !needsAlignment && sampleNs>0 && nowNs-sampleNs in 0..500_000_000L && nowNs-lastNs in 0..300_000_000L
   fun frame(mapId: String,sessionId: String,nowNs: Long,worldYaw: Double,mapped: HomePose?,flow: Map<String,Any?>,right: Double,forward: Double) {
@@ -40,5 +40,5 @@ internal class HomePoseTracker {
     if(pose?.distance(next)?.let {it>.20}==true){reset();reason="家庭坐标跳变，请重新定位";return}
     pose=next;sampleNs=ns;reason="地板视觉定位有效"
   }
-  fun lost(){reset();reason="相机跟踪丢失，请重新识别固定参照图"}
+  fun lost(){reset();reason="相机跟踪丢失，请观察保存过的场景或固定参照图"}
 }

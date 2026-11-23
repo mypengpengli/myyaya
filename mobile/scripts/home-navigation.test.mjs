@@ -22,6 +22,9 @@ assert.ok(grid.occupiedCells().some(c=>Math.abs(c.x)<.03&&Math.abs(c.y-3.2)<.03)
 const chinese=load('src/voice/chinese-command.ts');
 const {parseHomeVoice}=load('src/navigation/home-voice.ts',{'../voice/chinese-command':chinese});
 assert.deepEqual(parseHomeVoice('小丫小丫，这里是客厅。'),{op:'remember',name:'客厅',room:'客厅',kind:'room'});
+assert.deepEqual(parseHomeVoice('小丫小丫，我们搬家了，这里叫新家。'),{op:'new_location',name:'新家'});
+assert.deepEqual(parseHomeVoice('新建地点办公室'),{op:'new_location',name:'办公室'});
+assert.equal(parseHomeVoice('上次搬家了以后很忙'),null);
 assert.deepEqual(parseHomeVoice('把这里记为客厅门口'),{op:'remember',name:'客厅门口',kind:'door'});
 assert.deepEqual(parseHomeVoice('请去客厅吧'),{op:'go',target:'客厅'});
 assert.deepEqual(parseHomeVoice('把客厅改名为大厅'),{op:'rename',id:'客厅',name:'大厅'});

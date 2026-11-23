@@ -56,7 +56,7 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
     val m=requireNotNull(metadata()) {"请先新建或打开家庭地图"}
     if(currentMap!=m.id) {
       stop("切换家庭地图");if(tracker.mapIdentifier!=m.id)tracker.reset();currentMap=m.id;atlas=null;loadError=null;coverage=JSONArray()
-      runCatching {store.load(m.id)}.onSuccess {atlas=it ?: HomeAtlas(m.id,referenceKey(m))}
+      runCatching {store.load(m.id)}.onSuccess {atlas=it ?: HomeAtlas(m.id,referenceKey(m)).also(store::save)}
         .onFailure {loadError="家庭路线文件损坏，请导出记录后恢复备份：${it.message}"}
       runCatching {store.coverage(m.id)}.getOrNull()?.let {saved->if(saved.optString("referenceKey")==referenceKey(m))coverage=saved.optJSONArray("cells") ?: JSONArray()}
       task=runCatching {store.task(m.id)}.getOrElse {JSONObject().put("phase","RECOVERY_REQUIRED").put("reason","旧任务无法读取，请导出记录；家庭地图仍可使用")} ?: JSONObject().put("phase","IDLE")
@@ -140,6 +140,8 @@ internal class HomeNavigationPanel(private val activity: Activity,private val mo
     if(SystemClock.elapsedRealtime()-lastRender>500){lastRender=SystemClock.elapsedRealtime();activity.runOnUiThread {render()}}
   }
   @Synchronized fun expectFlowReset() {tracker.expectFlowReset()}
+  @Synchronized fun canInitializeVisualMap()=atlas?.let {it.places.isEmpty() && it.links.isEmpty()}==true &&
+    !teaching && task.optString("phase") !in setOf("RUNNING","PREPARING","PAUSED","PAUSED_RESTART","WAITING_LOCALIZATION")
   @Synchronized fun beginTeaching(name: String) {
     val a=sync();HomeWorkflow.requireTeaching(task.optString("phase"),teaching);val at=pose()
     check(metadata()?.referenceJpeg?.isNotEmpty()==true){"家庭路线重开后需要固定参照图；请在新地图首次扫描前登记"}

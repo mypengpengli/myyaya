@@ -3,6 +3,8 @@ import {compactChinese} from "../voice/chinese-command";
 /** Offline commands available while the mapping camera owns the normal conversation runtime. */
 export function parseHomeVoice(text:string):Record<string,string>|null {
   const s=compactChinese(text).replace(/^(?:小丫小丫|小丫)/u,"").replace(/^请/u,"");
+  const location=s.match(/^(?:我们搬家了|搬家了|新建地点|新地点)(?:这里叫|叫|记为)?(.{1,40})$/u);
+  if(location)return {op:"new_location",name:location[1]};
   if(/^(?:巡视|巡查|逛一圈)(?:各个房间|全部房间|全屋)$/u.test(s))return {op:"inspect",scope:"all",action:"observe"};
   let task=s.match(/^(?:去|到)(.{1,30}?)(?:拍照|拍张照片|拍一张照片)(?:然后|再)?回来$/u);if(task)return {op:"inspect",scope:"place",action:"photo",target:task[1]};
   task=s.match(/^(?:重新绘制|重新扫描|补扫)(.{1,30})$/u);if(task)return {op:"inspect",scope:"place",action:"rescan",target:task[1]};

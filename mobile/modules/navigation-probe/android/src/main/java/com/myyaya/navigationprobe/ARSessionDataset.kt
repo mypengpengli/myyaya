@@ -22,12 +22,13 @@ internal class ARSessionDataset(context: Context) {
     require(name.matches(Regex("dataset-[a-f0-9-]+\\.mp4")))
     return File(directory,name).canonicalFile.also { require(it.parentFile==directory.canonicalFile && it.isFile && it.length() in 1..120_000_000L) }
   }
-  fun start(session: Session) {
+  fun start(session: Session,maxSeconds: Int=90,prune: Boolean=true) {
+    require(maxSeconds in 1..600)
     check(active==null)
-    recordings().drop(2).forEach { it.delete() }
+    if(prune)recordings().drop(2).forEach { it.delete() }
     val f=File(directory,"dataset-${UUID.randomUUID()}.mp4")
     session.startRecording(RecordingConfig(session).setMp4DatasetUri(Uri.fromFile(f)).setAutoStopOnPause(true))
-    active=f;started=SystemClock.elapsedRealtime();lastFile=f.name;limitMs=90_000L
+    active=f;started=SystemClock.elapsedRealtime();lastFile=f.name;limitMs=maxSeconds*1000L
   }
   fun stop(session: Session?) {
     if(active==null) return

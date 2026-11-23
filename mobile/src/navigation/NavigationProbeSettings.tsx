@@ -69,9 +69,9 @@ export function NavigationProbeSettings() {
 
   return <View style={styles.card}>
     <Text style={styles.title}>房间地图</Text>
-    <Text style={styles.text}>家庭导航：先登记固定参照图，带领经过房间与门口并记名。保存后可选择目的地，途中自动绕障；支持暂停、继续、地图编辑和导出记录。本批功能待集中实车验收。</Text>
+    <Text style={styles.text}>家庭导航：先扫描记住场景，带领经过房间与门口并记名。保存后可选择目的地，途中自动绕障；支持暂停、继续、地图编辑和导出记录。视觉地标定位待实测验收。</Text>
     <Pressable accessibilityRole="button" accessibilityLabel="打开家庭导航" disabled={busy} onPress={()=>void openHome()} style={styles.button}><Text style={styles.label}>家庭导航与地图编辑</Text></Pressable>
-    <Text style={styles.text}>表面地图可保存观测与命名地点；固定参照图用于重开后的定位。需要行驶与地图编辑，请使用上方家庭导航入口。</Text>
+    <Text style={styles.text}>表面地图保存观测与命名地点，重开后可通过视觉地标或固定参照图恢复位置。搬家时可新建独立地点，熟悉地点可切回原地图。</Text>
     <Text style={styles.text}>{status ? (status.serviceInstalled ? `AR 服务：${status.serviceVersion || "已安装"}` : "AR 服务：尚未安装，打开探针可查看安装指引") : "正在检查 AR 服务…"}</Text>
     <Text style={styles.text}>路线试验：固定头部，在真实平整地面教路线；从指定起点低速复走，遇障停车，到点后转身。首次需做短动作方向校验。</Text>
     <Pressable accessibilityRole="button" accessibilityLabel="打开教路线与复走" disabled={busy} onPress={() => void openRoutes()} style={styles.button}>

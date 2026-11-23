@@ -62,6 +62,7 @@ internal class RoomMapper(initial: RoomMapData) {
   @Synchronized fun snapshot() = data.copy(voxels = cells.values.map { it.clone() },
     path = path.map { it.clone() }, places = places.map { it.copy(position = it.position.clone()) })
   @Synchronized fun referenceEnabled() = data.referenceJpeg.isNotEmpty()
+  @Synchronized fun hasNamedPlaces()=places.isNotEmpty()
   @Synchronized fun metadata() = data.copy(voxels=emptyList(),path=emptyList(),places=emptyList())
   @Synchronized fun summary(): Map<String, Any?> = mapOf("mapId" to data.id,"mapName" to data.name,
     "surfaceCells" to cells.size,"pathSamples" to path.size,"places" to places.map { it.name },
@@ -105,6 +106,11 @@ internal class RoomMapper(initial: RoomMapData) {
       worldFromImage.inverse().compose(origin).also { data = data.copy(imageFromMap = it) }
     }
     worldFromMap = worldFromImage.compose(relation)
+    return true
+  }
+  @Synchronized fun alignVisual(session: String,transform: RigidPose): Boolean {
+    if(session!=currentSession) return false
+    worldFromMap=transform
     return true
   }
   @Synchronized fun observePose(session: String, pose: RigidPose, tracking: Boolean): Boolean {
