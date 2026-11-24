@@ -128,6 +128,7 @@ const runtime = load("src/voice/chinese-voice-runtime.ts", {
   "../setup/setup-storage": { getAppMode: () => "local", hasCompletedRobotOnboarding: () => completed },
   "../store/user": { useUserStore: { getState: () => user, subscribe: (fn) => { userListener = fn; return () => {}; } } },
   "./chinese-voice-session": { ChineseVoiceSession: FakeSession }, "../device-tools/looi-robot": { stopLooiMotion() {} },
+  "../diagnostics/diagnostic-log": { recordDiagnosticEvent() {} },
   "./chinese-voice-preferences": { isChineseWakeEnabled: () => wakeEnabled, subscribeChineseWake: (fn) => { preferenceListener = fn; return () => {}; } },
   "../artifacts/presentation": {}, "../artifacts/video-control": {}, "./viewer-voice": { ViewerVoice: class {} },
 }, { setTimeout: schedule, clearTimeout: (id) => timers.delete(id) });
