@@ -19,7 +19,7 @@ export class HomeRouteCursor {
     this.points=points.filter((p,i)=>i===0 || distance(p,points[i-1])>.005);
     if(this.points.length<2)throw new Error("路线没有有效长度");
     for(let i=1;i<this.points.length;i++)this.lengths.push(this.lengths.at(-1)!+distance(this.points[i-1],this.points[i]));
-    if(this.total>40)throw new Error("本次路线过长，请拆分目的地");
+    if(this.total>200)throw new Error("本次路线过长，请拆分目的地");
   }
   get total(){return this.lengths.at(-1)!;}
   advanceTo(arc:number) {

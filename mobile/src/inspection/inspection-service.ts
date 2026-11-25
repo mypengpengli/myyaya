@@ -1,5 +1,5 @@
 export type InspectionObservation = {
-  id: string; roomId?: string; room: string; at: number; x: number; y: number;
+  id: string; roomId?: string; room: string; at: number; x: number; y: number; yaw?:number;
   artifactId?: string; analysis: "pending" | "completed" | "failed"; summary: string;
 };
 export type InspectionTask = {
@@ -28,9 +28,22 @@ export class InspectionService {
   add(id:string,observation:InspectionObservation) {
     const task=this.required(id);if(task.phase!=="running")throw new Error("巡查已暂停，不能加入旧照片");
     if(task.observations.some(o=>o.id===observation.id))return;
-    if(task.observations.length>=24)throw new Error("本轮观察点已达上限，请返回后另开任务");
+    if(task.observations.length>=128)throw new Error("本轮观察点已达上限，请返回后另开任务");
     if(![observation.x,observation.y,observation.at].every(Number.isFinite)||!observation.room.trim())throw new Error("观察位置或时间无效");
     this.save({...task,observations:[...task.observations,observation]});
+  }
+  assignRoom(id:string,observationId:string,roomId:string,room:string){
+    const task=this.required(id);if(!room.trim() || room.length>40)throw new Error("无效房间名称");
+    this.save({...task,observations:task.observations.map(o=>o.id===observationId?{...o,roomId,room}:o)});
+  }
+  relabelRooms(mapId:string,regions:Array<{id:string;name:string}>){
+    const names=new Map(regions.map(r=>[r.id,r.name]));
+    for(const task of this.list().filter(t=>t.mapId===mapId)){
+      let changed=false;const observations=task.observations.map(o=>{
+        const name=o.roomId?names.get(o.roomId):undefined;
+        if(name && name!==o.room){changed=true;return {...o,room:name};}return o;
+      });if(changed)this.storage.save({...task,observations});
+    }
   }
   finishTravel(id:string,returned:boolean,notice:string,cancelled=false) {
     const task=this.required(id);

@@ -33,4 +33,25 @@ class HomeInspectionPlannerTest {
     val a=atlas().copy(zones=listOf(HomeZone(name="禁止",x=0.0,y=.5,radius=.1)))
     assertThrows(IllegalStateException::class.java){HomeInspectionPlanner.plan(a,HomePose(0.0,0.0),HomePose(0.0,0.0),listOf(a.named("厨房")!!.id),.1)}
   }
+  @Test fun measuredGridCanConnectUntaughtRoomsWithoutSkippingStops() {
+    val start=HomePose(0.0,0.0);val kitchen=HomePlace(id="k",name="厨房",room="厨房",kind="room",pose=HomePose(0.0,1.0))
+    val atlas=HomeAtlas("grid-home","",places=listOf(kitchen))
+    val calls=ArrayList<Pair<HomePose,HomePose>>()
+    val plan=HomeInspectionPlanner.plan(atlas,start,start,listOf("k"),.1){a,b->calls.add(a to b);listOf(a,b)}
+    assertEquals(2,calls.size);assertEquals(listOf("k"),plan.stops.map {it.id});assertEquals(start,plan.points.last())
+    assertEquals(2.0,plan.meters,.001)
+  }
+  @Test fun moreThanSixRoomsAndFortyMetersPreserveEveryStop(){
+    val places=(1..8).map {HomePlace(id="room-$it",name="房间$it",room="",kind="room",pose=HomePose(it*3.0,0.0))}
+    val atlas=HomeAtlas("rooms","",places=places)
+    val trip=HomeInspectionPlanner.plan(atlas,HomePose(0.0,0.0),HomePose(0.0,0.0),places.map {it.id},.1){a,b->listOf(a,b)}
+    assertEquals(8,trip.stops.size);assertEquals(48.0,trip.meters,.001);assertEquals(HomePose(0.0,0.0),trip.points.last())
+  }
+  @Test fun fullPlaceCapacityDoesNotNeedAnExtraReturnNode(){
+    var a=atlas()
+    for(i in 0 until 126)a=a.remember("点$i","","point",HomePose(4.0+i*.001,4.0))
+    val start=HomePose(0.0,.3)
+    val trip=HomeInspectionPlanner.plan(a,start,start,listOf(a.named("厨房")!!.id),.1)
+    assertEquals(128,a.places.size);assertTrue(trip.points.last().distance(start)<.001)
+  }
 }

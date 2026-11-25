@@ -21,21 +21,21 @@ export function getInspectionService() {
   }
   return service;
 }
-export async function captureInspectionObservation(args:{id:string;key:string;roomId?:string;room:string;pose:{x:number;y:number};token:string}) {
+export async function captureInspectionObservation(args:{id:string;key:string;roomId?:string;room:string;pose:{x:number;y:number;yaw?:number};token:string}) {
   const store=getInspectionService(),task=store.find(args.id);
   if(!task || task.phase!=="running")throw new Error("巡查任务未执行或已暂停");
   if(task.observations.some(o=>o.id===args.key))return;
   const native=await import("../../modules/navigation-probe");
   const before=await native.getContinuousStatus();
-  if(before.token!==args.token || before.sentSpeed!==0 || before.sentTurn!==0 || before.stopAcknowledged!==true || before.phase!=="WAYPOINT_REACHED")throw new Error("观察点尚未确认停车");
+  if(before.token!==args.token || before.sentSpeed!==0 || before.sentTurn!==0 || before.stopAcknowledged!==true || !["WAYPOINT_REACHED","VIEW_READY"].includes(String(before.phase)))throw new Error("观察点尚未确认停车");
   const frame=await native.captureNativeSceneFrame();
   const after=await native.getContinuousStatus();
-  if(after.token!==args.token || after.sentSpeed!==0 || after.sentTurn!==0 || after.phase!=="WAYPOINT_REACHED" || AppState.currentState!=="active")throw new Error("拍摄期间导航状态改变");
+  if(after.token!==args.token || after.sentSpeed!==0 || after.sentTurn!==0 || !["WAYPOINT_REACHED","VIEW_READY"].includes(String(after.phase)) || AppState.currentState!=="active")throw new Error("拍摄期间导航状态改变");
   if(!FileSystem.cacheDirectory || !frame.jpegUri.startsWith(FileSystem.cacheDirectory+"monocular-benchmark/"))throw new Error("观察照片来源无效");
   const base64=await FileSystem.readAsStringAsync(frame.jpegUri,{encoding:FileSystem.EncodingType.Base64});
   try {
     const artifact=await savePhotoArtifact(base64,"image/jpeg",`${args.room} · 巡查照片`,undefined,{select:false,sourceTaskId:args.id,id:args.key});
-    store.add(args.id,{id:args.key,roomId:args.roomId,room:args.room,at:Date.now(),x:args.pose.x,y:args.pose.y,artifactId:artifact.id,analysis:"pending",summary:"照片已保存，尚未分析"});
+    store.add(args.id,{id:args.key,roomId:args.roomId,room:args.room,at:Date.now(),x:args.pose.x,y:args.pose.y,yaw:args.pose.yaw,artifactId:artifact.id,analysis:"pending",summary:"照片已保存，尚未分析"});
   }finally{await FileSystem.deleteAsync(frame.jpegUri,{idempotent:true}).catch(()=>{});}
 }
 export function inspectionReceipt(task: InspectionTask): string {

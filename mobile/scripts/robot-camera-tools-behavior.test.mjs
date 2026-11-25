@@ -49,12 +49,20 @@ finishCapture(frame(9)); await pendingShot;
 assert.equal(await stale, null); assert.equal(late.getSnapshot().phase, "idle");
 
 const app = { currentState: "active" };
-let permission = true, recording = "idle", runtimeCaptures = 0, runtimeSaves = 0;
+let permission = true, recording = "idle", runtimeCaptures = 0, runtimeSaves = 0, uuidCount = 0, runtimeSaveError = false;
+const saveIds = [];
+let navigationOwner=null;
 const camera = load("src/artifacts/phone-camera.ts", {
+  "expo-crypto": { randomUUID: () => "photo-test-" + ++uuidCount },
+  "../core/navigation-control-lease":{getNavigationControlOwner:()=>navigationOwner},
   "react-native": { AppState: app, PermissionsAndroid: { PERMISSIONS: { CAMERA: "camera" }, check: async () => permission } },
   "../../modules/local-face-attention": { getLocalFaceAttentionModule: () => ({ captureStill: async (facing) => ({ ...frame(++runtimeCaptures), cameraFacing: facing }) }) },
   "./phone-recording": { getPhoneRecording: () => ({ phase: recording }) },
-  "./artifact-store": { savePhotoArtifact: async () => ({ id: "observed-" + ++runtimeSaves, kind: "image" }) },
+  "./artifact-store": { savePhotoArtifact: async (_base64, _mime, _title, _parent, options) => {
+    saveIds.push(options?.id);
+    if (runtimeSaveError) throw new Error("focus store temporarily unavailable");
+    return { id: "observed-" + ++runtimeSaves, kind: "image" };
+  } },
   "./photo-capture-session": { PhotoCaptureSession },
   "../core/ambient-motion": { holdAmbientMotionFor() {} }, "../core/social-attention": { holdSocialAttentionMotionFor() {} },
 });
@@ -64,6 +72,7 @@ permission = false; await assert.rejects(camera.observeScene("front"), /相机�
 recording = "recording"; await assert.rejects(camera.observeScene("front"), /正在录像/); recording = "idle";
 app.currentState = "background"; await assert.rejects(camera.observeScene("front"), /前台/); app.currentState = "active";
 assert.equal(runtimeCaptures, 1);
+navigationOwner="navigation";await assert.rejects(camera.observeScene("front"),/导航相机/);assert.equal(runtimeCaptures,1,"navigation must retain exclusive camera ownership");navigationOwner=null;
 let homeNavigations = 0;
 const cameraTools = load("src/agent/camera-tools.ts", { typebox: { Type }, "../artifacts/phone-camera": camera,
   "expo-router": { router: { navigate: () => homeNavigations++ } },
@@ -80,6 +89,18 @@ const savedBeforeConfirm = runtimeSaves;
 camera.photoCapture.retake(); await showAndShoot(camera.photoCapture); assert.equal(runtimeSaves, savedBeforeConfirm);
 await camera.photoCapture.confirm();
 assert.equal((await draft).content[1].type, "image");
+const savingRetry = camera.photoCapture.begin("front");
+await showAndShoot(camera.photoCapture);
+runtimeSaveError = true;
+await camera.photoCapture.confirm();
+assert.equal(camera.photoCapture.getSnapshot().phase, "review");
+const retryId = saveIds.at(-1);
+runtimeSaveError = false;
+await camera.photoCapture.confirm();
+assert.ok(await savingRetry);
+assert.ok(retryId);
+assert.equal(saveIds.at(-1),retryId,"save retries keep the same artifact ID");
+assert.notEqual(saveIds.at(-3),retryId,"a new confirmed photo has its own ID");
 
 // Real community SDK emits the existing two-byte FED0 frames through the tool/controller chain.
 const { LooiRobot } = load("packages/looi-sdk/src/index.ts");
@@ -94,9 +115,11 @@ const hardware = {
   setLooiHead: async () => {}, setLooiLight: async () => {}, performLooiDance: async () => {}, performLooiHeadGesture: async () => {},
 };
 const holds = { holdAmbientMotionFor() {} }, social = { holdSocialAttentionMotionFor() {} };
+const distanceRequests=[];
 const controller = load("src/device-tools/chinese-robot-control.ts", {
   "react-native": { AppState: app }, "../setup/setup-storage": { getAppMode: () => "local" },
   "../core/ambient-motion": holds, "../core/social-attention": social, "../core/robot-inactivity": { markRobotInteraction() {} }, "./looi-robot": hardware,
+  "../agent/home-tools":{startMeasuredVoiceMove:async(direction,centimeters)=>distanceRequests.push({direction,centimeters})},
 });
 const tools = load("src/agent/robot-tools.ts", { typebox: { Type }, "react-native": { AppState: app },
   "../device-tools/chinese-robot-control": controller, "../device-tools/looi-robot": hardware,
@@ -111,9 +134,15 @@ blocked = true; await assert.rejects(tools.robotActionTool.execute("move", { act
 app.currentState = "background"; await assert.rejects(tools.robotActionTool.execute("move", { action: "forward" }), /前台/); app.currentState = "active";
 connected = false; await assert.rejects(tools.robotActionTool.execute("move", { action: "forward" }), /连接 LOOI/); connected = true;
 const writesBeforeUnsupportedDistances = frames.length;
-await assert.rejects(tools.robotActionTool.execute("move", { action: "forward", distanceCm: 1.5 }), /2 至 20 厘米/);
-await assert.rejects(tools.robotActionTool.execute("move", { action: "forward", distanceCm: 500 }), /2 至 20 厘米/);
+await assert.rejects(tools.robotActionTool.execute("move", { action: "forward", distanceCm: 1.5 }), /2至500厘米/);
+await assert.rejects(tools.robotActionTool.execute("move", { action: "forward", distanceCm: 501 }), /2至500厘米/);
 assert.equal(frames.length, writesBeforeUnsupportedDistances);
+for(const distanceCm of [10,15,100,500]){
+ const result=await tools.robotActionTool.execute("distance",{action:"back",distanceCm});
+ assert.equal(distanceRequests.at(-1).centimeters,distanceCm);
+ assert.equal(JSON.parse(result.content[0].text).arrived,false);
+}
+assert.equal(frames.length,writesBeforeUnsupportedDistances,"distance requests must not emit timed drive frames");
 let finishDrive; pendingDrive = new Promise((resolve) => { finishDrive = resolve; });
 const abortMotion = new AbortController(), moving = tools.robotActionTool.execute("move", { action: "forward" }, abortMotion.signal);
 await drain(); abortMotion.abort(); await drain(); assert.deepEqual(frames.at(-1), ["drive", "0000"]);

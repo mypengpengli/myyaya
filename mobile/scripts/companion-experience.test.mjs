@@ -52,7 +52,7 @@ assert.equal(leaseDepth, 0);
 // Reapply the real config plugin to a previously generated manifest with old permissions.
 const plugin = { exports: {} };
 new Function("require", "module", readFileSync("plugins/with-companion-permissions.js", "utf8"))(
-  () => ({ withAndroidManifest: (config, apply) => apply(config) }), plugin);
+  () => ({ withAndroidManifest: (config, apply) => apply(config),withFinalizedMod:(config)=>config }), plugin);
 const manifest = { "uses-permission": [{ $: { "android:name": "android.permission.BLUETOOTH_SCAN" } }] };
 const mod = { modResults: { manifest } };
 plugin.exports(mod); plugin.exports(mod);
@@ -85,6 +85,7 @@ const transport = load("src/device-tools/react-native-ble-transport.ts", {
   "react-native-ble-plx": { BleManager: class { constructor() { return manager; } }, ScanMode: { LowLatency: 2 },
     State: { PoweredOn: "PoweredOn", PoweredOff: "PoweredOff", Unauthorized: "Unauthorized", Unsupported: "Unsupported" } },
   "@sourcebug/looi-sdk": {}, "../diagnostics/diagnostic-log": { recordDiagnosticEvent() {} },
+  "expo-file-system/legacy": {}, "./speech-sample": {},
   "../setup/device-permissions": { requestBluetoothPermissions: permissions.requestBluetoothPermissions },
   "./looi-discovery": discovery,
 });
@@ -129,6 +130,7 @@ const runtime = load("src/voice/chinese-voice-runtime.ts", {
   "../store/user": { useUserStore: { getState: () => user, subscribe: (fn) => { userListener = fn; return () => {}; } } },
   "./chinese-voice-session": { ChineseVoiceSession: FakeSession }, "../device-tools/looi-robot": { stopLooiMotion() {} },
   "../diagnostics/diagnostic-log": { recordDiagnosticEvent() {} },
+  "expo-file-system/legacy": {}, "./speech-sample": {},
   "./chinese-voice-preferences": { isChineseWakeEnabled: () => wakeEnabled, subscribeChineseWake: (fn) => { preferenceListener = fn; return () => {}; } },
   "../artifacts/presentation": {}, "../artifacts/video-control": {}, "./viewer-voice": { ViewerVoice: class {} },
 }, { setTimeout: schedule, clearTimeout: (id) => timers.delete(id) });

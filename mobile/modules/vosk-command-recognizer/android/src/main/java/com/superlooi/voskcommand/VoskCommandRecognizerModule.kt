@@ -49,6 +49,9 @@ class VoskCommandRecognizerModule : Module() {
   @Volatile private var currentSessionId: Int = 0
   @Volatile private var appliedResetGeneration: Int = 0
   private var chineseBridge: ChineseSpeechBridge? = null
+  private val utteranceAudio = ChineseUtteranceAudio()
+  @Volatile private var relayAudio = false
+  @Volatile private var conversationEndSilence = 1.8f
 
   @Volatile private var diagnosticPcm: ByteBuffer? = null
   private fun bridge(): ChineseSpeechBridge = chineseBridge ?: ChineseSpeechBridge(
@@ -69,6 +72,16 @@ class VoskCommandRecognizerModule : Module() {
 
     Events("onCommandResult", "onEmergencyStop", "onEmergencyUnknown", "onEmergencyHealth", "onModelReady", "onRecognizerError", "onRecognizerState")
 
+    AsyncFunction("configureChineseConversation") { relay: Boolean, silence: Double ->
+      require(silence in 0.8..3.0)
+      executor.submit {
+        relayAudio = relay
+        conversationEndSilence = silence.toFloat()
+        utteranceAudio.reset()
+        if (currentLanguage == "zh" && currentGrammar == "__dictation__")
+          recognizer?.setEndpointerDelays(3.0f, conversationEndSilence, 45.0f)
+      }.get()
+    }
     AsyncFunction("prepareChinese") {
       check(diagnosticPcm == null) { "Speech sample already active" }
       bridge().stopCapture()
@@ -87,7 +100,7 @@ class VoskCommandRecognizerModule : Module() {
     AsyncFunction("setChinesePhotoMode") { enabled: Boolean ->
       executor.submit {
         if (currentLanguage == "zh" && currentGrammar == "__dictation__") {
-          recognizer?.setEndpointerDelays(3.0f, if (enabled) 0.5f else 1.1f, 25.0f)
+          recognizer?.setEndpointerDelays(3.0f, if (enabled) 0.5f else conversationEndSilence, 45.0f)
         }
       }.get()
     }
@@ -136,7 +149,7 @@ class VoskCommandRecognizerModule : Module() {
         val rms = sqrt(values.sumOf { it.toDouble() * it } / count)
         mapOf("uri" to "file://" + wav.path, "text" to text, "durationMs" to count / 16,
           "rms" to rms, "clipped" to values.count { it <= -32760 || it >= 32760 },
-          "decodeMs" to (SystemClock.elapsedRealtime() - started))
+          "decodeMs" to (SystemClock.elapsedRealtime() - started),"droppedChunks" to droppedChunks.get())+ChineseAudioQuality.summarize(values)
       }.get() else null
     }
     AsyncFunction("speakChinese") { text: String, promise: expo.modules.kotlin.Promise -> bridge().speak(text, promise) }
@@ -349,6 +362,7 @@ class VoskCommandRecognizerModule : Module() {
             }
           }
 
+          if (relayAudio && currentLanguage == "zh" && currentGrammar == "__dictation__") utteranceAudio.append(pcm)
           val normalStarted = SystemClock.elapsedRealtime()
           val endpoint = active.acceptWaveForm(pcm, pcm.size)
           val json = if (endpoint) active.result else active.partialResult
@@ -373,6 +387,15 @@ class VoskCommandRecognizerModule : Module() {
           if (endpoint) {
             lastPartial = ""
             sequence += 1
+            if (relayAudio && currentLanguage == "zh" && currentGrammar == "__dictation__") {
+              utteranceAudio.finish()?.let { wav ->
+                val folder = File(requireNotNull(appContext.reactContext).cacheDir, "chinese-utterances").apply { mkdirs() }
+                folder.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 120_000 }?.forEach { it.delete() }
+                val file = File(folder, "${UUID.randomUUID()}.wav")
+                file.writeBytes(wav)
+                common["audioUri"] = "file://" + file.path
+              }
+            }
             common["text"] = text
             common["partial"] = false
             common["sequence"] = sequence
@@ -473,7 +496,7 @@ class VoskCommandRecognizerModule : Module() {
       it.setEndpointerMode(Recognizer.EndpointerMode.SHORT)
       // Restored v1.1.36 command behavior after the v1.1.37 600 ms endpoint
       // experiment regressed repeated driving control on the physical robot.
-      if (language == "zh" && grammarJson == "__dictation__") it.setEndpointerDelays(3.0f, 1.1f, 25.0f)
+      if (language == "zh" && grammarJson == "__dictation__") it.setEndpointerDelays(3.0f, conversationEndSilence, 45.0f)
       else it.setEndpointerDelays(3.0f, 0.26f, 5.0f)
     }
     emergencyRecognizer = Recognizer(model, 16000.0f, emergencyGrammarJson).also {
@@ -484,6 +507,7 @@ class VoskCommandRecognizerModule : Module() {
       // partial. Keep finalization short for cases where only final text appears.
       it.setEndpointerDelays(3.0f, 0.12f, 3.0f)
     }
+    utteranceAudio.reset()
     droppedChunks.set(0)
     val recognizerCreateMs = SystemClock.elapsedRealtime() - recognizerStarted
     lastPartial = ""

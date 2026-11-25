@@ -36,10 +36,16 @@ internal class ARSessionDataset(context: Context) {
   }
   fun tick(session: Session) {
     val f=active ?: return
-    if(SystemClock.elapsedRealtime()-started>limitMs || f.length()>100_000_000 || session.recordingStatus!=RecordingStatus.OK) stop(session)
+    val remaining=limitMs-(SystemClock.elapsedRealtime()-started)
+    if(remaining<=0 || session.recordingStatus!=RecordingStatus.OK){stop(session);return}
+    if(f.length()>95_000_000){
+      // Rotate only the dataset, keeping the same live ARCore session and its coordinate frame.
+      stop(session);start(session,(remaining/1000).toInt().coerceIn(1,600),prune=false);limitMs=remaining
+      recordings().drop(4).forEach {it.delete()}
+    }
   }
   fun recording()=active!=null
-  fun extendForLocalMission() { check(active!=null);limitMs=600_000L }
+  fun extendForLocalMission(maximumMs: Long=600_000L) { check(active!=null);require(maximumMs in 30_000..1_500_000);limitMs=SystemClock.elapsedRealtime()-started+maximumMs }
   fun remainingMs()=if(active!=null) (limitMs-(SystemClock.elapsedRealtime()-started)).coerceAtLeast(0) else 0L
   fun report(): Map<String,Any?> = mapOf("recording" to recording(),"file" to lastFile,"maxSeconds" to limitMs/1000,"remainingMs" to remainingMs(),"localOnly" to true)
 }

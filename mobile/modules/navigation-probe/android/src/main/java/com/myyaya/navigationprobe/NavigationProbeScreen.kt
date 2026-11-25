@@ -109,7 +109,7 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
   private val datasets=ARSessionDataset(host)
   private var playbackName: String?=null
   private lateinit var datasetButton: Button
-  private val monocular=MonocularSnapshot(host,{ running && resumed && !isDestroyed && !isFinishing },{roomMap?.continuousSnapshot()})
+  private val monocular=MonocularSnapshot(host,{ running && resumed && !isDestroyed && !isFinishing },{roomMap?.continuousSnapshot()},{roomMap?.homeCapturePose()})
   fun captureMonocular(promise: expo.modules.kotlin.Promise)=monocular.request(promise)
   fun captureScene(promise: expo.modules.kotlin.Promise)=monocular.request(promise,true)
   fun showMonocular(id: String,data: String,inferenceMs: Double)=monocular.show(id,data,inferenceMs)
@@ -128,12 +128,13 @@ internal class NavigationProbeScreen(private val host: Activity, private val int
     datasets.extendForLocalMission()
     roomMap?.beginLocalMission(confirmed,region,promise) ?: promise.reject("ERR_FIELD_SCREEN","未打开路线页",null)
   }
-  fun beginContinuous(ble: com.bleplx.BlePlxModule,device: String,epoch: Int,gx: Double,gy: Double,height: Float,region: FloorFlowRegion,finalGoal: Boolean=true): Map<String,Any?> {
+  fun beginContinuous(ble: com.bleplx.BlePlxModule,device: String,epoch: Int,gx: Double,gy: Double,height: Float,region: FloorFlowRegion,finalGoal: Boolean=true,goalTolerance: Double=.06,maximumMs: Long=550_000): Map<String,Any?> {
     check(running && resumed && playbackName==null && datasets.recording()) { "请开始实时扫描和录像" }
-    datasets.extendForLocalMission()
-    return requireNotNull(roomMap).beginContinuous(ble,device,epoch,gx,gy,height,region,finalGoal)
+    datasets.extendForLocalMission((maximumMs+30_000).coerceAtMost(1_500_000))
+    return requireNotNull(roomMap).beginContinuous(ble,device,epoch,gx,gy,height,region,finalGoal,goalTolerance,maximumMs)
   }
   fun localMissionProgress(value: String) { roomMap?.localMissionProgress(value) }
+  fun homeSpatialRequest(v: org.json.JSONObject)=requireNotNull(roomMap).homeSpatialRequest(v)
   fun homeStatus()=requireNotNull(roomMap).homeStatus()
   fun homeCommand(data: JSONObject)=requireNotNull(roomMap).homeCommand(data)
   fun homePlan()=requireNotNull(roomMap).homePlan()

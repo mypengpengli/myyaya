@@ -13,6 +13,9 @@ service=new InspectionService(storage);service.recover();assert.equal(service.fi
 service.begin("task","map","observe","existing");service.finishTravel("task",true,"已确认返回");service.settle("task");assert.equal(service.find("task").phase,"analyzing");
 service.describe("task","photo","看到地板上的纸盒。",true);service.settle("task");assert.equal(service.find("task").phase,"completed");
 assert.equal(service.summaries("厨房")[0].observations[0].at,1000);assert.equal(service.find("task").returned,true);
+service.assignRoom("task","photo","region-kitchen","待命名房间1");
+service.relabelRooms("other-map",[{id:"region-kitchen",name:"错误地点"}]);assert.equal(service.find("task").observations[0].room,"待命名房间1");
+const observedOrder=service.find("task").updatedAt;service.relabelRooms("map",[{id:"region-kitchen",name:"厨房"}]);assert.equal(service.find("task").updatedAt,observedOrder,"room renaming must not make an old task look newly executed");assert.equal(service.summaries("厨房")[0].observations[0].at,1000);
 assert.throws(()=>service.begin("task","map","observe","existing"),/结束/);
 service.begin("cancel","map","photo","existing");service.finishTravel("cancel",false,"取消",true);assert.throws(()=>service.add("cancel",observation),/暂停/);
 const history=JSON.parse(boundedRecentDialogue(Array.from({length:100},(_,i)=>({role:i%2?"assistant":"user",content:"历史"+i+"。".repeat(1500),timestamp:String(i)}))));

@@ -5,11 +5,13 @@ import { getAppMode } from "../setup/setup-storage";
 import { useUserStore } from "../store/user";
 import { ChineseVoiceSession } from "./chinese-voice-session";
 import { stopLooiMotion } from "../device-tools/looi-robot";
-import { isChineseWakeEnabled, subscribeChineseWake } from "./chinese-voice-preferences";
+import { isChineseWakeEnabled, subscribeChineseWake, getChineseAsrMode, getChineseEndSilence } from "./chinese-voice-preferences";
 import { hasCompletedRobotOnboarding } from "../setup/setup-storage";
 import { resultPresentation } from "../artifacts/presentation";
 import { videoControl } from "../artifacts/video-control";
 import { recordDiagnosticEvent } from "../diagnostics/diagnostic-log";
+import * as FileSystem from "expo-file-system/legacy";
+import { transcribeChineseAudio } from "./speech-sample";
 import { ViewerVoice } from "./viewer-voice";
 
 let focused = 0;
@@ -41,7 +43,11 @@ export const chineseVoice = new ChineseVoiceSession(VoskCommandRecognizer, async
     if (review.phase === "review") return !review.photo ? "没有拍到照片，请按屏幕提示选择。"
       : review.notice.includes("保存失败") ? "这张还没保存，请按屏幕提示选择。" : "照片已经拍好，正在等你选择。";
   }, new ViewerVoice(resultPresentation, videoControl, () => photoSession().getSnapshot().phase === "idle"),
-  (event, details) => recordDiagnosticEvent("stt", event, details));
+  (event, details) => recordDiagnosticEvent("stt", event, details), {
+    settings: () => ({relay:getChineseAsrMode()==="relay",silence:getChineseEndSilence()}),
+    transcribe: async (uri,signal) => (await transcribeChineseAudio(uri,signal)).text,
+    discard: async uri => { if (FileSystem.cacheDirectory && uri.startsWith(FileSystem.cacheDirectory+"chinese-utterances/")) await FileSystem.deleteAsync(uri,{idempotent:true}); },
+  });
 
 export function focusChineseVoiceScreen({ autoStart = false }: { autoStart?: boolean } = {}): () => void {
   const owner = ++focusGeneration;
@@ -74,7 +80,11 @@ export function focusChineseVoiceScreen({ autoStart = false }: { autoStart?: boo
   });
   const preferences = subscribeChineseWake(() => {
     if (focused !== owner || !autoStart) return;
-    if (isChineseWakeEnabled()) resume();
+    if (isChineseWakeEnabled()) {
+      if (chineseVoice.getSnapshot().captureActive) void VoskCommandRecognizer.configureChineseConversation(
+        getChineseAsrMode()==="relay",getChineseEndSilence()).catch(()=>{});
+      resume();
+    }
     else void chineseVoice.stop("语音唤醒已关闭");
   });
   const syncFace = () => {

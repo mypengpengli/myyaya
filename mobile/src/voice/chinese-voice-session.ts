@@ -1,15 +1,16 @@
-import { ChineseCommandGate, compactChinese, isChineseStop, splitChineseWake, type ChineseRobotCommand } from "./chinese-command";
+import { ChineseCommandGate, compactChinese, isChineseStop, splitChineseWake, parseChineseRobotCommand, type ChineseRobotCommand } from "./chinese-command";
 import { CONVERSATION_WINDOW_MS, type ConversationReporter } from "./conversation-feedback";
 import type { ViewerVoice } from "./viewer-voice";
 
-type RecognitionEvent = { sessionId: number; text: string; partial: boolean; rms16?: number; droppedChunks?: number; processingMs?: number };
+type RecognitionEvent = { sessionId: number; text: string; partial: boolean; rms16?: number; droppedChunks?: number; processingMs?: number; audioUri?: string; refined?:boolean };
 
 export type ChineseSpeechState = {
   phase: "off" | "loading" | "listening" | "thinking" | "speaking" | "error";
   mode: "wake" | "dictation"; partial: string; transcript: string; notice: string;
-  captureActive: boolean; awake: boolean; listeningUntil: number; interim: string; acceptedText?: string;
+  acceptingFollowUp?: boolean; captureActive: boolean; awake: boolean; listeningUntil: number; interim: string; acceptedText?: string;
 };
 export interface ChineseSpeechNative {
+  configureChineseConversation?(relay: boolean, silence: number): Promise<void>;
   prepareChinese(): Promise<{ sessionId: number }>;
   startChineseCapture(): Promise<{ running: boolean }>;
   stopChineseCapture(): Promise<void>;
@@ -36,8 +37,14 @@ export class ChineseVoiceSession {
   private response?: AbortController;
   private responseFeedback?: ConversationReporter;
   private speakingText = "";
+  private asr?: AbortController;
+  private asrSequence = 0;
+  private asrPending = "";
+  private holdUtterance = false;
   private capturePaused = false;
   private lastInputAt = 0;
+  private utterance=0;
+  private utteranceAt=0;
   constructor(private readonly native: ChineseSpeechNative,
     private readonly permission: () => Promise<boolean>, private readonly allowed: () => boolean,
     private readonly execute: (command: ChineseRobotCommand) => Promise<string>,
@@ -46,7 +53,15 @@ export class ChineseVoiceSession {
     private readonly handlePhotoVoice?: (command: string) => boolean,
     private readonly photoWaitHint?: () => string | undefined,
     private readonly viewerVoice?: ViewerVoice,
-    private readonly observe?: (event: string, details: Record<string, number | string | boolean | undefined>) => void) {}
+    private readonly observe?: (event: string, details: Record<string, number | string | boolean | undefined>) => void,
+    private readonly speechOptions?: {
+      settings(): {relay: boolean; silence: number};
+      transcribe(uri: string, signal: AbortSignal): Promise<string>;
+      discard(uri: string): Promise<void>;
+    }) {}
+  private record(event:string,details:Record<string,number|string|boolean|undefined>){
+    this.observe?.(event,{...details,traceId:this.sessionId+":"+this.utterance,sinceUtteranceMs:Date.now()-this.utteranceAt});
+  }
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private update(patch: Partial<ChineseSpeechState>) { this.state = { ...this.state, ...patch }; this.listeners.forEach((fn) => fn()); }
@@ -65,7 +80,7 @@ export class ChineseVoiceSession {
     const generation = this.generation;
     this.windowTimer = setTimeout(() => {
       if (generation !== this.generation) return;
-      if (this.response || this.state.phase === "speaking") { this.openWindow(); return; }
+      if (this.response || this.asr || this.state.phase === "speaking") { this.openWindow(); return; }
       this.closeWindow(); this.update({ partial: "", notice: "等待唤醒，请说“小丫小丫”" });
     }, CONVERSATION_WINDOW_MS);
   }
@@ -80,6 +95,9 @@ export class ChineseVoiceSession {
         await this.native.stopChineseCapture();
         if (!this.current(generation)) return;
         if (!await this.permission()) throw new Error("麦克风权限未允许，请在系统设置中允许小丫使用麦克风");
+        if (!this.current(generation)) return;
+        const preferences = this.speechOptions?.settings();
+        if (preferences) await this.native.configureChineseConversation?.(preferences.relay, preferences.silence);
         if (!this.current(generation)) return;
         const model = await this.native.prepareChinese();
         if (!this.current(generation)) return;
@@ -129,6 +147,25 @@ export class ChineseVoiceSession {
     });
   }
   private onResult(event: RecognitionEvent) {
+    if(!event.partial && event.text.trim() && !event.refined){this.utterance++;this.utteranceAt=Date.now();}
+    if(event.partial && event.text.trim() && this.asr && !this.speakingText) {
+      const prior=compactChinese(this.asrPending),next=compactChinese(event.text);
+      if(next && prior && next!==prior && !prior.endsWith(next)) {
+        this.asr.abort();this.asr=undefined;this.asrSequence++;
+        this.continuation=(this.continuation ?? "")+splitChineseWake(this.asrPending).command;
+        this.asrPending="";this.waitForContinuation();
+      }
+    }
+    if (event.audioUri) {
+      const addressed = splitChineseWake(event.text);
+      const local = parseChineseRobotCommand(event.text);
+      const eligible = this.speechOptions?.settings().relay && !event.partial &&
+        (addressed.addressed || this.state.awake) && !this.speakingText &&
+        (this.state.phase === "listening" || this.state.acceptingFollowUp) &&
+        !local && !(addressed.addressed && !compactChinese(addressed.command)) && !this.photoWaitHint?.();
+      if (eligible) { void this.refine(event); return; }
+      void this.speechOptions?.discard(event.audioUri).catch(() => {});
+    }
     if (!event.text.trim()) {
       if (!event.partial && this.state.partial) {
         this.viewerVoice?.reset();
@@ -151,7 +188,7 @@ export class ChineseVoiceSession {
     }
     else {
       this.update({ transcript: event.text, partial: "" });
-      if (this.state.awake || addressed.addressed) this.observe?.("recognized", {
+      if (this.state.awake || addressed.addressed) this.record("recognized", {
         sessionId: this.sessionId, characters: event.text.length, rms16: event.rms16, droppedChunks: event.droppedChunks, processingMs: event.processingMs,
       });
     }
@@ -183,9 +220,9 @@ export class ChineseVoiceSession {
       this.interrupt(result.command.kind !== "stop");
       const generation = this.generation;
       const actionTurn = this.turn;
-      this.observe?.("local-action-started", { turn: actionTurn, action: result.command.kind });
+      this.record("local-action-started", { turn: actionTurn, action: result.command.kind });
       const finish = (notice: string) => {
-        this.observe?.("local-action-result", { turn: actionTurn, notice });
+        this.record("local-action-result", { turn: actionTurn, notice });
         if (this.current(generation) && this.turn === actionTurn) {
           if (result.command?.kind === "stop") this.update({ notice });
           else void this.sayWhileListening(notice);
@@ -197,38 +234,78 @@ export class ChineseVoiceSession {
         this.interrupt();
         if (command) this.acceptUtterance(addressed.command);
         else void this.sayWhileListening("我在听");
-      } else if (this.state.phase === "listening" && Date.now() < this.conversationUntil) {
-        if (this.speakingText) this.interrupt();
+      } else if ((this.state.phase === "listening" || this.state.acceptingFollowUp) && Date.now() < this.conversationUntil) {
+        if (this.speakingText || this.response) this.interrupt();
         this.acceptUtterance(event.text);
       }
     } else if (result.wake) { this.openWindow(); this.update({ notice: "已唤醒，正在听你说" }); }
   }
+  private async refine(event: RecognitionEvent) {
+    this.asr?.abort();
+    const controller = new AbortController();
+    this.asr = controller;
+    this.asrPending = event.text;
+    const sequence = ++this.asrSequence, generation = this.generation;
+    const started = Date.now();
+    this.openWindow();
+    this.update({ notice: "正在识别刚才的话", partial: event.text });
+    let text = event.text;
+    let source = "relay";
+    try {
+      const result = await this.speechOptions!.transcribe(event.audioUri!, controller.signal);
+      if (!result.trim()) throw new Error("中转未识别到文字");
+      text = result;
+      // The locally detected address grants this utterance permission even if the relay spells the name differently.
+      if (splitChineseWake(event.text).addressed) text = splitChineseWake(text).command;
+    } catch {
+      if (controller.signal.aborted) return;
+      source = "local-fallback";
+      this.update({ notice: "中转识别未成功，采用本机识别" });
+    } finally {
+      await this.speechOptions!.discard(event.audioUri!).catch(() => {});
+    }
+    if (!this.current(generation) || controller.signal.aborted || sequence !== this.asrSequence) return;
+    this.asr = undefined;this.asrPending = "";
+    this.record("asr-completed", { source, elapsedMs: Date.now() - started, characters: text.length });
+    if (!text.trim()) { this.update({ partial: "", notice: "这句没听清，请再说一次" }); return; }
+    this.onResult({ ...event, text, audioUri: undefined, refined:true });
+  }
   private clearContinuation() {
     clearTimeout(this.continuationTimer);
-    this.continuation = undefined;
+    this.continuation = undefined;this.holdUtterance=false;
   }
   private waitForContinuation() {
     clearTimeout(this.continuationTimer);
     this.continuationTimer = setTimeout(() => {
       if (!this.continuation) return;
-      if (this.state.partial && Date.now() - this.lastInputAt < 4000) {
+      if (this.asr || this.state.partial && Date.now() - this.lastInputAt < 4000) {
         this.waitForContinuation();
         return;
       }
-      this.clearContinuation();
+      this.continuationTimer = undefined;
       if (this.state.phase === "listening") {
         this.update({ partial: "" });
-        void this.sayWhileListening("想把这张照片怎么改？请说完整要求。");
+        void this.sayWhileListening(this.holdUtterance ? "我还在听，讲完后说“说完了”。" : /(?:照片|图片)/u.test(this.continuation ?? "") ? "想把这张照片怎么改？请说完整要求。" : "我在听，请继续把要求说完。");
       }
     }, 2200);
   }
   private acceptUtterance(text: string) {
     const whole = (this.continuation ?? "") + text;
     this.clearContinuation();
-    if (/^(?:请|麻烦)?(?:你)?(?:帮我)?把(?:这|刚才那)张(?:照片|图片)(?:给我)?$/u.test(compactChinese(whole))) {
+    const normalized=compactChinese(whole);
+    if(/^(?:先)?(?:等我说完|听我说完|我还没说完)/u.test(normalized))this.holdUtterance=true;
+    const finished=/(?:说完了|就这些|开始执行)$/u.test(normalized);
+    if(this.holdUtterance && finished){
+      this.holdUtterance=false;
+      this.beginConversation(whole.replace(/^(?:先)?(?:等我说完|听我说完|我还没说完)[，,。]?/u,"").replace(/(?:说完了|就这些|开始执行)[。！!]?$/u,""));
+      return;
+    }
+    const incomplete=/^(?:请|麻烦)?(?:你)?(?:帮我)?把.+(?:照片|图片|文件|文档|幻灯片|视频|邮件|任务|地图|房间|报告|灯|空调|东西|这个|那个)(?:给我)?$/u.test(normalized) && !/(?:改成|变成|换成|生成|保存|删除|发给|打开|调出|移到|放到|做成|编辑成|画成|制成|变为|改为).+/u.test(normalized)
+      || /(?:然后|接着|并且|以及|如果|因为|我想让你|我希望你|帮我把|请你把|给我把|改成|换成|做成|P成|p成|设置为|改为|生成一个|发给)$/u.test(normalized);
+    if (this.holdUtterance || incomplete) {
       this.continuation = whole;
       this.openWindow();
-      this.update({ notice: "我在听，请继续说怎么改" });
+      this.update({ notice: this.holdUtterance ? "正在听完整要求，讲完后说“说完了”" : "我在听，请继续说完整要求" });
       this.waitForContinuation();
       return;
     }
@@ -237,6 +314,9 @@ export class ChineseVoiceSession {
   private cancelResponse() {
     this.clearContinuation();
     this.turn++;
+    this.asr?.abort(); this.asr = undefined; this.asrPending = ""; this.asrSequence++;
+    this.holdUtterance = false;
+    this.update({ acceptingFollowUp: false });
     this.response?.abort();
     this.response = undefined;
     this.responseFeedback = undefined;
@@ -269,6 +349,11 @@ export class ChineseVoiceSession {
         } catch { if (this.current(generation)) this.update({ phase: "error", captureActive: false, notice: "录像结束后收音未恢复，请重新开启语音" }); }
       });
     };
+  }
+  /** Transfer a real, already-recognized utterance after navigation releases its camera/microphone. */
+  continueRecognizedTurn(text:string):boolean {
+    if(!this.allowed() || !this.state.captureActive || !text.trim())return false;
+    this.interrupt();this.update({transcript:text});this.acceptUtterance(text);return true;
   }
   isCapturePaused(): boolean { return this.capturePaused; }
   /** Announcements wait for idle; never abort a user turn, a photo review or recording. */
@@ -309,7 +394,7 @@ export class ChineseVoiceSession {
     const turn = this.turn, generation = this.generation;
     const controller = new AbortController(); this.response = controller;
     const current = () => this.current(generation) && this.turn === turn && !controller.signal.aborted;
-    this.observe?.("conversation-submitted", { turn, characters: text.length });
+    this.record("conversation-submitted", { turn, characters: text.length });
     this.openWindow(); this.update({ phase: "thinking", acceptedText: text, partial: "", interim: "", notice: "已收到，正在处理" });
     let speechQueue = Promise.resolve(), streamed = "", message = -1, lastFeedbackAt = Date.now();
     const stages = new Set<string>();
@@ -318,7 +403,7 @@ export class ChineseVoiceSession {
         if (!current() || (stillRelevant && !stillRelevant())) return;
         const audible = value.replace(/https?:\/\/\S+/gu, "链接").replace(/[`*_#]/gu, "").trim();
         if (!audible) return;
-        this.observe?.("conversation-tts", { turn, final, characters: audible.length });
+        this.record("conversation-tts", { turn, final, characters: audible.length });
         this.speakingText = compactChinese(audible);
         this.update({ phase: final ? "speaking" : "thinking", interim: audible, notice: final ? "小丫在说话" : audible });
         try { await this.native.speakChinese(audible); } catch { /* Text and tools remain usable if TTS fails. */ }
@@ -328,6 +413,10 @@ export class ChineseVoiceSession {
     const feedback: ConversationReporter = (value) => {
       if (!current()) return;
       lastFeedbackAt = Date.now();
+      if (value.kind === "stage" && value.acceptFollowUp !== undefined) {
+        this.update({ acceptingFollowUp: value.acceptFollowUp });
+        if (value.acceptFollowUp) this.openWindow();
+      }
       if (value.kind === "assistant") {
         if (message !== value.message) { message = value.message; streamed = ""; }
         streamed += value.text; say(value.text);

@@ -18,18 +18,25 @@ import type { ConversationReporter } from "../voice/conversation-feedback";
 import { quickPhotoRequest } from "../voice/quick-photo-request";
 import { photoTool } from "./camera-tools";
 
-import { updateCompanionProgress as update } from "./companion-progress";
+import { updateCompanionProgress as publishProgress } from "./companion-progress";
 let agent: CompanionAgent | undefined;
 let binding = "";
 let sessionId = "";
 let currentFeedback: ConversationReporter | undefined;
+let currentProgress: typeof publishProgress | undefined;
 let recoveredDialogue = "";
+let requestGeneration = 0;
 const taskNotices = new Map<string, string>();
 export function queueCompanionTaskResult(id: string, text: string) {
   taskNotices.set(id, text.slice(0, 10_000));
   if (taskNotices.size > 16) taskNotices.delete(taskNotices.keys().next().value!);
 }
 export async function replyToCompanion(text: string, signal: AbortSignal, feedback?: ConversationReporter): Promise<string> {
+  const generation = ++requestGeneration;
+  const current = () => generation === requestGeneration && !signal.aborted;
+  const update = (value: Parameters<typeof publishProgress>[0]) => {
+    if (generation === requestGeneration) publishProgress(value);
+  };
   const releaseCountdown = resultPresentation.holdCountdown();
   update({ phase: "thinking", label: "正在想怎么回答" });
   try {
@@ -39,7 +46,7 @@ export async function replyToCompanion(text: string, signal: AbortSignal, feedba
       update({ phase: "tool", label: "正在打开取景，请摆好姿势" });
       feedback?.({ kind: "stage", text: "取景画面会显示在右边，请先摆好姿势。" });
       const result = await photoTool.execute(`quick-photo-${Date.now()}`, photo, signal);
-      if (signal.aborted) throw new Error("已停止");
+      if (!current()) throw new Error("已停止");
       observeSkillTool("phone_photo", false, result);
       const reply = (result.details as { cancelled?: boolean })?.cancelled ? "拍照已取消。" : "照片已经确认并保存。";
       const cameraSession = sessionId || `camera-${Date.now()}`;
@@ -61,27 +68,32 @@ export async function replyToCompanion(text: string, signal: AbortSignal, feedba
       return reply;
     }
     const config = await readNewApiConfig();
+    if (!current()) throw new Error("已停止");
     if (!config) throw new Error("请在菜单的模型连接中填写中转站和 API Key");
     const identity = JSON.stringify(config); // In memory only. Never logged or persisted outside SecureStore.
     if (!agent || binding !== identity) {
       recoveredDialogue = await getRecentConversationMessages().then(boundedRecentDialogue).catch(()=>JSON.stringify({unavailable:true,notice:"近期聊天暂时无法恢复，不能声称记得旧问答"}));
+      if (!current()) throw new Error("已停止");
       agent?.abort(); binding = identity;
       agent = new CompanionAgent(config, createNewApiStream(config, fetch, (value) => {
         recordDiagnosticEvent("llm", "chat-http", { ...value });
         if (value.stage === "waiting") {
           const label = value.status === 200 ? "模型连接已建立，正在等待回复内容" : "还在等待模型服务器响应";
-          update({ phase: "thinking", label });
+          currentProgress?.({ phase: "thinking", label });
           currentFeedback?.({ kind: "stage", text: label + "。" });
         }
         if (value.stage === "retry") {
           const reason = value.status === 429 ? "服务暂时限制请求" : value.status && value.status >= 500 ? "模型服务暂时不可用"
             : value.reason === "idle-timeout" || value.reason === "total-timeout" ? "等待模型数据超时" : "模型连接暂时不稳定";
           const label = `${reason}，准备第${value.attempt! + 1}次尝试`;
-          update({ phase: "thinking", label }); currentFeedback?.({ kind: "stage", text: label + "。" });
+          currentProgress?.({ phase: "thinking", label }); currentFeedback?.({ kind: "stage", text: label + "。" });
         }
-      }), phoneTools, update, observeSkillTool, observeSkillReply);
+      }), phoneTools, value => currentProgress?.(value), observeSkillTool, observeSkillReply);
       sessionId = `pi-${Date.now()}`; mirrorSessionTouch(sessionId, "system");
     }
+    const replyingAgent = agent;
+    await replyingAgent.waitForIdle();
+    if (!current() || replyingAgent !== agent) throw new Error("已停止");
     const tasks = await currentHermesTasks().catch(() => []);
     const mediaBinding = await digestStringAsync(CryptoDigestAlgorithm.SHA256, config.baseUrl + "\n" + config.apiKey);
     const media = getMediaJobs().list().filter((job) => job.binding === mediaBinding);
@@ -89,16 +101,18 @@ export async function replyToCompanion(text: string, signal: AbortSignal, feedba
     try { skills = prepareSkillContext(text, phoneTools.map((tool) => tool.name)); }
     catch { skills = JSON.stringify({ unavailable: true, notice: "本轮技能库暂时无法读取；不能声称已加载或记得技能步骤，其他手机工具仍可正常使用" }); }
     const inspections=await import("../inspection/inspection-runtime").then(async m=>(await import("../inspection/inspection-service")).inspectionContext(m.getInspectionService().list())).catch(()=>({unavailable:true}));
-    agent.restoreContext(JSON.stringify({tasksAndMedia:JSON.parse(restoredCompanionContext(tasks, listArtifacts(), media, readArtifactFocus(), resultPresentation.getSnapshot().active?.id)),inspections}), skills, recoveredDialogue);
-    for (const [id, notice] of taskNotices) if (tasks.some((task) => task.id === id) || media.some((job) => `media:${job.id}` === id)) agent.appendBackgroundResult(notice);
+    if (!current()) throw new Error("已停止");
+    replyingAgent.restoreContext(JSON.stringify({tasksAndMedia:JSON.parse(restoredCompanionContext(tasks, listArtifacts(), media, readArtifactFocus(), resultPresentation.getSnapshot().active?.id)),inspections}), skills, recoveredDialogue);
+    for (const [id, notice] of taskNotices) if (tasks.some((task) => task.id === id) || media.some((job) => `media:${job.id}` === id)) replyingAgent.appendBackgroundResult(notice);
     taskNotices.clear();
     mirrorSessionMessage(sessionId, { role: "user", content: text });
     currentFeedback = feedback;
-    const reply = await agent.reply(text, signal, feedback);
+    currentProgress = update;
+    const reply = await replyingAgent.reply(text, signal, feedback);
     mirrorSessionMessage(sessionId, { role: "assistant", content: reply });
     update({ phase: "idle", label: "" }); return reply;
   } catch (error) {
     update({ phase: signal.aborted ? "idle" : "error", label: signal.aborted ? "" : error instanceof Error ? error.message : "对话暂时不可用" });
     throw error;
-  } finally { if (currentFeedback === feedback) currentFeedback = undefined; releaseCountdown(); }
+  } finally { if (generation === requestGeneration) { currentFeedback = undefined; currentProgress = undefined; } releaseCountdown(); }
 }

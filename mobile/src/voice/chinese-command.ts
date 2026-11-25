@@ -1,5 +1,5 @@
 export type ChineseRobotCommand =
-  | { kind: "stop" }
+  | { kind: "stop"; cancelNavigation?:boolean }
   | { kind: "move"; direction: "forward" | "back"; distanceCm?: number }
   | { kind: "turn"; direction: "left" | "right"; degrees: 90 | 180 }
   | { kind: "head"; direction: "up" | "down" | "center" }
@@ -19,7 +19,7 @@ export function splitChineseWake(text: string): { addressed: boolean; command: s
 }
 export function isChineseStop(text: string): boolean {
   const { command } = splitChineseWake(text);
-  return /^(?:请)?(?:停|停下|停下来|停止|停止移动|停止运动|停止录像|结束录像|停止录制|紧急停止|别动|不要动|刹车)$/u.test(compactChinese(command));
+  return /^(?:请)?(?:停|停下|停下来|停止|停止移动|停止运动|停止录像|结束录像|停止录制|紧急停止|停止导航|暂停导航|取消导航|结束导航|停止复走|别走了|别动|不要动|刹车)$/u.test(compactChinese(command));
 }
 export function parseChineseRobotCommand(text: string): ChineseRobotCommand | null {
   const raw = splitChineseWake(text).command;
@@ -36,7 +36,7 @@ export function parseChineseRobotCommand(text: string): ChineseRobotCommand | nu
     const scale = unit === "米" || unit === "m" ? 100 : unit === "毫米" || unit === "mm" ? 0.1 : 1;
     return { kind: "move", direction: /前/.test(distance[1]) ? "forward" : "back", distanceCm: cm * scale };
   }
-  if (isChineseStop(value)) return { kind: "stop" };
+  if (isChineseStop(value)) return /^(?:取消导航|结束导航)$/u.test(value)?{kind:"stop",cancelNavigation:true}:{ kind: "stop" };
   if (/^(?:前进|向前|往前|向前走|往前走|前进一步)$/u.test(value)) return { kind: "move", direction: "forward" };
   if (/^(?:后退|退后|向后|往后|向后走|往后走|后退一步)$/u.test(value)) return { kind: "move", direction: "back" };
   if (/^(?:左转|向左转|往左转|向左|往左)$/u.test(value)) return { kind: "turn", direction: "left", degrees: 90 };
@@ -58,7 +58,7 @@ export class ChineseCommandGate {
   open(now: number) { this.until = now + 60_000; }
   accept(text: string, partial: boolean, now: number): { command?: ChineseRobotCommand; wake?: boolean } {
     // STOP bypasses wake, endpoint and conversation windows. Other partials do nothing.
-    if (isChineseStop(text)) { this.until = 0; return { command: { kind: "stop" } }; }
+    if (isChineseStop(text)) { this.until = 0; return { command: parseChineseRobotCommand(text) ?? { kind: "stop" } }; }
     if (partial) return {};
     const addressed = splitChineseWake(text);
     if (addressed.addressed) this.open(now);

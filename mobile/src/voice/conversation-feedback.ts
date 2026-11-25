@@ -1,7 +1,7 @@
 /** Only public assistant text and factual execution stages belong in the speaker queue. */
 export type ConversationFeedback =
   | { kind: "assistant"; text: string; message: number }
-  | { kind: "stage"; text: string };
+  | { kind: "stage"; text: string; acceptFollowUp?: boolean };
 export type ConversationReporter = (feedback: ConversationFeedback) => void;
 
 export const CONVERSATION_WINDOW_MS = 60_000;

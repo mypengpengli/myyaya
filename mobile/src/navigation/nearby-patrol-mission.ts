@@ -1,5 +1,5 @@
 import {getContinuousStatus,getNavigationProbeStatus,startNativeContinuous,observeNativeContinuous,stopNativeContinuous,
-  getHomeStatus,getHomePlan,publishHomeProgress,prepareHomeCapture,retargetNativeContinuous,type HomePlan,type HomePose} from "../../modules/navigation-probe";
+  getHomeStatus,getHomePlan,publishHomeProgress,sendHomeCommand,prepareHomeCapture,retargetNativeContinuous,type HomePlan,type HomePose} from "../../modules/navigation-probe";
 import {prepareNativeNavigationDrive} from "../device-tools/looi-robot";
 import {getNavigationControlOwner} from "../core/navigation-control-lease";
 import {LocalGoalController} from "./local-goal-controller";
@@ -78,10 +78,13 @@ export async function runNearbyPatrolMission(initial: HomePlan) {
           const returning = returned;
           departingSpoken = true;
           if (returning) returningSpoken = true;
-          void import("../../modules/vosk-command-recognizer").then(({default:voice}) =>
-            voice.speakChinese(returning ? "观察点已记录，我开始返回起点。" : "已开始移动，正在观察附近地面。")).catch(()=>{});
+          void import("./navigation-speech").then(({announceNavigation}) =>
+            announceNavigation(returning ? "观察点已记录，我开始返回起点。" : "已开始移动，正在观察附近地面。")).catch(()=>{});
         }
-        if(Date.now()-lastSave>3000){lastSave=Date.now();await publishHomeProgress({taskId:plan.taskId,phase:"RUNNING",...checkpoint,
+        if(Date.now()-lastSave>3000){
+          const cells=(await import("../inspection/inspection-coverage")).mergeInspectionCoverage([],result.navigationCells,capture.pose,origin,g.centerRightMeters,g.alongViewMeters);
+          await sendHomeCommand({op:"spatial_observe",taskId:plan.taskId,cells});lastSave=Date.now();
+          await publishHomeProgress({taskId:plan.taskId,phase:"RUNNING",...checkpoint,
           reason:returned?tour.reason:"正在附近观察，绿色为已观察地面；最多80厘米范围"});}
         errors=0;
       }catch(e){if(++errors>=3)throw e;}
@@ -100,8 +103,8 @@ export async function runNearbyPatrolMission(initial: HomePlan) {
       reason:success?"附近短巡游已返回起点并停车，不代表整个房间探索完毕":!stopped?"已请求停车，尚未收到回执":failure}).catch(()=>{});
     await import("react-native").then(async n=>{
       if(n.AppState.currentState!=="active")return;
-      const {default:voice}=await import("../../modules/vosk-command-recognizer");
-      await voice.speakChinese(success?"附近逛完，已经回到起点。":`巡游已暂停，${failure || "请查看屏幕"}`);
+      const {announceNavigation}=await import("./navigation-speech");
+      await announceNavigation(success?"附近逛完，已经回到起点。":`巡游已暂停，${failure || "请查看屏幕"}`);
     }).catch(()=>{});
   }
 }

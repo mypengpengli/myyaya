@@ -3,7 +3,7 @@ import { AppState, PermissionsAndroid, Pressable, ScrollView, StyleSheet, Switch
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { ChineseVoiceControls } from "@/src/ui/ChineseVoiceControls";
-import { isChineseWakeEnabled, setChineseWakeEnabled, subscribeChineseWake } from "@/src/voice/chinese-voice-preferences";
+import { isChineseWakeEnabled, setChineseWakeEnabled, subscribeChineseWake, getChineseAsrMode, setChineseAsrMode, getChineseEndSilence, setChineseEndSilence } from "@/src/voice/chinese-voice-preferences";
 import { chineseVoice, resumeAutomaticChineseVoice } from "@/src/voice/chinese-voice-runtime";
 import Vosk from "../modules/vosk-command-recognizer";
 import * as FileSystem from "expo-file-system/legacy";
@@ -13,6 +13,8 @@ import { looiTheme as theme } from "@/src/ui/looi-theme";
 export default function VoiceSettings() {
   const router = useRouter();
   const enabled = useSyncExternalStore(subscribeChineseWake, isChineseWakeEnabled, isChineseWakeEnabled);
+  const asrMode = useSyncExternalStore(subscribeChineseWake, getChineseAsrMode, getChineseAsrMode);
+  const silence = useSyncExternalStore(subscribeChineseWake, getChineseEndSilence, getChineseEndSilence);
   const [advanced, setAdvanced] = useState(false);
   const [notice, setNotice] = useState("");
   const [compare, setCompare] = useState(false);
@@ -59,7 +61,7 @@ export default function VoiceSettings() {
       uri = local.uri;
       if (run.signal.aborted) return;
       const db = local.rms > 0 ? (20 * Math.log10(local.rms / 32768)).toFixed(1) : "静音";
-      const summary = `本机（${local.decodeMs} 毫秒）：${local.text || "未识别到文字"}\n采样 ${local.durationMs} 毫秒 · 电平 ${db} dBFS · 削顶 ${local.clipped} 样本`;
+      const summary = `本机（${local.decodeMs} 毫秒）：${local.text || "未识别到文字"}\n采样 ${local.durationMs} 毫秒 · 电平 ${db} dBFS · 削顶 ${local.clipped} 样本\n解码丢块 ${local.droppedChunks} · 噪声电平 ${local.noiseDbfs.toFixed(1)} dBFS · 电平对比约 ${local.levelContrastDb.toFixed(1)} dB（非标准信噪比）`;
       setSampleResult(summary);
       if (compare) {
         const remote = await compareSpeechSample(uri, run.signal).catch(error => error.message as string);
@@ -90,6 +92,16 @@ export default function VoiceSettings() {
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.row}><Text style={styles.label}>语音唤醒</Text><Switch accessibilityLabel="自动开启中文语音唤醒" value={enabled} onValueChange={setChineseWakeEnabled} /></View>
       <Text style={styles.detail}>返回表情页后自动监听“小丫小丫”。App 进入后台或休眠时暂停，回来后自动恢复。“停止”无需唤醒。</Text>
+      <View style={styles.row}><Text style={styles.label}>自由对话使用中转识别</Text>
+        <Switch value={asrMode === "relay"} onValueChange={value => setChineseAsrMode(value ? "relay" : "local")} disabled={sampling} />
+      </View>
+      <Text style={styles.detail}>唤醒后的自由对话发送到已配置中转的 TeleSpeechASR，失败采用本机结果。停止和拍照选择由本机响应。</Text>
+      <Text style={styles.label}>说完后等多久再处理</Text>
+      <View style={styles.row}>{[1.1, 1.8, 2.5].map(value =>
+        <Pressable key={value} disabled={sampling} accessibilityRole="radio" accessibilityState={{checked:silence===value}}
+          onPress={() => setChineseEndSilence(value)} style={styles.button}>
+          <Text style={styles.link}>{silence===value ? "✓ " : ""}{value} 秒</Text>
+        </Pressable>)}</View>
       <Text style={styles.label}>声音：手机系统中文音色</Text>
       <Pressable disabled={sampling} accessibilityRole="button" onPress={() => void preview()} style={styles.button}>
         <Text style={styles.link}>试听声音</Text>

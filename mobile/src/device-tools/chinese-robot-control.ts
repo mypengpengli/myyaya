@@ -27,13 +27,16 @@ export async function executeChineseRobotCommand(command: ChineseRobotCommand, o
     switch (command.kind) {
       case "move": {
         const cm = command.distanceCm;
-        if (cm !== undefined && (!Number.isFinite(cm) || cm < 2 || cm > 20)) throw new Error("一次估时短步支持 2 至 20 厘米，请重新给出距离");
-        // Provisional short-step estimate from measured rearward field pulses.
-        // Forward uses this as an estimate until a directional calibration is available.
-        result = await moveLooi(command.direction, cm === undefined ? 450 : Math.round(cm * 450 / 6.5));
+        if(cm!==undefined){
+          if(!Number.isFinite(cm) || cm<2 || cm>500)throw new Error("定位行驶支持2至500厘米，请给出有效距离");
+          const navigation=await import("../agent/home-tools");
+          await navigation.startMeasuredVoiceMove(command.direction,cm);
+          return "已设置目标"+cm+"厘米，正在准备定位行驶；尚未到达。";
+        }
+        // An unspecified short nudge remains a timed primitive. Distances above use visual navigation.
+        result = await moveLooi(command.direction,450);
         if (!result.completed) return "移动已中断，距离未确认。";
-        return cm === undefined ? "短步驱动和停止指令已写入，实际位移未测量。" :
-          `已按目标${cm}厘米估时写入${command.direction === "forward" ? "前进" : "后退"}和停止指令，实际距离未测量。`;
+        return "短步驱动和停止指令已写入，实际位移未测量。";
       }
       case "turn": result = await turnLooi(command.direction, command.degrees); break;
       case "head": return (await setLooiHead(command.direction, undefined, true, options?.headWriteResponse)).notice;

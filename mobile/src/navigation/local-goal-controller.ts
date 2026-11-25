@@ -35,7 +35,8 @@ export class LocalGoalController {
         if(Math.hypot(x*CELL-z.x,y*CELL-z.y)<=z.radius+CELL*Math.SQRT1_2)out.push({x:x*CELL,y:y*CELL,label:2});
     return out;
   }
-  constructor(readonly goal:{x:number;y:number},readonly geometry:NearStepGeometry,initialYaw:number) {
+  constructor(readonly goal:{x:number;y:number},readonly geometry:NearStepGeometry,initialYaw:number,readonly stopTolerance=.06) {
+    if(!Number.isFinite(stopTolerance)||stopTolerance<.01||stopTolerance>.06)throw new Error("无效停车容差");
     if(![goal.x,goal.y,initialYaw].every(Number.isFinite) || Math.hypot(goal.x,goal.y)<.15 || Math.hypot(goal.x,goal.y)>1) throw new Error("局部目标应在15厘米至1米内");
     this.originYaw=initialYaw;this.bestDistance=Math.hypot(goal.x,goal.y);
   }
@@ -88,7 +89,7 @@ export class LocalGoalController {
   distance(){return Math.hypot(this.goal.x-this.pose.x,this.goal.y-this.pose.y);}
   plan():GoalPlan {
     if(this.positionUncertaintyMeters>.1) return {phase:"LOCALIZATION_UNCERTAIN",path:[]};
-    if(this.distance()<=.06) return {phase:"AT_GOAL",path:[]};
+    if(this.distance()<=this.stopTolerance) return {phase:"AT_GOAL",path:[]};
     if(this.stagnant>32) return {phase:"NO_PROGRESS",path:[]};
     const radius=Math.max(this.geometry.widthMeters,this.geometry.lengthMeters)/2+this.geometry.marginMeters+.01;
     const blocked=new Set<string>();
@@ -106,17 +107,18 @@ export class LocalGoalController {
       nearBlockers:blockers.filter(c=>Math.hypot(c.x*CELL-this.pose.x,c.y*CELL-this.pose.y)<=radius+.08).slice(0,12).map(c=>({x:c.x*CELL,y:c.y*CELL,label:c.label}))};
     const steps=[[-1,0],[1,0],[0,1],[0,-1],[-1,1],[1,1],[-1,-1],[1,-1]];
     diagnostic.freeNeighbors=steps.filter(([dx,dy])=>!blocked.has(key(sx+dx,sy+dy)) && !(dx&&dy&&(blocked.has(key(sx+dx,sy))||blocked.has(key(sx,sy+dy))))).length;
-    const goalRadius=Math.ceil(.06/CELL);
+    const gridTolerance=Math.max(this.stopTolerance,CELL*Math.SQRT1_2);
+    const goalRadius=Math.ceil(gridTolerance/CELL);
     let freeGoal=false;
     for(let dx=-goalRadius;dx<=goalRadius;dx++)for(let dy=-goalRadius;dy<=goalRadius;dy++)
-      if(Math.hypot((tx+dx)*CELL-this.goal.x,(ty+dy)*CELL-this.goal.y)<=.06 && !blocked.has(key(tx+dx,ty+dy)))freeGoal=true;
+      if(Math.hypot((tx+dx)*CELL-this.goal.x,(ty+dy)*CELL-this.goal.y)<=gridTolerance && !blocked.has(key(tx+dx,ty+dy)))freeGoal=true;
     if(!freeGoal)return {phase:"OBSERVE_SIDE",path:[],reason:"GOAL_REGION_OCCUPIED",diagnostic};
     const open=[{x:sx,y:sy,g:0,f:Math.hypot(tx-sx,ty-sy)}],cost=new Map([[root,0]]),parent=new Map<string,string>();
     let found:string|undefined,expanded=0;
     while(open.length && expanded++<10000) {
       let best=0;for(let n=1;n<open.length;n++) if(open[n].f<open[best].f) best=n;
       const p=open.splice(best,1)[0],pk=key(p.x,p.y);if(p.g!==(cost.get(pk) ?? Infinity)) continue;
-      if(pk!==root && Math.hypot(p.x*CELL-this.goal.x,p.y*CELL-this.goal.y)<=.06){found=pk;break;}
+      if(pk!==root && Math.hypot(p.x*CELL-this.goal.x,p.y*CELL-this.goal.y)<=gridTolerance){found=pk;break;}
       for(const [dx,dy] of steps) {
         const x=p.x+dx,y=p.y+dy,k=key(x,y);
         if(Math.abs(x*CELL-this.pose.x)>1.5||Math.abs(y*CELL-this.pose.y)>1.5||blocked.has(k) || (dx&&dy&&(blocked.has(key(p.x+dx,p.y))||blocked.has(key(p.x,p.y+dy))))) continue;
@@ -128,6 +130,11 @@ export class LocalGoalController {
     if(!found) return {phase:"OBSERVE_SIDE",path:[],reason:open.length?"SEARCH_LIMIT":diagnostic.freeNeighbors===0?"START_ENCLOSED":"DISCONNECTED_GRID",diagnostic};
     const path:Array<{x:number;y:number}>=[];let k:string|undefined=found;
     while(k && k!==root){const [x,y]=k.split(",").map(Number);path.unshift({x:x*CELL,y:y*CELL});k=parent.get(k);}
+    if(this.stopTolerance<.06 && path.length){
+      const last=path.at(-1)!;let clear=true;
+      for(let t=0;t<=1;t+=.1)if(blocked.has(key(Math.round((last.x+(this.goal.x-last.x)*t)/CELL),Math.round((last.y+(this.goal.y-last.y)*t)/CELL))))clear=false;
+      if(clear)path.push({...this.goal});
+    }
     let look=path[0];
     // Only shorten a path when its continuous segment avoids the inflated obstacles.
     for(const p of path) {

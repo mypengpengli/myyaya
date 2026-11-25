@@ -233,6 +233,7 @@ export default function IndexScreen() {
   const voiceReady = speech.captureActive && !robotSleeping;
   const voiceStatus = !voiceReady ? "收音未开启" : photo.phase === "framing" ? "取景中 · 可说确定或取消"
     : photo.phase === "review" ? "审片中 · 可说确定、重拍或取消" : speech.phase === "speaking" || speech.interim ? "正在播报 · 可说停止"
+    : speech.acceptingFollowUp ? "我在听 · 可以接着说"
     : speech.phase === "thinking" ? "已收到 · 可喊小丫小丫打断"
     : speech.awake || speech.mode === "dictation" ? "已唤醒 · 正在听你说" : "待唤醒 · 请说小丫小丫";
   return <SafeAreaView style={styles.home} {...swipe.panHandlers}>

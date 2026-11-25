@@ -50,7 +50,7 @@ internal data class HomeAtlas(val mapId: String,val referenceKey: String,val rev
     require(points.zipWithNext().sumOf { (a,b)->a.distance(b) } in .10..30.0) { "路线应在10厘米至30米内" }
     return copy(revision=revision+1,links=links.filterNot { setOf(it.from,it.to)==setOf(from,to) }+HomeLink(from=from,to=to,points=points))
   }
-  fun report(): Map<String,Any?> = mapOf("mapId" to mapId,"revision" to revision,"requiresReference" to referenceKey.isNotEmpty(),
+  fun report(requiresReference: Boolean=false): Map<String,Any?> = mapOf("mapId" to mapId,"revision" to revision,"requiresReference" to requiresReference,
     "places" to places.map { mapOf("id" to it.id,"name" to it.name,"room" to it.room,"kind" to it.kind,"pose" to it.pose.report()) },
     "links" to links.map { mapOf("id" to it.id,"from" to it.from,"to" to it.to,"taught" to it.taught,"enabled" to it.enabled,"points" to it.points.map(HomePose::report)) },
     "zones" to zones.map { mapOf("id" to it.id,"name" to it.name,"x" to it.x,"y" to it.y,"radius" to it.radius) })

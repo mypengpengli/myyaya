@@ -29,7 +29,7 @@ assert.throws(()=>new patrol.NearbyPatrol({x:NaN,y:0,yaw:0}),/起点/);
 
 async function mission(mode="ok") {
   let time=0,calls=0,token="",active=false,goal={x:0,y:.15,yaw:0},final=false,state={pose:{x:0,y:0,yaw:0},phase:"IDLE",stopAcknowledged:true};
-  const photos=[],reports=[],actions={starts:0,stops:0,observations:0,finishes:0};
+  const photos=[],reports=[],actions={starts:0,stops:0,observations:0,finishes:0,globalWrites:0};
   const plan={mode:"patrol",taskId:"tour",mapId:"map",revision:1,poseRevision:1,origin:{x:0,y:0,yaw:0},
     patrolStart:JSON.stringify({x:0,y:0,yaw:0}),patrolTrail:JSON.stringify([{x:0,y:0,yaw:0}]),coverage:"[]",zones:[],...(mode==="inspection"?{inspectionId:"inspection"}:{})};
   const status=()=>({...state,token,active,poseReady:true,stopEpoch:3,frameNs:1e9});
@@ -42,10 +42,11 @@ async function mission(mode="ok") {
       const dx=goal.x-state.pose.x,dy=goal.y-state.pose.y,d=Math.hypot(dx,dy);
       if(d>.001){const step=Math.min(.05,d);state.pose={x:state.pose.x+dx/d*step,y:state.pose.y+dy/d*step,yaw:Math.atan2(dx,dy)};}
       if(Math.hypot(goal.x-state.pose.x,goal.y-state.pose.y)<=.06){state.phase=final?"AT_GOAL":"WAYPOINT_REACHED";if(final)active=false;}else state.phase="DRIVING";
-    },stopNativeContinuous:async()=>{actions.stops++;active=false;state.stopAcknowledged=true;},publishHomeProgress:async v=>reports.push(v)};
+    },stopNativeContinuous:async()=>{actions.stops++;active=false;state.stopAcknowledged=true;},sendHomeCommand:async v=>{assert.equal(v.op,"spatial_observe");assert.equal(v.taskId,"tour");actions.globalWrites++;return {};},publishHomeProgress:async v=>reports.push(v)};
   const mod=load("src/navigation/nearby-patrol-mission.ts",{
     "../../modules/navigation-probe":native,"../device-tools/looi-robot":{prepareNativeNavigationDrive:async()=>({device:"same-ble",finish:()=>actions.finishes++})},
     "../core/navigation-control-lease":{getNavigationControlOwner:()=>"owner"},"./local-goal-controller":nav,"./home-route":route,"./nearby-patrol":patrol,
+    "../inspection/inspection-coverage":load("src/inspection/inspection-coverage.ts",{"../navigation/home-route":route}),
     "../inspection/inspection-mission":{beginInspection:async()=>({count:()=>photos.length,capture:async(...args)=>{assert.equal(state.phase,"WAYPOINT_REACHED");photos.push(args);},finish(){}})},
     "../diagnostics/floor-vision-probe":{releaseContinuousVision:async()=>{},runFloorVisionProbe:async()=>{
       time+=1200;calls++;if(mode==="model-error")throw new Error("model failed");
@@ -55,7 +56,7 @@ async function mission(mode="ok") {
   await mod.runNearbyPatrolMission(plan);return {reports,actions,state,photos};
 }
 const success=await mission();assert.equal(success.reports.at(-1).phase,"COMPLETED");assert.equal(success.actions.starts,1);assert.equal(success.actions.stops,1);
-assert.ok(success.actions.observations>8);assert.ok(success.reports.some(r=>r.coverage?.length));assert.ok(success.reports.some(r=>r.patrolTrail?.length>2));
+assert.ok(success.actions.observations>8);assert.ok(success.actions.globalWrites>0,"nearby observations must also extend the persistent home grid");assert.ok(success.reports.some(r=>r.coverage?.length));assert.ok(success.reports.some(r=>r.patrolTrail?.length>2));
 assert.ok(Math.hypot(success.state.pose.x,success.state.pose.y)<=.06);
 const observed=await mission("inspection");assert.equal(observed.reports.at(-1).phase,"COMPLETED",JSON.stringify({reason:observed.reports.at(-1).reason,photos:observed.photos.length,state:observed.state}));assert.ok(observed.photos.length>0 && observed.photos.length<=4);
 for(const reason of ["changed","model-error","no-floor"]) {

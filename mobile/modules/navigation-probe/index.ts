@@ -14,9 +14,9 @@ export type NavigationProbeStatus = {
 
 export type ContinuousStatus={token?:string;stopEpoch:number;phase?:string;reason?:string;active?:boolean;pose?:{x:number;y:number;yaw:number};poseReady?:boolean;frameNs?:number;[key:string]:unknown};
 export type HomePose={x:number;y:number;yaw:number};
-export type HomeAtlas={mapId:string;mapName?:string;revision:number;requiresReference:boolean;task?:string;places:Array<{id:string;name:string;room:string;kind:string;pose:HomePose}>;links:Array<{id:string;from:string;to:string;taught:boolean;enabled:boolean;points:HomePose[]}>;zones:Array<{id:string;name:string;x:number;y:number;radius:number}>};
-export type HomeStatus={atlas:Pick<HomeAtlas,"mapId"|"revision"|"requiresReference">|null;pose:HomePose|null;localized:boolean;poseRevision:number;connectionConfirmed:boolean;teaching:boolean;task:string;notice:string;localizationReason:string};
-export type HomePlan={taskId:string;mapId:string;revision:number;poseRevision:number;origin:HomePose;targetName:string;points:HomePose[];zones:Array<{x:number;y:number;radius:number}>;robotRadius:number;mode?:"patrol"|"inspection";patrolStart?:string;patrolTrail?:string;patrolElapsedMs?:number;coverage?:string;inspectionId?:string;inspectionAction?:"observe"|"photo"|"rescan";mapping?:"existing"|"local-new"|"rescan";roomName?:string;inspectionStops?:Array<{id:string;name:string;pose:HomePose;arc:number}>;inspectionDone?:string[]};
+export type HomeAtlas={active?:boolean;regions?:Array<{id:string;name:string;areaSquareMeters:number}>;mapId:string;mapName?:string;revision:number;requiresReference:boolean;task?:string;places:Array<{id:string;name:string;room:string;kind:string;pose:HomePose}>;links:Array<{id:string;from:string;to:string;taught:boolean;enabled:boolean;points:HomePose[]}>;zones:Array<{id:string;name:string;x:number;y:number;radius:number}>};
+export type HomeStatus={spatialRoom?:{id:string;name:string}|null;regions?:Array<{id:string;name:string;areaSquareMeters:number}>;atlas:Pick<HomeAtlas,"mapId"|"revision"|"requiresReference">|null;pose:HomePose|null;localized:boolean;poseRevision:number;connectionConfirmed:boolean;teaching:boolean;task:string;notice:string;localizationReason:string;spatialPath?:HomePose[]|null;observedCells?:number;temporaryBlocks?:number};
+export type HomePlan={taskId:string;mapId:string;revision:number;poseRevision:number;origin:HomePose;targetName:string;points:HomePose[];zones:Array<{x:number;y:number;radius:number}>;robotRadius:number;mode?:"patrol"|"inspection"|"explore"|"distance"|"route";explorationStart?:string;explorationVisited?:string;patrolStart?:string;patrolTrail?:string;patrolElapsedMs?:number;coverage?:string;inspectionId?:string;inspectionAction?:"observe"|"photo"|"rescan";mapping?:"existing"|"local-new"|"rescan";roomName?:string;inspectionStops?:Array<{id:string;name:string;pose:HomePose;arc:number}>;inspectionDone?:string[]};
 type Native = {
   captureSceneFrame():Promise<{jpegUri:string;requestId:string;imageTimestampNs:number}>;
   finishHomeSession(token:string):Promise<void>;
@@ -26,6 +26,7 @@ type Native = {
   homeProgress(data:string):Promise<void>;
   listHomes():Promise<HomeAtlas[]>;
   prepareHomeCapture():Promise<void>;
+  lookContinuous(token:string,yaw:number|null):Promise<void>;
   retargetContinuous(token:string,x:number,y:number,final:boolean):Promise<void>;
   continuousStatus():Promise<ContinuousStatus>;
   startContinuous(device:string,epoch:number,config:string):Promise<ContinuousStatus>;
@@ -70,7 +71,8 @@ export const publishHomeProgress=(data:Record<string,unknown>)=>getNative().home
 export const listHomeAtlases=()=>getNative().listHomes();
 export const prepareHomeCapture=()=>getNative().prepareHomeCapture();
 export const retargetNativeContinuous=(token:string,target:HomePose,final:boolean)=>getNative().retargetContinuous(token,target.x,target.y,final);
-export const startNativeContinuous=(device:string,epoch:number,gx:number,gy:number,height:number,region:{left:number;top:number;right:number;bottom:number},final=true)=>getNative().startContinuous(device,epoch,JSON.stringify({gx,gy,height,region,final}));
+export const lookNativeContinuous=(token:string,yaw:number|null)=>getNative().lookContinuous(token,yaw);
+export const startNativeContinuous=(device:string,epoch:number,gx:number,gy:number,height:number,region:{left:number;top:number;right:number;bottom:number},final=true,options:{goalToleranceMeters?:number;maximumMs?:number}={})=>getNative().startContinuous(device,epoch,JSON.stringify({gx,gy,height,region,final,...options}));
 export const observeNativeContinuous=(token:string,data:unknown)=>getNative().continuousObservation(token,JSON.stringify(data));
 export const stopNativeContinuous=(reason:string)=>getNative().stopContinuous(reason);
 export const saveContinuousReport=(value:unknown)=>getNative().saveContinuousReport(JSON.stringify(value));

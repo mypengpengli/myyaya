@@ -1,3 +1,5 @@
+import {getNavigationControlOwner} from "../core/navigation-control-lease";
+import { randomUUID } from "expo-crypto";
 import { AppState, PermissionsAndroid } from "react-native";
 import { getLocalFaceAttentionModule, type LocalStillCapture } from "../../modules/local-face-attention";
 import { getPhoneRecording } from "./phone-recording";
@@ -8,6 +10,7 @@ import { holdSocialAttentionMotionFor } from "../core/social-attention";
 
 let captureBusy = false;
 export async function ensurePhotoAvailable() {
+  if(getNavigationControlOwner())throw new Error("导航相机正在占用；请先暂停并回到表情页拍摄，原目的地会保留");
   if (AppState.currentState !== "active" || !await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.CAMERA)) throw new Error("请允许相机权限并保持 App 在前台");
   if (["preparing", "recording", "saving"].includes(getPhoneRecording().phase)) throw new Error("正在录像，请先停止录像再拍照");
 }
@@ -25,8 +28,12 @@ async function capture(cameraFacing: "front" | "back"): Promise<LocalStillCaptur
     return photo;
   } finally { captureBusy = false; }
 }
-export const photoCapture = new PhotoCaptureSession(
-  (photo) => savePhotoArtifact(photo.base64, photo.mimeType, "手机照片"));
+const photoIds = new WeakMap<LocalStillCapture, string>();
+export const photoCapture = new PhotoCaptureSession((photo) => {
+  let id = photoIds.get(photo);
+  if (!id) { id = randomUUID(); photoIds.set(photo, id); }
+  return savePhotoArtifact(photo.base64, photo.mimeType, "手机照片", undefined, { id });
+});
 
 /** Observation reuses Camera2 capture and returns an actual image to the model, without opening a Viewer. */
 export async function observeScene(camera: "front" | "back", signal?: AbortSignal): Promise<PhotoResult> {

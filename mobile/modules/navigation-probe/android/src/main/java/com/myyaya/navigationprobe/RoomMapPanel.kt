@@ -724,6 +724,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       "depthCapture" to depthRecorder.report()))) }
   fun canStart() = mapper != null && !saving && !restoring
   fun stopTaughtRoute(reason: String) {homeNavigation?.stop(reason);taughtRoutes?.stop(reason) }
+  fun homeSpatialRequest(v: org.json.JSONObject)=requireNotNull(homeNavigation).spatialRequest(v)
+  fun homeCapturePose()=homeNavigation?.capturePose()
   fun homeStatus()=requireNotNull(homeNavigation).status()+mapOf("visualLocalization" to visual.report())
   fun homeCommand(data: org.json.JSONObject): Map<String,Any?> {
     if(data.optString("op")=="new_location") {
@@ -745,7 +747,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     if(id.isNotEmpty()) {
       require(UUID.fromString(id).toString()==id)
       val map=read(File(directory,"$id.yayamap"));mapper=RoomMapper(map);freshMap=false;name=map.name
-      render(map,"请恢复固定参照图定位，再使用家庭导航。")
+      render(map,"请观察已保存的场景或参照图，恢复定位后使用家庭导航。")
     } else {
       val newLocation=data.optJSONObject("command")?.takeIf {it.optString("op")=="new_location"}
       val clean=newLocation?.getString("name")?.trim() ?: "我的家"
@@ -773,8 +775,8 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     taughtRoutes?.beginLocalMission(confirmed,region,promise) ?: promise.reject("ERR_FIELD_SCREEN","未打开路线页",null)
   }
   fun continuousSnapshot()=taughtRoutes?.continuousSnapshot()
-  fun beginContinuous(ble: com.bleplx.BlePlxModule,device: String,epoch: Int,gx: Double,gy: Double,height: Float,region: FloorFlowRegion,finalGoal: Boolean=true)=
-    requireNotNull(taughtRoutes).beginContinuous(ble,device,epoch,gx,gy,height,region,finalGoal)
+  fun beginContinuous(ble: com.bleplx.BlePlxModule,device: String,epoch: Int,gx: Double,gy: Double,height: Float,region: FloorFlowRegion,finalGoal: Boolean=true,goalTolerance: Double=.06,maximumMs: Long=550_000)=
+    requireNotNull(taughtRoutes).beginContinuous(ble,device,epoch,gx,gy,height,region,finalGoal,goalTolerance,maximumMs)
   fun localMissionProgress(value: String) { taughtRoutes?.localMissionProgress(value) }
   fun localMissionRegion(token: String,region: FloorFlowRegion) { requireNotNull(taughtRoutes).localMissionRegion(token,region) }
   fun openTaughtRoute(id: String) {
@@ -870,6 +872,15 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
     }
     if(!tracking) {runCatching {visualAnchor?.detach()};visualAnchor=null}
     if(visualAnchor?.trackingState==TrackingState.STOPPED){visualAnchor?.detach();visualAnchor=null}
+    val loopCandidate=if(tracking && basisReady && !hasReference && homeNavigation?.canCorrectVisualLoop()==true)visual.candidate(sessionId,frame.timestamp) else null
+    if(loopCandidate?.mapId==current.metadata().id){
+      val existing=current.poseInMap(sessionId,rigid(frame.camera.pose))
+      val corrected=loopCandidate.worldFromMap.inverse().compose(rigid(frame.camera.pose))
+      if(existing!=null && (VisualPoseConsensus.distance(existing,corrected)>.05 || VisualPoseConsensus.angle(existing,corrected)>.045)){
+        visualAnchor?.detach();visualAnchor=null;sessionOriginAnchor?.detach();sessionOriginAnchor=null
+        originAnchorRetired=true;homeNavigation?.correctedVisualLoop();basisReady=false
+      }
+    }
     if(!basisReady && tracking) {
       val found=visual.candidate(sessionId,frame.timestamp)
       if(visualAnchor==null && found?.mapId==current.metadata().id) {

@@ -20,10 +20,11 @@ async function run(mode="roundtrip") {
       if(d>.001)state.pose={x:state.pose.x+dx/d*step,y:state.pose.y+dy/d*step,yaw:Math.atan2(dx,dy)};
       if(Math.hypot(goal.x-state.pose.x,goal.y-state.pose.y)<=.06){state.phase=final?"AT_GOAL":"WAYPOINT_REACHED";if(final)state.active=false;}
       else state.phase="DRIVING";
-    },stopNativeContinuous:async()=>{stops++;state.active=false;state.stopAcknowledged=true;},publishHomeProgress:async data=>reports.push(data)};
+    },sendHomeCommand:async()=>({}),stopNativeContinuous:async()=>{stops++;state.active=false;state.stopAcknowledged=true;},publishHomeProgress:async data=>reports.push(data)};
   const mod=load("src/navigation/home-mission.ts",{
     "../../modules/navigation-probe":native,"../device-tools/looi-robot":{prepareNativeNavigationDrive:async()=>({device:"same-ble",finish(){}})},
     "../core/navigation-control-lease":{getNavigationControlOwner:()=>"owner"},"./local-goal-controller":nav,"./home-route":route,
+    "../inspection/inspection-coverage":load("src/inspection/inspection-coverage.ts",{"../navigation/home-route":route}),
     "../inspection/inspection-mission":{beginInspection:async()=>({capture:async(...args)=>{assert.equal(state.phase,"WAYPOINT_REACHED");photos.push(args);},finish:(...args)=>finishes.push(args)})},
     "../diagnostics/floor-vision-probe":{releaseContinuousVision:async()=>{},runFloorVisionProbe:async()=>({selectedFloorRegion:{left:.1,top:.7,right:.3,bottom:.95},frame:{imageTimestampNs:1e9,navigationPose:{...state,pose:{...state.pose}}},navigationCells:[[.07,.25,1,30]]})},
     "react-native":{AppState:{currentState:"background"}}

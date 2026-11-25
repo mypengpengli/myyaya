@@ -8,6 +8,7 @@ const origin={x:5,y:4,yaw:Math.PI/2};
 for(const p of [{x:0,y:3,yaw:.4},{x:-1,y:2,yaw:-.5}]){
  const actual=route.homeToLocal(route.localToHome(p,origin),origin);assert.ok(Math.hypot(actual.x-p.x,actual.y-p.y)<1e-8);
 }
+const longRoute=new route.HomeRouteCursor([{x:0,y:0,yaw:0},{x:0,y:49,yaw:0}]);assert.equal(longRoute.total,49);
 const corner=new route.HomeRouteCursor([{x:0,y:0,yaw:0},{x:0,y:1,yaw:0},{x:1,y:1,yaw:Math.PI/2}]);
 const before=corner.select({x:0,y:.7,yaw:0});assert.equal(before.target.x,0);assert.equal(before.target.y,1,'lookahead must stop at corner');
 assert.ok(corner.select({x:0,y:.96,yaw:0}).target.x>0);
@@ -19,6 +20,9 @@ grid.setForbidden([{x:0,y:3.2,radius:.1}]);
 for(let n=0;n<3;n++)grid.observe([[.07,.25,1,100]]);
 assert.ok(grid.occupiedCells().some(c=>Math.abs(c.x)<.03&&Math.abs(c.y-3.2)<.03),'floor cannot erase configured keepout');
 
+const precise=new nav.LocalGoalController({x:0,y:.15},{centerRightMeters:.07,alongViewMeters:.05,widthMeters:.15,lengthMeters:.1,marginMeters:.02},0,.01);
+precise.setGoal({x:0,y:.02});assert.notEqual(precise.plan().phase,'AT_GOAL','a 2cm target must not be declared reached without movement');
+precise.pose={x:0,y:.015,yaw:0};assert.equal(precise.plan().phase,'AT_GOAL');
 const chinese=load('src/voice/chinese-command.ts');
 const {parseHomeVoice}=load('src/navigation/home-voice.ts',{'../voice/chinese-command':chinese});
 assert.deepEqual(parseHomeVoice('小丫小丫，这里是客厅。'),{op:'remember',name:'客厅',room:'客厅',kind:'room'});
@@ -56,6 +60,7 @@ function rig(mode='success') {
    if(final && Math.hypot(goal.x-state.pose.x,goal.y-state.pose.y)<=.06){state.phase='AT_GOAL';state.active=false;}
   },
   stopNativeContinuous:async()=>{calls.stops++;state.active=false;state.stopAcknowledged=true;},
+  sendHomeCommand:async()=>({}),
   publishHomeProgress:async v=>calls.reports.push(v)
  };
  const probe={releaseContinuousVision:async()=>calls.releases++,runFloorVisionProbe:async()=>{
@@ -63,7 +68,7 @@ function rig(mode='success') {
   return {frame:{imageTimestampNs:1e9,navigationPose:{...state,pose:state.pose?{...state.pose}:undefined}},selectedFloorRegion:{left:.35,top:.75,right:.65,bottom:.94},navigationCells:[[.07,.4,1,30]]};
  }};
  const mod=load('src/navigation/home-mission.ts',{'../../modules/navigation-probe':native,'../device-tools/looi-robot':{prepareNativeNavigationDrive:async()=>({device:'same-ble-owner',finish:()=>calls.finishes++})},
-  '../core/navigation-control-lease':{getNavigationControlOwner:()=> 'owner'},'./local-goal-controller':nav,'../diagnostics/floor-vision-probe':probe,'./home-route':route});
+  '../core/navigation-control-lease':{getNavigationControlOwner:()=> 'owner'},'./local-goal-controller':nav,'../diagnostics/floor-vision-probe':probe,'./home-route':route,'../inspection/inspection-coverage':load('src/inspection/inspection-coverage.ts',{'../navigation/home-route':route})});
  return {run:mod.runHomeMission,calls};
 }
 const good=rig();await good.run();assert.equal(good.calls.starts,1,'whole multi-meter route must share one native task');
@@ -76,7 +81,7 @@ const replaced=rig('replacement-task');await replaced.run();assert.equal(replace
 let owner='navigation',currentMap='home';const commands=[];
 const atlas={mapId:'home',revision:1,requiresReference:true,places:[{id:'living',name:'客厅',room:'客厅',kind:'room',pose:{x:0,y:1,yaw:0}}],links:[],zones:[]};
 const tools=load('src/agent/home-tools.ts',{'typebox':await import('typebox'),'react-native':{AppState:{currentState:'active'},Alert:{}},
- '../core/navigation-control-lease':{getNavigationControlOwner:()=>owner},'../../modules/navigation-probe':{
+ '../navigation/current-home':load('src/navigation/current-home.ts'),'../core/navigation-control-lease':{getNavigationControlOwner:()=>owner},'../../modules/navigation-probe':{
   listHomeAtlases:async()=>[atlas],getHomeStatus:async()=>({atlas:{mapId:currentMap}}),sendHomeCommand:async v=>{commands.push(v);return {notice:'saved'};}
  }}).createHomeTools();
 const tool=name=>tools.find(t=>t.name===name);

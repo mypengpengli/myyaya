@@ -38,6 +38,7 @@ internal class VisualRelocalizer(private val mapDirectory: File,evidenceDirector
   private var firstView: RigidPose?=null
   private var candidateMap=""
   private var learningStats: Map<String,Any?> = emptyMap()
+  private var catalogCursor=0
   private var matchStats: Map<String,Any?> = emptyMap()
   private fun rejected(stage: String,pairs: Int,inliers: Int=0): Estimate? {
     if(pairs>=(matchStats["descriptorMatches"] as? Int ?: 0))
@@ -105,9 +106,12 @@ internal class VisualRelocalizer(private val mapDirectory: File,evidenceDirector
     if(workerSession!=i.session){consensus.reset();match=null;firstView=null;candidateMap="";observations.clear();workerSession=i.session}
     if(lastCatalog==0L || i.ns-lastCatalog>10_000_000_000L) {
       val ids=mapDirectory.listFiles()?.filter {it.extension=="yayamap"}?.sortedByDescending {it.lastModified()}
-        ?.take(8)?.map {it.nameWithoutExtension}.orEmpty()+i.map.id
-      library.keys.retainAll(ids.toSet())
-      ids.distinct().forEach {id->if(!library.containsKey(id))library[id]=runCatching {store.load(id)}.getOrElse {emptyList()}}
+        ?.map {it.nameWithoutExtension}.orEmpty().filter {it!=i.map.id}
+      val batch=if(ids.isEmpty())emptyList() else (0 until minOf(2,ids.size)).map {ids[(catalogCursor+it)%ids.size]}
+      if(ids.isNotEmpty())catalogCursor=(catalogCursor+2)%ids.size
+      val selectedIds=batch+i.map.id
+      library.keys.retainAll(selectedIds.toSet())
+      selectedIds.distinct().forEach {id->if(!library.containsKey(id))library[id]=runCatching {store.load(id)}.getOrElse {emptyList()}}
       lastCatalog=i.ns
     }
     val fingerprint=key(i.map)
@@ -118,16 +122,20 @@ internal class VisualRelocalizer(private val mapDirectory: File,evidenceDirector
       gray.put(0,0,i.gray);detector.detectAndCompute(gray,mask,features,descriptors)
       if(descriptors.rows()<2){match=null;consensus.reset();state=mapOf("status" to "NEED_TEXTURE");return}
       val kp=features.toArray()
+      val previousFrames=library[i.map.id].orEmpty().toList()
       if(i.mapped!=null) {
         learn(i,kp,descriptors,fingerprint)
-        if(i.localizationTrusted) {
+        if(i.localizationTrusted && previousFrames.size<4) {
           match=null;consensus.reset();firstView=null;state=mapOf("status" to "LEARNING","keyframes" to library[i.map.id].orEmpty().size,"mapId" to i.map.id)+learningStats
           return
         }
       }
       if(i.mapped==null)observations.clear()
       matchStats=emptyMap()
-      val all=library.values.flatMap {frames->frames.mapNotNull {estimate(it,kp,descriptors,i)}}
+      val search=if(i.localizationTrusted && i.mapped!=null)
+        previousFrames.dropLast(2).sortedBy {VisualPoseConsensus.distance(it.pose,i.mapped)}.take(12)
+        else library.values.flatten()
+      val all=search.mapNotNull {estimate(it,kp,descriptors,i)}
       val estimates=all.groupBy {it.keyframe.mapId}.values.mapNotNull {it.maxByOrNull {e->e.inliers}}
         .sortedByDescending {it.inliers}
       val best=estimates.firstOrNull()
@@ -197,7 +205,17 @@ internal class VisualRelocalizer(private val mapDirectory: File,evidenceDirector
       bitmap.setPixels(pixels,0,i.width,0,0,i.width,i.height)
       ByteArrayOutputStream().use {out->check(bitmap.compress(Bitmap.CompressFormat.JPEG,92,out));out.toByteArray()}
     }finally {bitmap.recycle()}
-    val next=(old+VisualKeyframe(i.map.id,fingerprint,pose,xyz,bytes.toByteArray(),photo,i.k.clone(),i.width,i.height)).takeLast(12)
+    val candidates=(old+VisualKeyframe(i.map.id,fingerprint,pose,xyz,bytes.toByteArray(),photo,i.k.clone(),i.width,i.height)).toMutableList()
+    // Keep geographically distinct views and the original anchor view; discard the most redundant pair.
+    if(candidates.size>VisualLandmarkStore.MAX_FRAMES){
+      var remove=1;var redundancy=Double.POSITIVE_INFINITY
+      for(a in 1 until candidates.lastIndex)for(b in a+1 until candidates.size){
+        val score=VisualPoseConsensus.distance(candidates[a].pose,candidates[b].pose)+.3*VisualPoseConsensus.angle(candidates[a].pose,candidates[b].pose)
+        if(score<redundancy){redundancy=score;remove=if(candidates[a].points.size<=candidates[b].points.size)a else b}
+      }
+      candidates.removeAt(remove)
+    }
+    val next=candidates.toList()
     store.save(i.map.id,next);library[i.map.id]=next
     evidence?.parentFile?.let {folder->
       runCatching {VisualLandmarkStore(folder).save(i.map.id,next)}

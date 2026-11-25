@@ -15,6 +15,30 @@ class ContinuousPilotTest {
     if(obstacle)points.add(ContinuousPilot.Point(.07,.10,2))
     p.observation(t,t*1_000_000,p.pose,points,listOf(ContinuousPilot.Pose(0.0,.4,0.0)))
   }
+  @Test fun measuredShortGoalDoesNotUseSixCentimeterArrivalRadius() {
+    val p=ContinuousPilot(0.0,.02,.15,.10,.02,.07,.05,.08f,1000,.01)
+    frame(p,1000);observe(p,1000);p.tick(1050,true)
+    assertNotEquals("AT_GOAL",p.phase)
+    frame(p,1100,.015);p.tick(1100,false);assertEquals("AT_GOAL",p.phase)
+  }
+  @Test fun longerExplorationHasExplicitNativeDeadline() {
+    val p=ContinuousPilot(0.0,.4,.15,.10,.02,.07,.05,.08f,1000,.06,1_210_000)
+    p.retarget(0.0,.4,true,559_900);frame(p,560_000);p.tick(560_000,true);assertNotEquals("FAILED",p.phase)
+    p.tick(1_212_000,true);assertEquals("FAILED",p.phase)
+  }
+  @Test fun scanTurnsInPlaceAndStillChecksObstacleSweep() {
+    val p=pilot();frame(p,1000);observe(p,1000);p.look(.6)
+    val turn=p.tick(1050,true);assertEquals(0,turn.first);assertTrue(turn.second!=0);assertEquals("SCANNING",p.phase)
+    p.cancel("USER_STOP");assertEquals(0 to 0,p.tick(1100,false))
+    assertThrows(IllegalStateException::class.java){p.look(0.0)}
+  }
+  @Test fun scanWaitsForCurrentPerception() {
+    val p=pilot();frame(p,1000);p.look(.8);assertEquals(0 to 0,p.tick(1050,true));assertEquals("WAITING_PERCEPTION",p.phase)
+  }
+  @Test fun scanStopsWhenHeadingReachedWithoutClaimingArrival() {
+    val p=pilot();frame(p,1000);observe(p,1000);p.look(0.0)
+    assertEquals(0 to 0,p.tick(1050,true));assertEquals("VIEW_READY",p.phase);assertTrue(p.active)
+  }
   @Test fun waitsForLinkAndPose() { val p=pilot();assertEquals(0 to 0,p.tick(1010,true));assertEquals("WAITING_LINK",p.phase) }
   @Test fun movesBetweenPerceptionUpdates() {
     val p=pilot();frame(p,1000);observe(p,1000)

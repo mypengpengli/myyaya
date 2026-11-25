@@ -8,33 +8,45 @@ function load(file, mocks = {}) {
   new Function("require","module","exports",js)((id)=>mocks[id]??require(id),module,module.exports);
   return module.exports;
 }
-const drain = async () => { for(let i=0;i<24;i++) await Promise.resolve(); };
+const drain = async () => { for(let i=0;i<180;i++) await Promise.resolve(); };
 const lease = load("src/core/navigation-control-lease.ts");
 const chinese = load("src/voice/chinese-command.ts");
 const app = { currentState:"active", addEventListener:(_event,cb)=>{ lifecycle=cb;return {remove(){ lifecycle=undefined; }}; } };
 let event, token, close, lifecycle, voiceResult, voiceStops=0, releasedCamera=0, releasedMic=0;
 let deferredStop, connected=true,homeStarts=0;
+const homeCommands=[];
 const pulses=[],acks=[],pending=[],nativeStops=[],heads=[];
 const native = {
   subscribeRouteMotion(cb){event=cb;return {remove(){event=undefined;}};},
-  publishRouteRobotState:async()=>{},
+  getHomeStatus:async()=>({task:"{}"}),sendHomeCommand:async v=>{homeCommands.push(v);return {notice:"saved"};},publishRouteRobotState:async()=>{},
   acknowledgeRouteMotion:async(_token,id,ok)=>{acks.push({id,ok});},
   stopNativeTaughtRoute:async(t)=>{nativeStops.push(t);},
   openNativeTaughtRoutes(t){token=t;return new Promise(resolve=>{close=resolve;});},
 };
 const robot = {
   getLooiRobotRuntimeState:()=>({connected}), subscribeLooiRobotRuntimeState:()=>()=>{},
-  setLooiHead:async(direction)=>{heads.push(direction);},
+  navigationDrivePermits:()=>({back:true,turn:true}),setLooiHead:async(direction)=>{heads.push(direction);},
   stopLooiMotion:async(reason)=>{ if(reason==="navigation-stop" && deferredStop) await new Promise(resolve=>{deferredStop=resolve;}); },
   moveLooiNavigationPulse:(dir,ms,owner)=>{lease.assertNavigationControl(owner);pulses.push({dir,ms});return new Promise(resolve=>pending.push(()=>resolve({completed:true})));},
   moveLooiOperatorTurnCalibration:(dir,owner)=>{lease.assertNavigationControl(owner);pulses.push({dir,ms:350});return new Promise(resolve=>pending.push(()=>resolve({completed:true})));},
 };
 const voice={stop:async()=>{},pauseCaptureForRecording:async()=>async()=>{releasedMic++;}};
-const vosk={prepareChinese:async()=>({sessionId:44}),startChineseCapture:async()=>({running:true}),stopChineseCapture:async()=>{voiceStops++;},
-  addListener:(_name,cb)=>{voiceResult=cb;return {remove(){voiceResult=undefined;}};}};
+const voiceListeners=new Map();
+const vosk={stopChineseSpeech(){},speakChinese:async()=>{},prepareChinese:async()=>({sessionId:44}),startChineseCapture:async()=>({running:true}),stopChineseCapture:async()=>{voiceStops++;},
+  addListener:(name,cb)=>{
+    if(!voiceListeners.has(name))voiceListeners.set(name,new Set());voiceListeners.get(name).add(cb);
+    voiceResult=event=>voiceListeners.get("onCommandResult")?.forEach(fn=>fn(event));
+    return {remove(){voiceListeners.get(name)?.delete(cb);}};
+  }};
 const session=load("src/navigation/route-robot-session.ts",{
   "react-native":{AppState:app,PermissionsAndroid:{PERMISSIONS:{CAMERA:"camera",RECORD_AUDIO:"mic"},RESULTS:{GRANTED:"granted"},request:async()=>"granted",check:async()=>true}},
   "../../modules/navigation-probe":native,
+  "./current-home":load("src/navigation/current-home.ts"),
+  "../voice/chinese-voice-session":load("src/voice/chinese-voice-session.ts",{"./chinese-command":chinese,"./conversation-feedback":load("src/voice/conversation-feedback.ts")}),
+  "../voice/chinese-voice-preferences":{getChineseAsrMode:()=>"local",getChineseEndSilence:()=>1.8},
+  "expo-file-system/legacy":{},
+  "../diagnostics/diagnostic-log":{recordDiagnosticEvent(){}},
+  "./navigation-speech":load("src/navigation/navigation-speech.ts"),
   "../core/background-process-exit":{withExternalActivityLease:async(_r,fn)=>fn()},
   "../core/navigation-control-lease":lease,
   "../core/social-attention":{pauseSocialCamera:async()=>()=>{releasedCamera++;}},
@@ -64,6 +76,8 @@ event({token,sequence:6,action:"calibration_left",durationMs:350});await drain()
 pending.shift()();await drain();
 voiceResult({sessionId:44,text:"小丫小丫，停止导航",partial:true});await drain();assert.deepEqual(nativeStops,[token]);
 voiceResult({sessionId:45,text:"停止",partial:true});await drain();assert.equal(nativeStops.length,1);
+voiceResult({sessionId:45,text:"取消导航",partial:true});await drain();assert.equal(nativeStops.length,1,"stale recognizer cannot cancel a new task");
+voiceResult({sessionId:44,text:"取消导航",partial:true});await drain();assert.equal(homeCommands.at(-1).op,"cancel");
 app.currentState="background";lifecycle("background");await drain();assert.ok(voiceStops>0);
 event({token,sequence:7,action:"back",durationMs:100});await drain();assert.equal(pulses.length,3,"background cannot drive");
 close(null);await task;assert.equal(lease.hasNavigationControl(),false);assert.equal(event,undefined);

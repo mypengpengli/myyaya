@@ -39,7 +39,14 @@ export async function savePhotoArtifact(base64: string, mimeType: "image/jpeg" |
   if (!FileSystem.documentDirectory) throw new Error("手机文件存储不可用");
   const id = options.id ?? randomUUID(), directory = FileSystem.documentDirectory + "myyaya-artifacts/";
   if (!/^[A-Za-z0-9_-]{1,160}$/.test(id)) throw new Error("作品编号无效");
-  if (options.id) { const existing = findArtifact(id); if (existing) return existing; }
+  if (options.id) {
+    const existing = findArtifact(id);
+    if (existing) {
+      if (existing.mimeType !== mimeType || existing.parentId !== parentId || existing.sourceTaskId !== options.sourceTaskId) throw new Error("照片编号冲突");
+      if (options.select !== false) selectArtifact(existing);
+      return existing;
+    }
+  }
   await FileSystem.makeDirectoryAsync(directory, { intermediates: true });
   const uri = directory + id + (mimeType === "image/png" ? ".png" : ".jpg");
   await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });

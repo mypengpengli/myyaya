@@ -6,11 +6,12 @@ import { pauseSocialCamera } from "../core/social-attention";
 import { getLooiRobotRuntimeState, navigationDrivePermits, subscribeLooiRobotRuntimeState, moveLooiNavigationPulse, moveLooiOperatorBackCalibration, moveLooiOperatorTurnCalibration, setLooiHead, stopLooiMotion } from "../device-tools/looi-robot";
 import { forceReconnectSavedLooiRobot } from "../device-tools/looi-robot-autoconnect";
 import { compactChinese, isChineseStop } from "../voice/chinese-command";
+import {currentHomeId} from "./current-home";
 import {parseHomeVoice} from "./home-voice";
 
 export async function openHomeNavigation(options:{mapId?:string;command?:Record<string,unknown>}={}) {
   const homes=await listHomeAtlases();
-  const mapId=options.mapId ?? homes[0]?.mapId;
+  const mapId=options.command?.op==="new_location"?undefined:options.mapId ?? currentHomeId(homes);
   return openTaughtRouteSession("home:"+JSON.stringify({...options,...(mapId?{mapId}:{})}));
 }
 
@@ -31,6 +32,7 @@ export async function openTaughtRouteSession(name = ""): Promise<string | null> 
       let timer: ReturnType<typeof setInterval> | undefined;
       let lastSequence = 0;
       let closed = false;
+      let cameraHandoff="";
       let stopping: Promise<unknown> = Promise.resolve();
       let voiceReady = false;
       let stopVoice: (() => Promise<void>) | undefined;
@@ -42,38 +44,61 @@ export async function openTaughtRouteSession(name = ""): Promise<string | null> 
         releaseVoice = await chineseVoice.pauseCaptureForRecording();
         acquireNavigationControl(token);
         await pauseAppRuntime("navigation");
-        // A dedicated stop-only listener owns the existing Chinese recognizer;
-        // normal conversation and head commands do not compete with navigation.
+        // One recognizer owns both emergency STOP and wake-addressed free conversation.
         if (await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO)) {
-          const { default: vosk } = await import("../../modules/vosk-command-recognizer");
-          try {
-            const model = await vosk.prepareChinese();
-            let lastStop = 0;
-            let lastHomeSequence="";
-            const sub = vosk.addListener("onCommandResult", (event) => {
-              if (closed || event.sessionId !== model.sessionId || AppState.currentState !== "active") return;
-              const value = compactChinese(event.text);
-              const home=parseHomeVoice(event.text);
-              if(home && !["pause","cancel"].includes(String(home.op))) {
-                const sequence=`${event.resetGeneration}:${event.sequence}`;
-                if(event.partial || sequence===lastHomeSequence)return;lastHomeSequence=sequence;
-                void sendHomeCommand(home).then(()=>vosk.speakChinese(["remember","rename"].includes(String(home.op))?"地点已保存":home.op==="patrol"?"正在观察地面，准备附近巡视。":"指令已收到"))
-                  .catch(error=>import("../../modules/navigation-probe").then(n=>Promise.all([n.publishNativeLocalMission(error instanceof Error?error.message:String(error)),vosk.speakChinese(error instanceof Error?error.message:String(error)).catch(()=>{})])));return;
+          const {default:vosk}=await import("../../modules/vosk-command-recognizer");
+          const {ChineseVoiceSession}=await import("../voice/chinese-voice-session");
+          const {getChineseAsrMode,getChineseEndSilence}=await import("../voice/chinese-voice-preferences");
+          const files=await import("expo-file-system/legacy");
+          const navigationVoice=new ChineseVoiceSession(vosk,async()=>true,()=>!closed && AppState.currentState==="active",
+            async command=>{
+              if(command.kind==="stop"){
+                cameraHandoff="";
+                await stopLooiMotion("navigation-voice-stop");await stopNativeTaughtRoute(token);await sendHomeCommand({op:command.cancelNavigation?"cancel":"pause"});return command.cancelNavigation?"导航已取消":"导航已暂停";
               }
-              if (!home && !isChineseStop(event.text) && !/^(?:小丫小丫)?(?:请)?(?:停止导航|停止复走|取消导航|别走了)$/u.test(value)) return;
-              if (Date.now() - lastStop < 800) return;
-              lastStop = Date.now();
-              void stopLooiMotion("navigation-voice-stop").catch(() => {});
-              void stopNativeTaughtRoute(token).catch(() => {});
-              if(home?.op==="cancel")void sendHomeCommand({op:"cancel"}).catch(()=>{});
-            });
-            const lifecycle = AppState.addEventListener("change", (state) => {
-              if (state !== "active") { voiceReady=false;void vosk.stopChineseCapture().catch(() => {}); }
-              else if (!closed) void vosk.startChineseCapture().then(() => { voiceReady=true; }).catch(() => {});
-            });
-            stopVoice = async () => { sub.remove();lifecycle.remove();voiceReady=false;await vosk.stopChineseCapture().catch(() => {}); };
-            await vosk.startChineseCapture();voiceReady=true;
-          } catch { await stopVoice?.();voiceReady=false; }
+              if(command.kind==="move" && command.distanceCm!==undefined){
+                await sendHomeCommand({op:"distance",direction:command.direction,centimeters:command.distanceCm});
+                return "已设置距离目标，正在根据定位和实时地面规划，尚未到达。";
+              }
+              throw new Error("导航期间请先暂停，再执行独立转向或头部动作");
+            },()=>stopLooiMotion("navigation-speech-owner-closed"),async(text,signal,feedback)=>{
+              const photo=(await import("../voice/quick-photo-request")).quickPhotoRequest(text);
+              if(photo || /(?:开始录像|帮我录像|拍一段视频|看看眼前|看看周围(?:环境|有什么)|看看这里)/u.test(compactChinese(text))){
+                const native=await import("../../modules/navigation-probe");
+                await(await import("./navigation-camera-handoff")).parkNavigationForCamera({
+                  getContinuousStatus:native.getContinuousStatus,getHomeStatus:native.getHomeStatus,sendHomeCommand,
+                  stopMotion:()=>stopLooiMotion("navigation-camera-handoff")
+                },signal);
+                if(signal.aborted)throw new Error("已取消");
+                cameraHandoff=text;
+                try{await native.finishNativeHomeSession(token);}catch(error){cameraHandoff="";throw error;}
+                return "导航已暂停，正在切换相机。";
+              }
+              const home=parseHomeVoice(text);
+              if(home){
+                if(signal.aborted)throw new Error("已取消");
+                const result=await sendHomeCommand(home);
+                return ["remember","rename"].includes(String(home.op)) ? result.notice : "导航请求已处理，"+result.notice;
+              }
+              return (await import("../agent/companion-runtime")).replyToCompanion(text,signal,feedback);
+            },undefined,undefined,undefined,
+            (event,details)=>{void import("../diagnostics/diagnostic-log").then(m=>m.recordDiagnosticEvent("stt","navigation-"+event,details)).catch(()=>{});},
+            {settings:()=>({relay:getChineseAsrMode()==="relay",silence:getChineseEndSilence()}),
+             transcribe:async(uri,signal)=>(await(await import("../voice/speech-sample")).transcribeChineseAudio(uri,signal)).text,
+             discard:async uri=>{if(files.cacheDirectory && uri.startsWith(files.cacheDirectory+"chinese-utterances/"))await files.deleteAsync(uri,{idempotent:true});}});
+          let voiceLabel="";
+          const unbindSpeaker=(await import("./navigation-speech")).bindNavigationSpeaker(text=>navigationVoice.announce(text));
+          const sub=navigationVoice.subscribe(()=>{
+            const state=navigationVoice.getSnapshot();voiceReady=state.captureActive;
+            const label=state.captureActive ? state.awake ? state.notice || "已唤醒，正在听" : "待唤醒，可说“小丫小丫”" : state.notice;
+            if(label!==voiceLabel){voiceLabel=label;void sendHomeCommand({op:"voice_state",text:label}).catch(()=>{});}
+          });
+          const lifecycle=AppState.addEventListener("change",state=>{
+            if(state!=="active"){cameraHandoff="";void navigationVoice.stop("进入后台，导航语音暂停");}
+            else if(!closed)void navigationVoice.start();
+          });
+          stopVoice=async()=>{unbindSpeaker();sub();lifecycle.remove();voiceReady=false;await navigationVoice.stop();};
+          await navigationVoice.start();voiceReady=navigationVoice.getSnapshot().captureActive;
         }
         const listener = subscribeRouteMotion((event) => {
           if (closed || event.token !== token || !Number.isInteger(event.sequence) || event.sequence <= lastSequence) return;
@@ -160,7 +185,13 @@ export async function openTaughtRouteSession(name = ""): Promise<string | null> 
         releaseNavigationControl(token); releaseCamera();
         if (AppState.currentState === "active") {
           await resumeAppRuntime();
-          const { resumeAutomaticChineseVoice } = await import("../voice/chinese-voice-runtime");resumeAutomaticChineseVoice();
+          const { resumeAutomaticChineseVoice,chineseVoice:normalVoice } = await import("../voice/chinese-voice-runtime");
+          if(cameraHandoff){
+            await normalVoice.start();
+            if(!normalVoice.continueRecognizedTurn(cameraHandoff)){
+              await(await import("../../modules/vosk-command-recognizer")).default.speakChinese("导航已经暂停，请回到表情页继续拍摄。").catch(()=>{});
+            }
+          }else resumeAutomaticChineseVoice();
         }
       }
     });

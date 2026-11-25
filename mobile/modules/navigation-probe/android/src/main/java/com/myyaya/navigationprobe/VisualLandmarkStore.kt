@@ -13,6 +13,7 @@ internal data class VisualKeyframe(val mapId: String,val referenceKey: String,va
 
 /** Independent files preserve old room-map formats. Called only by the vision worker. */
 internal class VisualLandmarkStore(private val directory: File) {
+  companion object {const val MAX_FRAMES=48;const val MAX_BYTES=48_000_000}
   init {directory.mkdirs()}
   private fun file(id: String): AtomicFile {
     require(UUID.fromString(id).toString()==id)
@@ -21,11 +22,11 @@ internal class VisualLandmarkStore(private val directory: File) {
   fun load(id: String): List<VisualKeyframe> {
     val f=file(id)
     if(!f.baseFile.exists() && !File(f.baseFile.path+".bak").exists()) return emptyList()
-    require(maxOf(f.baseFile.length(),File(f.baseFile.path+".bak").length())<=8_000_000)
+    require(maxOf(f.baseFile.length(),File(f.baseFile.path+".bak").length())<=MAX_BYTES)
     val root=JSONObject(f.readFully().toString(Charsets.UTF_8))
     if(root.getInt("version")==1)return emptyList()
     require(root.getInt("version")==2)
-    val frames=root.getJSONArray("frames");require(frames.length()<=12)
+    val frames=root.getJSONArray("frames");require(frames.length()<=MAX_FRAMES)
     return (0 until frames.length()).map {i->
       val row=frames.getJSONObject(i);val points=row.getJSONArray("points");require(points.length() in 12..400)
       val xyz=(0 until points.length()).map {n->val p=points.getJSONArray(n);require(p.length()==3)
@@ -39,14 +40,14 @@ internal class VisualLandmarkStore(private val directory: File) {
     }
   }
   fun save(id: String,frames: List<VisualKeyframe>) {
-    require(frames.size<=12 && frames.all {it.mapId==id})
+    require(frames.size<=MAX_FRAMES && frames.all {it.mapId==id})
     val rows=JSONArray()
     frames.forEach {f->rows.put(JSONObject().put("referenceKey",f.referenceKey).put("t",JSONArray(f.pose.t.toList()))
       .put("q",JSONArray(f.pose.q.toList())).put("points",JSONArray(f.points.map {it.toList()}))
       .put("descriptors",Base64.encodeToString(f.descriptors,Base64.NO_WRAP))
       .put("captureJpeg",Base64.encodeToString(f.captureJpeg,Base64.NO_WRAP)).put("intrinsics",JSONArray(f.intrinsics.toList()))
       .put("width",f.width).put("height",f.height))}
-    val bytes=JSONObject().put("version",2).put("frames",rows).toString().toByteArray();require(bytes.size<=8_000_000)
+    val bytes=JSONObject().put("version",2).put("frames",rows).toString().toByteArray();require(bytes.size<=MAX_BYTES)
     val atomic=file(id);val out=atomic.startWrite()
     try {out.write(bytes);atomic.finishWrite(out)}catch(e: Exception){atomic.failWrite(out);throw e}
   }

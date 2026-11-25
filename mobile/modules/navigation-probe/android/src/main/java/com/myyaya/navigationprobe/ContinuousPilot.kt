@@ -4,7 +4,7 @@ import kotlin.math.*
 
 /** Native feedback loop. Neural perception and path updates never own the motor clock. */
 internal class ContinuousPilot(val gx: Double,val gy: Double,val width: Double,val length: Double,
-  val margin: Double,val mountRight: Double,val mountForward: Double,val height: Float,private val started: Long) {
+  val margin: Double,val mountRight: Double,val mountForward: Double,val height: Float,private val started: Long,private val goalTolerance: Double=.06,private val maximumMs: Long=550_000) {
   data class Pose(val x: Double,val y: Double,val yaw: Double)
   data class Point(val x: Double,val y: Double,val label: Int)
   var phase="WAITING_POSE";private set
@@ -32,6 +32,11 @@ internal class ContinuousPilot(val gx: Double,val gy: Double,val width: Double,v
   private var lastTick=started
   private var lostSince=0L;private var wasMoving=false
   private var best=hypot(gx,gy);private var progressedAt=started
+  private var lookYaw: Double?=null
+  @Synchronized fun look(yaw: Double?){
+    check(active){"导航已经停止"};require(yaw==null || yaw.isFinite())
+    lookYaw=yaw;sentSpeed=0;sentTurn=0;path=emptyList()
+  }
   private var targetX=gx;private var targetY=gy;private var finalTarget=true
   @Synchronized fun retarget(x: Double,y: Double,final: Boolean,now: Long) {
     check(active) { "已停止的任务不能换目标重新发车" }
@@ -39,7 +44,7 @@ internal class ContinuousPilot(val gx: Double,val gy: Double,val width: Double,v
     targetX=x;targetY=y;finalTarget=final;best=hypot(x-pose.x,y-pose.y);progressedAt=now;path=emptyList()
   }
   val active get()=phase !in setOf("AT_GOAL","CANCELLED","FAILED")
-  init {require(listOf(gx,gy,width,length,margin,mountRight,mountForward).all {it.isFinite()} && abs(mountRight)<=.3 && abs(mountForward)<=.3 && height in .03f.. .5f && hypot(gx,gy) in .03..1.0 && width in .1..1.0 && length in .1..1.0 && margin in .019999.. .3)}
+  init {require(listOf(gx,gy,width,length,margin,mountRight,mountForward).all {it.isFinite()} && abs(mountRight)<=.3 && abs(mountForward)<=.3 && height in .03f.. .5f && goalTolerance in .01.. .06 && maximumMs in 30_000..1_500_000 && hypot(gx,gy) in .015..1.0 && width in .1..1.0 && length in .1..1.0 && margin in .019999.. .3)}
   @Synchronized fun sensors(now: Long,link: Boolean,back: Boolean,turn: Boolean) {sensorAt=now;connected=link;backAllowed=back;turnAllowed=turn}
   private fun offset(yaw: Double)=Pair(cos(yaw)*mountRight+sin(yaw)*mountForward,-sin(yaw)*mountRight+cos(yaw)*mountForward)
   @Synchronized fun frame(now: Long,ns: Long,worldYaw: Double,flow: Map<String,Any?>) {
@@ -92,7 +97,7 @@ internal class ContinuousPilot(val gx: Double,val gy: Double,val width: Double,v
     ticks++;val dt=((now-lastTick)/1000.0).coerceIn(.001,.15);lastTick=now
     fun brake(why: String): Pair<Int,Int> {if(wasMoving)brakeCount++;wasMoving=false;sentSpeed=0;sentTurn=0;reason=why;return 0 to 0}
     if(!active)return brake(reason)
-    if(now-started>550_000){phase="FAILED";return brake("任务时间上限")}
+    if(now-started>maximumMs){phase="FAILED";return brake("任务时间上限")}
     if(!connected || now-sensorAt>900){phase="WAITING_LINK";return brake("控制心跳或连接未就绪")}
     if(frameAt==0L || now-frameAt>250){phase="WAITING_POSE";return brake("相机画面过期")}
     if(odomAt==0L || now-odomAt>300 || frameNs-odomNs>350_000_000L) {
@@ -101,9 +106,20 @@ internal class ContinuousPilot(val gx: Double,val gy: Double,val width: Double,v
       phase="WAITING_POSE";return brake("等待新的地板定位")
     }
     lostSince=0
+    lookYaw?.let {heading->
+      val error=atan2(sin(heading-pose.yaw),cos(heading-pose.yaw))
+      if(abs(error)<.08){phase="VIEW_READY";return brake("当前方向扫视已停稳")}
+      if(perceptionNs==0L || frameNs-perceptionNs>2_200_000_000L){phase="WAITING_PERCEPTION";return brake("扫视等待实时障碍观察")}
+      if(!turnAllowed){phase="WAITING_INTERLOCK";return brake("底座传感器阻止扫视转向")}
+      val target=(-error*35).coerceIn(-18.0,18.0)
+      val turn=target.coerceIn(sentTurn-90*dt,sentTurn+90*dt).roundToInt()
+      if(!clearArc(0.0,turn.toDouble())){phase="WAITING_CLEARANCE";return brake("扫视旋转范围存在障碍")}
+      sentSpeed=0;sentTurn=turn;wasMoving=turn!=0;phase="SCANNING";reason="原地转向观察，不前进";if(wasMoving)motionTicks++
+      return 0 to turn
+    }
     val d=hypot(targetX-pose.x,targetY-pose.y)
     if(d<best-.01){best=d;progressedAt=now}
-    if(d<=.06){phase=if(finalTarget) "AT_GOAL" else "WAYPOINT_REACHED";return brake(if(finalTarget) "到达局部目标范围" else "正在衔接下一个路线点")}
+    if(d<=if(finalTarget)goalTolerance else .06){phase=if(finalTarget) "AT_GOAL" else "WAYPOINT_REACHED";return brake(if(finalTarget) "到达局部目标范围" else "正在衔接下一个路线点")}
     if(now-progressedAt>35_000){phase="FAILED";return brake("持续无进展")}
     val viewTravel=hypot(pose.x-perceptionPose.x,pose.y-perceptionPose.y)
     val viewTurn=abs(atan2(sin(pose.yaw-perceptionPose.yaw),cos(pose.yaw-perceptionPose.yaw)))
@@ -130,6 +146,7 @@ internal class ContinuousPilot(val gx: Double,val gy: Double,val width: Double,v
   }
   @Synchronized fun report(now: Long): Map<String,Any?> = mapOf("phase" to phase,"reason" to reason,"active" to active,
     "pose" to mapOf("x" to pose.x,"y" to pose.y,"yaw" to pose.yaw),"poseReady" to (odomAt>0 && now-odomAt<=300),
+    "goalToleranceMeters" to goalTolerance,"maximumMs" to maximumMs,
     "remainingMeters" to hypot(targetX-pose.x,targetY-pose.y),"goal" to listOf(targetX,targetY),"finalTarget" to finalTarget,"positionUncertaintyMeters" to uncertainty,
     "ticks" to ticks,"motionTicks" to motionTicks,"brakeCount" to brakeCount,"perceptionCount" to perceptionCount,
     "sentSpeed" to sentSpeed,"sentTurn" to sentTurn,"elapsedMs" to now-started,"frameNs" to frameNs,"frameAgeMs" to now-frameAt,

@@ -16,6 +16,7 @@ class NavigationProbeModule : Module() {
   private var routeDialog: Dialog?=null
   private var routeScreen: NavigationProbeScreen?=null
   private var gateway: RouteMotorGateway?=null
+  private val homePlanner=java.util.concurrent.Executors.newSingleThreadExecutor()
 
   override fun definition() = ModuleDefinition {
     Name("NavigationProbe")
@@ -41,6 +42,10 @@ class NavigationProbeModule : Module() {
       }.onFailure { promise.reject("ERR_FIELD_REGION",it.message,it) } }
     }
     AsyncFunction("continuousStatus") { (gateway?.continuous?.report() ?: emptyMap<String,Any?>())+mapOf("stopEpoch" to (gateway?.stopEpoch ?: -1)) }
+    AsyncFunction("lookContinuous") {token: String,yaw: Double? ->
+      val drive=requireNotNull(gateway?.continuous);check(drive.token==token && gateway?.foreground==true)
+      drive.pilot.look(yaw)
+    }
     AsyncFunction("retargetContinuous") { token: String,x: Double,y: Double,final: Boolean ->
       val drive=requireNotNull(gateway?.continuous);check(drive.token==token && gateway?.foreground==true)
       drive.pilot.retarget(x,y,final,android.os.SystemClock.elapsedRealtime())
@@ -50,11 +55,14 @@ class NavigationProbeModule : Module() {
     AsyncFunction("homeCommand") {data: String,promise: Promise ->
       val activity=appContext.currentActivity;val screen=routeScreen
       if(activity==null || screen==null)promise.reject("ERR_HOME_SCREEN","请先打开家庭导航",null)
-      else activity.runOnUiThread {runCatching {require(data.length<=4000);screen.homeCommand(org.json.JSONObject(data))}
+      else if(data.length<=500_000 && runCatching {org.json.JSONObject(data).optString("op") in setOf("spatial_route","spatial_frontier")}.getOrDefault(false)){
+        homePlanner.execute {runCatching {check(routeScreen===screen){"导航页面已关闭"};screen.homeSpatialRequest(org.json.JSONObject(data))}
+          .onSuccess {promise.resolve(it)}.onFailure {promise.reject("ERR_HOME_PLAN",it.message,it)}}
+      }else activity.runOnUiThread {runCatching {require(data.length<=500_000);val value=org.json.JSONObject(data);require(data.length<=4000 || value.optString("op") in setOf("spatial_observe","spatial_frontier"));screen.homeCommand(value)}
         .onSuccess {promise.resolve(it)}.onFailure {promise.reject("ERR_HOME_COMMAND",it.message,it)}}
     }
     AsyncFunction("homeProgress") {data: String ->
-      require(data.length<=8000);requireNotNull(routeScreen).homeProgress(org.json.JSONObject(data))
+      require(data.length<=500_000);requireNotNull(routeScreen).homeProgress(org.json.JSONObject(data))
     }
     AsyncFunction("prepareHomeCapture") {promise: Promise ->
       val screen=routeScreen;val activity=appContext.currentActivity
@@ -69,7 +77,7 @@ class NavigationProbeModule : Module() {
       else activity.runOnUiThread { runCatching {
         require(config.length<=2000);val c=org.json.JSONObject(config);val r=c.getJSONObject("region")
         val ble=requireNotNull((appContext.reactContext as? com.facebook.react.bridge.ReactContext)?.getNativeModule(com.bleplx.BlePlxModule::class.java))
-        requireNotNull(routeScreen).beginContinuous(ble,device,epoch,c.getDouble("gx"),c.getDouble("gy"),c.getDouble("height").toFloat(),FloorFlowRegion(r.getDouble("left").toFloat(),r.getDouble("top").toFloat(),r.getDouble("right").toFloat(),r.getDouble("bottom").toFloat()),c.optBoolean("final",true))
+        requireNotNull(routeScreen).beginContinuous(ble,device,epoch,c.getDouble("gx"),c.getDouble("gy"),c.getDouble("height").toFloat(),FloorFlowRegion(r.getDouble("left").toFloat(),r.getDouble("top").toFloat(),r.getDouble("right").toFloat(),r.getDouble("bottom").toFloat()),c.optBoolean("final",true),c.optDouble("goalToleranceMeters",.06),c.optLong("maximumMs",550_000))
       }.onSuccess { promise.resolve(it) }.onFailure { promise.reject("ERR_CONTINUOUS",it.message,it) } }
     }
     AsyncFunction("continuousObservation") { token: String,data: String ->
@@ -132,7 +140,7 @@ class NavigationProbeModule : Module() {
     AsyncFunction("finishHomeSession") { token: String,promise: Promise ->
       val activity=appContext.currentActivity
       if(gateway?.token!=token || gateway?.continuous?.pilot?.active==true || activity==null)promise.reject("ERR_HOME_ACTIVE","当前导航尚未停车或会话已变化",null)
-      else activity.runOnUiThread {if(gateway?.token==token && gateway?.continuous?.pilot?.active!=true && gateway?.continuous?.report()?.get("stopAcknowledged")==true){routeScreen?.finish();promise.resolve(null)}else promise.reject("ERR_HOME_CHANGED","导航会话已变化或未确认停车",null)}
+      else activity.runOnUiThread {if(gateway?.token==token && gateway?.continuous?.pilot?.active!=true && (gateway?.continuous==null || gateway?.continuous?.report()?.get("stopAcknowledged")==true)){routeScreen?.finish();promise.resolve(null)}else promise.reject("ERR_HOME_CHANGED","导航会话已变化或未确认停车",null)}
     }
     AsyncFunction("captureMonocularFrame") { promise: Promise ->
       val screen=routeScreen;val activity=appContext.currentActivity
@@ -290,6 +298,7 @@ class NavigationProbeModule : Module() {
     }
 
     OnDestroy {
+      homePlanner.shutdownNow()
       gateway?.close();routeDialog?.dismiss()
       pending?.reject("ERR_NAVIGATION_DESTROYED", "应用会话已结束", null)
       pending = null
