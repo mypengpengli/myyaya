@@ -6,13 +6,13 @@ import { pauseSocialCamera } from "../core/social-attention";
 import { getLooiRobotRuntimeState, navigationDrivePermits, subscribeLooiRobotRuntimeState, moveLooiNavigationPulse, moveLooiOperatorBackCalibration, moveLooiOperatorTurnCalibration, setLooiHead, stopLooiMotion } from "../device-tools/looi-robot";
 import { forceReconnectSavedLooiRobot } from "../device-tools/looi-robot-autoconnect";
 import { compactChinese, isChineseStop } from "../voice/chinese-command";
-import {currentHomeId} from "./current-home";
+import {homeOpeningSelection} from "./current-home";
 import {parseHomeVoice} from "./home-voice";
 
 export async function openHomeNavigation(options:{mapId?:string;command?:Record<string,unknown>}={}) {
   const homes=await listHomeAtlases();
-  const mapId=options.command?.op==="new_location"?undefined:options.mapId ?? currentHomeId(homes);
-  return openTaughtRouteSession("home:"+JSON.stringify({...options,...(mapId?{mapId}:{})}));
+  const selection=homeOpeningSelection(homes,options.mapId,options.command?.op==="new_location");
+  return openTaughtRouteSession("home:"+JSON.stringify({...options,...selection}));
 }
 
 let opening = false;

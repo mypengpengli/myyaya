@@ -46,9 +46,5 @@ export async function executeChineseRobotCommand(command: ChineseRobotCommand, o
     }
     if (command.kind === "turn" && result?.completed) return "转向驱动和停止指令已写入，实际角度未测量。";
     return result?.completed === false ? "动作已被停止或中断" : command.kind === "nod" ? "已发送点头指令，尚未确认机械动作完成" : "指令执行结束";
-  } catch (error) {
-    const reason = getLooiRobotRuntimeState().safety.lastMotionBlockReason;
-    if (reason && !(error instanceof Error && error.message.includes("停止写入失败"))) throw new Error(`传感器保护阻止动作：${reason}`);
-    throw error;
   } finally { executing = false; }
 }

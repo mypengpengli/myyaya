@@ -61,6 +61,31 @@ type LooiSensorSnapshot = {
 
 export type LooiSafetyState = "safe" | "unsafe" | "unknown";
 
+/** Explain the current interlock; historical failures must never replace a new error. */
+export function describeLooiMotionBlock(reason: string | null): string {
+  switch (reason) {
+    case null: return "无阻断";
+    case "fed9-never-seen": return "尚未收到底座传感器数据，请等待连接完成；持续无数据时重新连接";
+    case "tof-unknown": return "尚未收到底座前方测距数据，请等待；持续无数据时重新连接";
+    case "cliff-rearming": return "地面信号正在稳定，请保持底座放平，稍后重试";
+    case "cliff-front": return "底座前侧防跌落传感器未检测到支撑面，请检查是否悬空或接近边缘";
+    case "cliff-rear": return "底座后侧防跌落传感器未检测到支撑面，请检查是否悬空或接近边缘";
+    case "cliff-turn": case "cliff-all": return "防跌落传感器未全部检测到支撑面，暂不能转向，请检查底座是否放平";
+    case "near-edge-front": case "near-edge-rear": case "near-edge-turn":
+      return "上次移动触发了边缘保护；若已手动移到安全地面，请在底座页点击重新检查边缘锁存";
+    case "obstacle": return "底座前方测距检测到18厘米以内的障碍，请检查屏幕朝向一侧的物体";
+    default: return `底座传感器状态异常（${reason}），请检查底座页诊断`;
+  }
+}
+
+export class LooiMovementBlockedError extends Error {
+  readonly code = "LOOI_MOVEMENT_BLOCKED";
+  constructor(readonly reason: string, readonly safetyState: LooiSafetyState, readonly direction: LooiMoveDirection) {
+    super(`传感器保护阻止动作：${describeLooiMotionBlock(reason)}（${reason}）`);
+    this.name = "LooiMovementBlockedError";
+  }
+}
+
 type NearEdgeLatch = {
   front: boolean;
   rear: boolean;
@@ -489,6 +514,10 @@ export function getLooiRobotRuntimeState() {
     activeDirection: state.activeDirection,
     driveControlReady: state.connected && !state.driveControlRevalidationRequired,
     driveControlRevalidationReason: state.driveControlRevalidationReason,
+    directionalSafety: {
+      forward: computeSafety("forward"), back: computeSafety("back"),
+      left: computeSafety("left"), right: computeSafety("right"),
+    },
     sensors: { ...state.sensors },
     nearEdge: { ...state.nearEdge },
     safety: {
@@ -636,11 +665,7 @@ function assertMovementAllowed(direction: LooiMoveDirection, source: string): vo
     nearEdgeFront: state.nearEdge.front,
     nearEdgeRear: state.nearEdge.rear,
   });
-  throw new Error(
-    safety.state === "unknown"
-      ? `Движение заблокировано: состояние датчиков неизвестно (${reason}).`
-      : `Движение заблокировано системой безопасности (${reason}).`
-  );
+  throw new LooiMovementBlockedError(reason, safety.state, direction);
 }
 
 function assertPendingMotionCurrent(token: number, robot: LooiRobot): void {

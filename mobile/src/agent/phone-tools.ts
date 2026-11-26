@@ -43,7 +43,7 @@ export const phoneTools: AgentTool[] = [
       const robot = getLooiRobotRuntimeState();
       return text({ platform: Platform.OS, foreground: AppState.currentState === "active",
         looiConnected: robot.connected, connecting: robot.connecting, lastError: robot.lastError,
-        driveControlReady: robot.driveControlReady, safety: robot.safety,
+        driveControlReady: robot.driveControlReady, safety: robot.safety, directionalSafety: robot.directionalSafety,
         recording: getPhoneRecording().phase });
     } },
   { name: "robot_head_status", label: "正在读取头部状态", description: "只读检查已连接底座的头部蓝牙属性、原始回读和手机倾角，不发运动命令，不会自动连接。原始字节语义未确认，倾角也不能证明脖子最低；physicalPosition 为 unknown 时须如实说明。",

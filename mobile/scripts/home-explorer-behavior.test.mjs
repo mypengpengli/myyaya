@@ -4,10 +4,16 @@ import {createRequire} from "node:module";
 let now=100_000;
 const require=createRequire(import.meta.url),ts=require("typescript");
 function load(file,mocks={}){const m={exports:{}};new Function("require","module","exports","Date",ts.transpileModule(readFileSync(file,"utf8"),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(n=>mocks[n]??require(n),m,m.exports,{now:()=>now});return m.exports;}
-const {currentHomeId}=load("src/navigation/current-home.ts");
+const {currentHomeId,homeOpeningSelection}=load("src/navigation/current-home.ts");
 assert.equal(currentHomeId([]),undefined);assert.equal(currentHomeId([{mapId:"one"}]),"one");
 assert.equal(currentHomeId([{mapId:"old"},{mapId:"current",active:true}]),"current");
 assert.throws(()=>currentHomeId([{mapId:"one"},{mapId:"two"}]),/选择当前地点/);
+assert.deepEqual(homeOpeningSelection([{mapId:"one"},{mapId:"two"}]),{chooseMap:true});
+assert.deepEqual(homeOpeningSelection([{mapId:"one",active:true},{mapId:"two",active:true}]),{chooseMap:true});
+assert.deepEqual(homeOpeningSelection([{mapId:"one"},{mapId:"two",active:true}]),{mapId:"two"});
+assert.deepEqual(homeOpeningSelection([{mapId:"one"},{mapId:"two"}],"one"),{mapId:"one"});
+assert.deepEqual(homeOpeningSelection([],undefined,true),{});
+assert.deepEqual(homeOpeningSelection([{mapId:"one"}]),{mapId:"one"});
 const route=load("src/navigation/home-route.ts");
 const pose=(x,y)=>({x,y,yaw:0});let requests=[],frontiers=[pose(0,.4),pose(.4,.4)],current=pose(0,0),fail=false;
 const native={sendHomeCommand:async v=>{requests.push(v);if(fail)throw Error("old task");if(v.op==="spatial_frontier")return {spatialPath:frontiers.length?[current,frontiers.shift()]:null};return {spatialPath:[current,v.target]};}};

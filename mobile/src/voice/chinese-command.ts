@@ -24,7 +24,7 @@ export function isChineseStop(text: string): boolean {
 export function parseChineseRobotCommand(text: string): ChineseRobotCommand | null {
   const raw = splitChineseWake(text).command;
   const value = compactChinese(raw).replace(/^请/u, "").replace(/(?:一下|一点|一点点)$/u, "");
-  const distance = raw.match(/^(?:请)?(?:你)?(?:帮我)?(前进|向前走?|往前走?|后退|向后退|向后走?|往后走?)(\d+(?:\.\d+)?|[一二两三四五六七八九]?十[一二三四五六七八九]?|[零一二两三四五六七八九])(厘米|公分|毫米|米|cm|mm|m)(?:吧)?[。！？,.!?]?$/iu);
+  const distance = raw.match(/^(?:请)?(?:你)?(?:帮我)?(前进|向前走?|往前走?|后退|退后|向后退|向后走?|往后走?|走)(\d+(?:\.\d+)?|[一二两三四五六七八九]?十[一二三四五六七八九]?|[零一二两三四五六七八九])(厘米|公分|毫米|米|cm|mm|m)(?:吧)?[。！？,.!?]?$/iu);
   if (distance) {
     const number = distance[2];
     const digits = "零一二三四五六七八九";
@@ -34,7 +34,7 @@ export function parseChineseRobotCommand(text: string): ChineseRobotCommand | nu
       : (tens ? digit(tens) : 1) * 10 + (units ? digit(units) : 0);
     const unit = distance[3].toLowerCase();
     const scale = unit === "米" || unit === "m" ? 100 : unit === "毫米" || unit === "mm" ? 0.1 : 1;
-    return { kind: "move", direction: /前/.test(distance[1]) ? "forward" : "back", distanceCm: cm * scale };
+    return { kind: "move", direction: /后/.test(distance[1]) ? "back" : "forward", distanceCm: cm * scale };
   }
   if (isChineseStop(value)) return /^(?:取消导航|结束导航)$/u.test(value)?{kind:"stop",cancelNavigation:true}:{ kind: "stop" };
   if (/^(?:前进|向前|往前|向前走|往前走|前进一步)$/u.test(value)) return { kind: "move", direction: "forward" };

@@ -28,10 +28,8 @@ async function request(mapId:string|undefined,command:Record<string,unknown>,sig
 export async function startMeasuredVoiceMove(direction:"forward"|"back",centimeters:number):Promise<void>{
   const command={op:"distance",direction,centimeters};
   if(getNavigationControlOwner()){await sendHomeCommand(command);return;}
-  const homes=await listHomeAtlases();
-  const mapId=currentHomeId(homes);
   const {openHomeNavigation}=await import("../navigation/route-robot-session");
-  void openHomeNavigation({mapId,command}).catch(async error=>{
+  void openHomeNavigation({command}).catch(async error=>{
     const message=error instanceof Error?error.message:"定位行驶未能开始";
     Alert.alert("距离行驶",message);
     if(AppState.currentState==="active")await(await import("../../modules/vosk-command-recognizer")).default.speakChinese(message).catch(()=>{});

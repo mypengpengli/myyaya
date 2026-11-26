@@ -430,7 +430,7 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       }
     }
   }
-  private fun openMap() {
+  private fun openMap(title: String="打开房间地图",onOpened: (()->Unit)?=null) {
     if (saving) { toast("正在保存地图，请稍后"); return }
     // Read on IO thread; corrupt maps never replace the current map.
     io.execute {
@@ -439,13 +439,14 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       activity.runOnUiThread {
         if (activity.isDestroyed) return@runOnUiThread
         if (maps.isEmpty()) { toast("暂无可打开的地图；损坏的文件不会载入。"); return@runOnUiThread }
-        AlertDialog.Builder(activity).setTitle("打开房间地图")
+        AlertDialog.Builder(activity).setTitle(title)
           .setItems(maps.map { "${it.name} · ${it.voxels.size} 表面点 · ${it.places.size} 地点" }.toTypedArray()) { _,index ->
             replaceAfterSave {
               val selected=maps[index]
               val map=mapper?.snapshot()?.takeIf { it.id==selected.id } ?: selected
               mapper=RoomMapper(map); freshMap=false; name=map.name
               render(map,"地图已打开。开始扫描后观察保存过的门框、柜边等场景，或识别固定参照图恢复位置。")
+              runCatching {onOpened?.invoke()}.onFailure {toast(it.message ?: "地图准备失败")}
             }
           }.setNegativeButton("取消",null).show()
       }
@@ -743,6 +744,15 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
   fun homePlan()=requireNotNull(homeNavigation).plan()
   fun homeProgress(data: org.json.JSONObject) {requireNotNull(homeNavigation).progress(data)}
   fun openHomeConfiguration(data: org.json.JSONObject): Boolean {
+    if(data.optBoolean("chooseMap",false)) {
+      openMap("请选择当前所在地点") {
+        // Only the user's selected map becomes active; keep the original request
+        // queued behind localization and mount confirmation, never auto-arm it.
+        requireNotNull(homeNavigation).command(org.json.JSONObject().put("op","status"))
+        queueHomeConfiguration(data)
+      }
+      return true
+    }
     val id=data.optString("mapId","")
     if(id.isNotEmpty()) {
       require(UUID.fromString(id).toString()==id)
@@ -756,12 +766,15 @@ internal class RoomMapPanel(private val activity: Activity, private val stopAndR
       render(map,"开始扫描记住当前地点的视觉地标，再确认最低姿态、带领经过房间和门口。")
       if(newLocation!=null) {save(true);requireNotNull(homeNavigation).command(org.json.JSONObject().put("op","status"));return true}
     }
+    queueHomeConfiguration(data)
+    return mapper!=null
+  }
+  private fun queueHomeConfiguration(data: org.json.JSONObject) {
     data.optJSONObject("command")?.let {request->
       if(request.optString("op")=="new_location") {homeCommand(request);return@let}
       if(request.optString("op") in setOf("pause","cancel","status","rename","remove","link_enabled","remove_zone"))requireNotNull(homeNavigation).command(request)
       else requireNotNull(homeNavigation).queue(request)
     }
-    return mapper!=null
   }
   fun diagnosticField(direction: String,confirmed: Boolean,stepMs: Int,batchId: String,promise: expo.modules.kotlin.Promise) {
     val panel=taughtRoutes

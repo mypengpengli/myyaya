@@ -110,16 +110,16 @@ let connected = true, blocked = false, pendingDrive;
 const hardware = {
   getLooiRobotRuntimeState: () => ({ connected, safety: { lastMotionBlockReason: blocked ? "test-cliff" : null } }),
   stopLooiMotion: async () => { await sdk.move("stop"); }, disconnectLooiRobot: async () => { connected = false; },
-  moveLooi: async (direction, duration) => { assert.equal(duration, 450); if (blocked) throw Error("blocked"); await sdk.move(direction); if (pendingDrive) await pendingDrive; await sdk.move("stop"); return { completed: true }; },
+  moveLooi: async (direction, duration) => { assert.equal(duration, 450); if (blocked) throw Error("传感器保护阻止动作：test-cliff"); await sdk.move(direction); if (pendingDrive) await pendingDrive; await sdk.move("stop"); return { completed: true }; },
   turnLooi: async (direction, degrees) => { assert.equal(degrees, 90); await sdk.move(direction); await sdk.move("stop"); return { completed: true }; },
   setLooiHead: async () => {}, setLooiLight: async () => {}, performLooiDance: async () => {}, performLooiHeadGesture: async () => {},
 };
 const holds = { holdAmbientMotionFor() {} }, social = { holdSocialAttentionMotionFor() {} };
-const distanceRequests=[];
+const distanceRequests=[]; let navigationError=null;
 const controller = load("src/device-tools/chinese-robot-control.ts", {
   "react-native": { AppState: app }, "../setup/setup-storage": { getAppMode: () => "local" },
   "../core/ambient-motion": holds, "../core/social-attention": social, "../core/robot-inactivity": { markRobotInteraction() {} }, "./looi-robot": hardware,
-  "../agent/home-tools":{startMeasuredVoiceMove:async(direction,centimeters)=>distanceRequests.push({direction,centimeters})},
+  "../agent/home-tools":{startMeasuredVoiceMove:async(direction,centimeters)=>{ if(navigationError)throw navigationError; distanceRequests.push({direction,centimeters}); }},
 });
 const tools = load("src/agent/robot-tools.ts", { typebox: { Type }, "react-native": { AppState: app },
   "../device-tools/chinese-robot-control": controller, "../device-tools/looi-robot": hardware,
@@ -133,6 +133,14 @@ assert.deepEqual(frames.slice(-2), [["drive", "047a"], ["drive", "0000"]]);
 blocked = true; await assert.rejects(tools.robotActionTool.execute("move", { action: "forward" }), /传感器保护/); blocked = false;
 app.currentState = "background"; await assert.rejects(tools.robotActionTool.execute("move", { action: "forward" }), /前台/); app.currentState = "active";
 connected = false; await assert.rejects(tools.robotActionTool.execute("move", { action: "forward" }), /连接 LOOI/); connected = true;
+// An old sensor rejection must not hide a new navigation, validation or BLE failure.
+blocked=true;
+try {load("src/navigation/current-home.ts").currentHomeId([{mapId:"one",active:false},{mapId:"two",active:false}]);assert.fail("ambiguous home must require selection");} catch(error) {navigationError=error;}
+await assert.rejects(tools.robotActionTool.execute("distance",{action:"back",distanceCm:15}), /选择当前地点/);
+await assert.rejects(tools.robotActionTool.execute("distance",{action:"back",distanceCm:501}), /2至500厘米/);
+navigationError=new Error("停止写入失败");
+await assert.rejects(tools.robotActionTool.execute("distance",{action:"back",distanceCm:15}), /停止写入失败/);
+navigationError=null; blocked=false;
 const writesBeforeUnsupportedDistances = frames.length;
 await assert.rejects(tools.robotActionTool.execute("move", { action: "forward", distanceCm: 1.5 }), /2至500厘米/);
 await assert.rejects(tools.robotActionTool.execute("move", { action: "forward", distanceCm: 501 }), /2至500厘米/);
@@ -168,4 +176,35 @@ async function roundTrip(tool, args, check, reply, expected = reply) {
 await roundTrip(tools.robotActionTool, { action: "back" }, (messages) => assert.match(messages.at(-1).content, /实际位移未测量/), "已经向后短移。", "短步驱动和停止指令已写入，实际位移未测量。");
 assert.deepEqual(frames.slice(-2), [["drive", "86fc"], ["drive", "0000"]]);
 await roundTrip(cameraTools.observeSceneTool, {}, (messages) => assert.match(messages.at(-1).content[0].image_url.url, /^data:image\/jpeg;base64,frame-/), "已根据眼前照片回答。");
+// Permission-protected diagnostics must return materialized data, not serialize a Promise as {}.
+const reports=[];
+let integrationTick, integrationCommand={id:"sensor-read",kind:"probe",mode:"robot_diagnostics",args:{category:"stt",event:"local-action"},receivedAtEpochMs:Date.now()};
+const savedInterval=globalThis.setInterval, savedClearInterval=globalThis.clearInterval;
+const integration=load("src/diagnostics/integration-control.ts", {
+  "react-native":{AppState:app},
+  "../../modules/integration-control":{integrationControl:()=>({takeCommand:()=>{const value=integrationCommand;integrationCommand=null;return value?JSON.stringify(value):null;},reportResult:value=>reports.push(JSON.parse(value))})},
+  "../agent/phone-tools":{phoneTools:[]},
+  "../agent/companion-runtime":{replyToCompanion:()=>assert.fail("read-only probe must not call the agent")},
+  "../voice/chinese-voice-runtime":{chineseVoice:{}},
+  "./model-connection-probe":{probeModelConnection:()=>assert.fail("sensor diagnostics must not call a model")},
+  "./integration-command-age":load("src/diagnostics/integration-command-age.ts"),
+  "../device-tools/looi-robot":{getLooiRobotRuntimeState:()=>({connected:true,sensors:{},safety:{state:"safe"},directionalSafety:{back:{state:"safe"}}})},
+  "./diagnostic-log":{getDiagnosticLogEntries:()=>[
+    {category:"robot",event:"fed9-notify",details:{}},
+    ...Array.from({length:45},(_,id)=>({id,category:"stt",event:"local-action-result",details:{notice:"sensor check"}})),
+    {category:"stt",event:"recognized",details:{}},
+  ]},
+});
+let closeIntegration;
+try {
+  globalThis.setInterval=callback=>{integrationTick=callback;return 123;};
+  globalThis.clearInterval=()=>{};
+  closeIntegration=integration.startIntegrationControl();
+  integrationTick();await drain();
+  const result=reports.at(-1);assert.equal(result.status,"completed");
+  assert.equal(result.result.connected,true);assert.equal(result.result.events.length,40);
+  assert.equal(result.result.events[0].id,5);
+  assert.ok(result.result.events.every(e=>e.category==="stt" && e.event==="local-action-result"));
+} finally {closeIntegration?.();globalThis.setInterval=savedInterval;globalThis.clearInterval=savedClearInterval;}
+
 console.log("Robot/camera tools: Pi to SDK drive frames, guards/STOP, observation vision replay, confirm/retake/cancel and stale capture/save isolation: PASS");

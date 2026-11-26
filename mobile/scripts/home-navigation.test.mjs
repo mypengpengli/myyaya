@@ -78,12 +78,12 @@ for(const mode of ['changed-before-start','changed-during-run','inference-error'
  if(mode!=='changed-during-run')assert.equal(bad.calls.starts,0,'failure before arming must not start motors');
 }
 const replaced=rig('replacement-task');await replaced.run();assert.equal(replaced.calls.stops,0,'old finally must never stop a replacement native task');
-let owner='navigation',currentMap='home';const commands=[];
+let owner='navigation',currentMap='home';const commands=[],openedHomes=[];
 const atlas={mapId:'home',revision:1,requiresReference:true,places:[{id:'living',name:'客厅',room:'客厅',kind:'room',pose:{x:0,y:1,yaw:0}}],links:[],zones:[]};
-const tools=load('src/agent/home-tools.ts',{'typebox':await import('typebox'),'react-native':{AppState:{currentState:'active'},Alert:{}},
- '../navigation/current-home':load('src/navigation/current-home.ts'),'../core/navigation-control-lease':{getNavigationControlOwner:()=>owner},'../../modules/navigation-probe':{
+const homeTools=load('src/agent/home-tools.ts',{'typebox':await import('typebox'),'react-native':{AppState:{currentState:'active'},Alert:{}},
+ '../navigation/route-robot-session':{openHomeNavigation:async options=>{openedHomes.push(options);return null;}},'../navigation/current-home':load('src/navigation/current-home.ts'),'../core/navigation-control-lease':{getNavigationControlOwner:()=>owner},'../../modules/navigation-probe':{
   listHomeAtlases:async()=>[atlas],getHomeStatus:async()=>({atlas:{mapId:currentMap}}),sendHomeCommand:async v=>{commands.push(v);return {notice:'saved'};}
- }}).createHomeTools();
+ }});const tools=homeTools.createHomeTools();
 const tool=name=>tools.find(t=>t.name===name);
 await tool('navigate_home').execute('go',{place_id:'living'},new AbortController().signal);assert.equal(commands.at(-1).op,'go');
 await assert.rejects(tool('navigate_home').execute('bad',{place_id:'invented'}),/真实|准确/);
@@ -91,5 +91,5 @@ currentMap='another';await assert.rejects(tool('navigate_home').execute('wrong',
 const cancel=new AbortController();cancel.abort();const count=commands.length;await assert.rejects(tool('navigate_home').execute('cancel',{place_id:'living'},cancel.signal));assert.equal(commands.length,count);
 await tool('edit_home_passage').execute('zone',{operation:'zone',place_id:'living',radius:.2});assert.equal(commands.at(-1).placeId,'living');
 assert.equal('x' in tool('edit_home_passage').parameters.properties,false,'model cannot fabricate a coordinate');
-owner='';const saved=await tool('home_navigation_control').execute('status',{operation:'status'});assert.equal(JSON.parse(saved.content[0].text).moving,false);
+owner='';await homeTools.startMeasuredVoiceMove('forward',10);assert.deepEqual(openedHomes.at(-1),{command:{op:'distance',direction:'forward',centimeters:10}},'distance requests must reach map selection with the original target');const saved=await tool('home_navigation_control').execute('status',{operation:'status'});assert.equal(JSON.parse(saved.content[0].text).moving,false);
 console.log('Home navigation: rotated coordinates, corners, rolling map, keepouts, voice, one-task 3m route, version changes and failure cleanup: PASS');

@@ -6,3 +6,11 @@ export function currentHomeId(homes:Array<{mapId:string;active?:boolean}>):strin
   if(selected.length!==1)throw new Error("请在家庭地图选择当前地点，再安排行驶");
   return selected[0].mapId;
 }
+
+/** Opening the UI may ask for a location; execution must never guess between homes. */
+export function homeOpeningSelection(homes:Array<{mapId:string;active?:boolean}>,explicitId?:string,newLocation=false):{mapId?:string;chooseMap?:true}{
+  if(newLocation)return {};
+  if(explicitId)return {mapId:explicitId};
+  if(homes.length>1 && homes.filter(h=>h.active).length!==1)return {chooseMap:true};
+  const mapId=currentHomeId(homes);return mapId?{mapId}:{};
+}

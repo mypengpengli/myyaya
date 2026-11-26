@@ -21,6 +21,17 @@ export function startIntegrationControl() {
       let result;
       if (command.kind === "head_probe") result = await (await import("./head-protocol-probe")).runHeadProtocolProbe(command);
       else if (command.kind === "chat") result = await replyToCompanion(String(command.text).slice(0, 10000), new AbortController().signal);
+      else if (command.kind === "probe" && command.mode === "robot_diagnostics") {
+        const robot = await import("../device-tools/looi-robot");
+        const log = await import("./diagnostic-log");
+        const runtime = robot.getLooiRobotRuntimeState();
+        const category = ["robot", "stt", "llm", "navigation"].includes(command.args?.category) ? command.args.category : "robot";
+        const event = typeof command.args?.event === "string" ? command.args.event.slice(0,80) : "";
+        const events = log.getDiagnosticLogEntries().filter((entry) => entry.category === category && entry.event.includes(event)).slice(-40);
+        while (events.length && JSON.stringify(events).length > 18000) events.shift();
+        result = { connected: runtime.connected, sensors: runtime.sensors, safety: runtime.safety,
+          directionalSafety: runtime.directionalSafety, category, events };
+      }
       else if (command.kind === "probe") result = command.mode === "field_operator"
         ? await (await import("./field-operator-probe")).runFieldOperatorProbe(command.args)
         : command.mode === "floor_vision" ? await (await import("./floor-vision-probe")).runFloorVisionProbe(command.args)

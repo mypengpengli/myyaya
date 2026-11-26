@@ -4,7 +4,7 @@ import { PermissionsAndroid, Pressable, ScrollView, StyleSheet, Text, View } fro
 import { SafeAreaView } from "react-native-safe-area-context";
 import { clearSavedLooiRobot } from "@/src/device-tools/looi-robot-autoconnect";
 import { LooiPairingPanel } from "@/src/setup/LooiPairingPanel";
-import { getLooiRobotRuntimeState, stopLooiMotion, subscribeLooiRobotRuntimeState, clearLooiNearEdgeAfterManualReposition } from "@/src/device-tools/looi-robot";
+import { getLooiRobotRuntimeState, describeLooiMotionBlock, stopLooiMotion, subscribeLooiRobotRuntimeState, clearLooiNearEdgeAfterManualReposition } from "@/src/device-tools/looi-robot";
 import { executeChineseRobotCommand } from "@/src/device-tools/chinese-robot-control";
 import type { ChineseRobotCommand } from "@/src/voice/chinese-command";
 import { ChineseVoiceControls } from "@/src/ui/ChineseVoiceControls";
@@ -90,7 +90,9 @@ export default function RobotScreen() {
       {getLastHeadObservation() ? <Text style={styles.detail}>{getLastHeadObservation()?.notice}</Text> : null}
       {headRead ? <Text selectable style={styles.detail}>{headRead}</Text> : null}
       <Text style={styles.detail}>传感器：悬崖 {runtime.sensors.cliffSafe === null ? "未知" : runtime.sensors.cliffSafe ? "地面安全" : "检测到边缘"} · 前方距离 {runtime.sensors.tofDistanceMm === null ? "未知 / 无目标" : `${runtime.sensors.tofDistanceMm} mm`} · 驱动通道 {runtime.driveControlReady ? "已就绪" : "等待校验"}</Text>
-      <Text selectable style={styles.detail}>保护状态：{runtime.safety.lastMotionBlockReason ?? runtime.safety.reason ?? "无阻断"} · 最近停止：{runtime.safety.lastSafetyStopReason ?? "无"}</Text>
+      <Text selectable style={styles.detail}>当前保护：{runtime.connected ? describeLooiMotionBlock(runtime.safety.reason) : "底座未连接"}</Text>
+      <Text selectable style={styles.detail}>前进：{describeLooiMotionBlock(runtime.directionalSafety.forward.reason)} · 后退：{describeLooiMotionBlock(runtime.directionalSafety.back.reason)}</Text>
+      <Text selectable style={styles.detail}>上次动作阻断（历史记录）：{runtime.safety.lastMotionBlockReason ?? "无"} · 最近停止：{runtime.safety.lastSafetyStopReason ?? "无"}</Text>
       {runtime.lastError ? <Text selectable style={styles.notice}>{runtime.lastError}</Text> : null}
       {runtime.nearEdge.front || runtime.nearEdge.rear ? <Button label="已手动移到安全地面，重新检查边缘锁存" onPress={() => void run(async () => {
         clearLooiNearEdgeAfterManualReposition(); if (active.current) setNotice("已根据传感器状态检查边缘锁存");

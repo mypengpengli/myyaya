@@ -77,7 +77,8 @@ function tofClear() {
 
 async function expectBlocked(fn, reasonPattern) {
   const beforeWrites = writes.length;
-  await assert.rejects(fn, /Движение заблокировано/);
+  await assert.rejects(fn, (error) => error instanceof robot.LooiMovementBlockedError &&
+    error.code === "LOOI_MOVEMENT_BLOCKED" && reasonPattern.test(error.reason) && /传感器保护/.test(error.message));
   assert.equal(writes.length, beforeWrites, "blocked motion must not emit a BLE drive write");
   const lastBlock = [...events].reverse().find((event) => event.event === "movement-blocked");
   assert.ok(lastBlock, "movement-blocked diagnostic must be emitted");
